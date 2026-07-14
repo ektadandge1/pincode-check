@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "819a4f61c71a7a21adf004cda3437867"
-name = "incode-track"
+name = "Incode Track"
 application_url = "https://example.com"
 embedded = true
 
@@ -10,7 +10,7 @@ automatically_update_urls_on_dev = true
 include_config_on_deploy = true
 
 [webhooks]
-api_version = "2026-07"
+api_version = "2026-04"
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
@@ -20,38 +20,18 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "/webhooks/privacy"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_metaobject_definitions,write_metaobjects,write_products"
+scopes = "read_products,write_app_proxy"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://example.com/auth/callback" ]
 
 [app_proxy]
-url = "https://example.com/apps/pincode-checker"
-subpath = "pincode-checker"
+url = "/apps/delivery-checker"
+subpath = "delivery-checker"
 prefix = "apps"
-
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
-
-  [product.metafields.app.demo_info.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-
-  [metaobjects.app.example.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
-type = "single_line_text_field"
-required = true
-
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"

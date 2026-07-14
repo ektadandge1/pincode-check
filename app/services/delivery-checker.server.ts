@@ -2,23 +2,33 @@ import prisma from "../db.server";
 import {
   computeEstimatedDate,
   formatReadableDate,
-  normalizePincode,
+  normalizeCountryCode,
+  normalizePostalCode,
   parseCsvToStringSet,
   parseWeekendDays,
   toYyyyMmDd,
-  validateIndianPincode,
+  validatePostalCode,
 } from "../utils/delivery.server";
 
-type CheckPincodeInput = {
-  pincode: string;
+type CheckDeliveryInput = {
+  country?: string;
+  postalCode: string;
   shop?: string;
   codRequested?: boolean;
+  variantId?: string;
+  quantity?: number;
+  admin?: {
+    graphql: (query: string, options?: { variables?: Record<string, unknown> }) => Promise<Response>;
+  };
 };
 
-type PincodeResult = {
+type DeliveryResult = {
   available: boolean;
-  pincode: string;
+  country: string;
+  postal_code: string;
   source: "courier_api" | "db_fallback" | "none";
+  reason?: "variant_required" | "out_of_stock" | "inventory_unavailable";
+  in_stock?: boolean;
   courier_name?: string;
   delivery_days?: number;
   estimated_date?: string;
@@ -40,9 +50,13 @@ const DEFAULT_SETTINGS = {
   retryCount: 1,
   courierEnabled: false,
   dbFallbackEnabled: true,
+  inventoryAwareEnabled: false,
   holidayCsv: "",
   weekendDaysCsv: "0",
 };
+
+const CHECK_CACHE_TTL_MS = 60_000;
+const checkCache = new Map<string, { expiresAt: number; result: DeliveryResult }>();
 
 async function getShopSettings(shop?: string) {
   const shopKey = shop && shop.length > 0 ? shop : "default";
@@ -68,9 +82,59 @@ async function getShopSettings(shop?: string) {
     retryCount: record.retryCount,
     courierEnabled: record.courierEnabled,
     dbFallbackEnabled: record.dbFallbackEnabled,
+    inventoryAwareEnabled: record.inventoryAwareEnabled,
     holidayCsv: record.holidaysCsv,
     weekendDaysCsv: record.weekendDaysCsv,
   };
+}
+
+async function checkVariantSellableQuantity(
+  admin: CheckDeliveryInput["admin"],
+  variantId: string,
+): Promise<number | null> {
+  if (!admin) {
+    return null;
+  }
+
+  const response = await admin.graphql(
+    `#graphql
+    query VariantInventoryForEdd($id: ID!) {
+      productVariant(id: $id) {
+        id
+        inventoryPolicy
+        sellableOnlineQuantity
+      }
+    }`,
+    {
+      variables: { id: variantId },
+    },
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const json = (await response.json()) as {
+    data?: {
+      productVariant?: {
+        sellableOnlineQuantity?: number | null;
+        inventoryPolicy?: "CONTINUE" | "DENY";
+      } | null;
+    };
+  };
+
+  const variant = json.data?.productVariant;
+  if (!variant) {
+    return null;
+  }
+
+  if (variant.inventoryPolicy === "CONTINUE") {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return typeof variant.sellableOnlineQuantity === "number"
+    ? variant.sellableOnlineQuantity
+    : 0;
 }
 
 function parseBoolean(value: string | null | undefined): boolean {
@@ -152,14 +216,14 @@ async function callShiprocketServiceability(
 }
 
 async function resolveCourierEstimate(
-  pincode: string,
+  postalCode: string,
   codRequested: boolean,
   retries: number,
   timeoutMs: number,
 ): Promise<CourierEstimate | null> {
   let attempts = 0;
   while (attempts <= retries) {
-    const result = await callShiprocketServiceability(pincode, codRequested, timeoutMs);
+    const result = await callShiprocketServiceability(postalCode, codRequested, timeoutMs);
     if (result) {
       return result;
     }
@@ -168,30 +232,79 @@ async function resolveCourierEstimate(
   return null;
 }
 
-export async function checkPincodeDelivery(input: CheckPincodeInput): Promise<PincodeResult> {
-  const normalizedPin = normalizePincode(input.pincode);
+export async function checkDelivery(input: CheckDeliveryInput): Promise<DeliveryResult> {
+  const country = normalizeCountryCode(input.country);
+  const normalizedPostalCode = normalizePostalCode(country, input.postalCode);
 
-  if (!validateIndianPincode(normalizedPin)) {
+  if (!validatePostalCode(country, normalizedPostalCode)) {
     return {
       available: false,
-      pincode: normalizedPin,
+      country,
+      postal_code: normalizedPostalCode,
       source: "none",
-      message: "Please enter a valid 6-digit pincode.",
+      message: "Please enter a valid postal code.",
     };
   }
 
   const settings = await getShopSettings(input.shop);
+  const cacheKey = [input.shop ?? "default", country, normalizedPostalCode, input.codRequested ? "cod" : "prepaid"].join("|");
+  const cached = !settings.inventoryAwareEnabled ? checkCache.get(cacheKey) : undefined;
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+
   const holidays = parseCsvToStringSet(settings.holidayCsv);
   const weekendDays = parseWeekendDays(settings.weekendDaysCsv);
+  const requestedQuantity = Math.max(1, Math.floor(input.quantity ?? 1));
 
-  let source: PincodeResult["source"] = "none";
+  if (settings.inventoryAwareEnabled) {
+    if (!input.variantId) {
+      return {
+        available: false,
+        country,
+        postal_code: normalizedPostalCode,
+        source: "none",
+        reason: "variant_required",
+        in_stock: false,
+        message: "Please select a product variant to check delivery.",
+      };
+    }
+
+    const sellableQty = await checkVariantSellableQuantity(input.admin, input.variantId);
+
+    if (sellableQty === null) {
+      return {
+        available: false,
+        country,
+        postal_code: normalizedPostalCode,
+        source: "none",
+        reason: "inventory_unavailable",
+        in_stock: false,
+        message: "Unable to verify stock right now. Please try again.",
+      };
+    }
+
+    if (sellableQty < requestedQuantity) {
+      return {
+        available: false,
+        country,
+        postal_code: normalizedPostalCode,
+        source: "none",
+        reason: "out_of_stock",
+        in_stock: false,
+        message: "Out of stock for the selected variant.",
+      };
+    }
+  }
+
+  let source: DeliveryResult["source"] = "none";
   let deliveryDays: number | null = null;
   let codAvailable = false;
   let courierName: string | undefined;
 
-  if (settings.courierEnabled) {
+  if (settings.courierEnabled && country === "IN") {
     const courier = await resolveCourierEstimate(
-      normalizedPin,
+      normalizedPostalCode,
       input.codRequested ?? false,
       settings.retryCount,
       settings.courierTimeoutMs,
@@ -206,21 +319,29 @@ export async function checkPincodeDelivery(input: CheckPincodeInput): Promise<Pi
   }
 
   if (deliveryDays === null && settings.dbFallbackEnabled) {
-    const pincode = await prisma.pincode.findUnique({ where: { pincode: normalizedPin } });
-    if (pincode && pincode.serviceable) {
+    const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
+    const postalCode = await prisma.postalCode.findUnique({
+      where: { shop_country_postalCode: { shop: shopKey, country, postalCode: normalizedPostalCode } },
+    });
+    if (postalCode && postalCode.serviceable) {
       source = "db_fallback";
-      deliveryDays = pincode.deliveryDays;
-      codAvailable = pincode.codAvailable;
+      deliveryDays = postalCode.deliveryDays;
+      codAvailable = postalCode.codAvailable;
     }
   }
 
   if (deliveryDays === null) {
-    return {
+    const result = {
       available: false,
-      pincode: normalizedPin,
+      country,
+      postal_code: normalizedPostalCode,
       source: "none",
-      message: "Sorry, delivery is not available for this pincode.",
-    };
+      message: "Sorry, delivery is not available for this postal code.",
+    } satisfies DeliveryResult;
+    if (!settings.inventoryAwareEnabled) {
+      checkCache.set(cacheKey, { expiresAt: Date.now() + CHECK_CACHE_TTL_MS, result });
+    }
+    return result;
   }
 
   const estimatedDate = computeEstimatedDate({
@@ -234,16 +355,24 @@ export async function checkPincodeDelivery(input: CheckPincodeInput): Promise<Pi
   const prettyDate = formatReadableDate(estimatedDate);
   const codLabel = codAvailable ? "COD available" : "Prepaid only";
 
-  return {
+  const result = {
     available: true,
-    pincode: normalizedPin,
+    country,
+    postal_code: normalizedPostalCode,
     source,
+    in_stock: true,
     courier_name: courierName,
     delivery_days: deliveryDays,
     estimated_date: estimatedDateIso,
     cod_available: codAvailable,
     message: `Delivery by ${prettyDate}. ${codLabel}.`,
   };
+
+  if (!settings.inventoryAwareEnabled) {
+    checkCache.set(cacheKey, { expiresAt: Date.now() + CHECK_CACHE_TTL_MS, result });
+  }
+
+  return result;
 }
 
 export function parseCodRequestParam(value: string | null): boolean {

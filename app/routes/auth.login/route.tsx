@@ -1,7 +1,15 @@
-import { AppProvider } from "@shopify/shopify-app-react-router/react";
-import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, useActionData, useLoaderData } from "react-router";
+import { useActionData, useLoaderData } from "react-router";
+import enTranslations from "@shopify/polaris/locales/en.json";
+import {
+  AppProvider as PolarisProvider,
+  BlockStack,
+  Card,
+  Page,
+  Text,
+} from "@shopify/polaris";
+import "@shopify/polaris/build/esm/styles.css";
+import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { login } from "../../shopify.server";
 import { loginErrorMessage } from "./error.server";
@@ -23,27 +31,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function Auth() {
   const loaderData = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const [shop, setShop] = useState("");
   const { errors } = actionData || loaderData;
 
   return (
-    <AppProvider embedded={false}>
-      <s-page>
-        <Form method="post">
-        <s-section heading="Log in">
-          <s-text-field
-            name="shop"
-            label="Shop domain"
-            details="example.myshopify.com"
-            value={shop}
-            onChange={(e) => setShop(e.currentTarget.value)}
-            autocomplete="on"
-            error={errors.shop}
-          ></s-text-field>
-          <s-button type="submit">Log in</s-button>
-        </s-section>
-        </Form>
-      </s-page>
-    </AppProvider>
+    <ShopifyAppProvider embedded={false}>
+      <PolarisProvider i18n={enTranslations}>
+        <Page narrowWidth title="Log in">
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Start installation from Shopify
+              </Text>
+              <Text as="p" tone="subdued">
+                Public app installs must begin from Shopify App Store, Shopify
+                admin, or Partner Dashboard surfaces. Open the app from Shopify
+                with your shop context to continue OAuth authentication.
+              </Text>
+              {errors.shop ? (
+                <Text as="p" tone="critical">
+                  {errors.shop}
+                </Text>
+              ) : null}
+            </BlockStack>
+          </Card>
+        </Page>
+      </PolarisProvider>
+    </ShopifyAppProvider>
   );
 }

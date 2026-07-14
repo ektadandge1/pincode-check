@@ -10,7 +10,7 @@ generator client {
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "sqlite"
-  url      = "file:dev.sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -33,9 +33,11 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-model Pincode {
+model PostalCode {
   id            Int      @id @default(autoincrement())
-  pincode       String   @unique
+  shop          String   @default("default")
+  country       String   @default("IN")
+  postalCode    String
   city          String?
   state         String?
   zone          String?
@@ -44,6 +46,8 @@ model Pincode {
   codAvailable  Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@unique([shop, country, postalCode])
 }
 
 model DeliverySetting {
@@ -57,6 +61,7 @@ model DeliverySetting {
   retryCount        Int      @default(1)
   courierEnabled    Boolean  @default(false)
   dbFallbackEnabled Boolean  @default(true)
+  inventoryAwareEnabled Boolean @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

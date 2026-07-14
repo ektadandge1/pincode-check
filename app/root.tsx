@@ -1,3 +1,4 @@
+import type { HeadersFunction } from "react-router";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
 export default function App() {
@@ -11,6 +12,7 @@ export default function App() {
           rel="stylesheet"
           href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
         />
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
         <Meta />
         <Links />
       </head>
@@ -22,3 +24,8 @@ export default function App() {
     </html>
   );
 }
+
+export const headers: HeadersFunction = () => ({
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "X-Content-Type-Options": "nosniff",
+});

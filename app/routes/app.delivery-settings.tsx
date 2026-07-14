@@ -1,14 +1,51 @@
+import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
+import {
+  Badge,
+  Banner,
+  BlockStack,
+  Button,
+  Card,
+  Checkbox,
+  DataTable,
+  DropZone,
+  FormLayout,
+  InlineStack,
+  Layout,
+  Page,
+  Select,
+  Text,
+  TextField,
+} from "@shopify/polaris";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { parseCsv } from "../utils/csv.server";
-import { validateIndianPincode } from "../utils/delivery.server";
+import {
+  normalizeCountryCode,
+  normalizePostalCode,
+  validatePostalCode,
+} from "../utils/delivery.server";
 
 type ActionData = {
   ok: boolean;
   message: string;
 };
+
+const COUNTRY_OPTIONS = [
+  { label: "Australia", value: "AU" },
+  { label: "Canada", value: "CA" },
+  { label: "France", value: "FR" },
+  { label: "Germany", value: "DE" },
+  { label: "India", value: "IN" },
+  { label: "Italy", value: "IT" },
+  { label: "Japan", value: "JP" },
+  { label: "Netherlands", value: "NL" },
+  { label: "New Zealand", value: "NZ" },
+  { label: "Spain", value: "ES" },
+  { label: "United Kingdom", value: "GB" },
+  { label: "United States", value: "US" },
+];
 
 function parseBool(value: FormDataEntryValue | null): boolean {
   const normalized = String(value ?? "").toLowerCase();
@@ -24,6 +61,14 @@ function normalizeHolidayList(csv: string): string {
   return [...new Set(values)].join(",");
 }
 
+function hasCourierIntegrationConfig() {
+  return Boolean(
+    process.env.SHIPROCKET_EMAIL &&
+      process.env.SHIPROCKET_PASSWORD &&
+      process.env.SHIPROCKET_PICKUP_PINCODE,
+  );
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
@@ -32,23 +77,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (await prisma.deliverySetting.findUnique({ where: { shop } })) ??
     (await prisma.deliverySetting.findUnique({ where: { shop: "default" } }));
 
-  const rows = await prisma.pincode.findMany({
-    orderBy: { pincode: "asc" },
+  const rows = await prisma.postalCode.findMany({
+    where: { shop },
+    orderBy: [{ country: "asc" }, { postalCode: "asc" }],
     take: 150,
   });
 
   return {
     shop,
+    courierIntegrationAvailable: hasCourierIntegrationConfig(),
     setting: setting ?? {
       cutoffHour24: 14,
       holidaysCsv: "",
       courierEnabled: false,
       dbFallbackEnabled: true,
+      inventoryAwareEnabled: false,
       weekendDaysCsv: "0",
       courierTimeoutMs: 2000,
       retryCount: 1,
     },
-    samplePincodes: rows,
+    samplePostalCodes: rows,
   };
 }
 
@@ -60,8 +108,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === "save_settings") {
     const cutoffHour24 = Math.max(0, Math.min(23, Number(formData.get("cutoffHour24") ?? 14)));
-    const courierEnabled = parseBool(formData.get("courierEnabled"));
+    const courierEnabled = hasCourierIntegrationConfig()
+      ? parseBool(formData.get("courierEnabled"))
+      : false;
     const dbFallbackEnabled = parseBool(formData.get("dbFallbackEnabled"));
+    const inventoryAwareEnabled = parseBool(formData.get("inventoryAwareEnabled"));
     const weekendDaysCsv = String(formData.get("weekendDaysCsv") ?? "0").trim() || "0";
     const courierTimeoutMs = Math.max(500, Number(formData.get("courierTimeoutMs") ?? 2000));
     const retryCount = Math.max(0, Math.min(3, Number(formData.get("retryCount") ?? 1)));
@@ -74,6 +125,7 @@ export async function action({ request }: ActionFunctionArgs) {
         cutoffHour24,
         courierEnabled,
         dbFallbackEnabled,
+        inventoryAwareEnabled,
         weekendDaysCsv,
         courierTimeoutMs,
         retryCount,
@@ -83,6 +135,7 @@ export async function action({ request }: ActionFunctionArgs) {
         cutoffHour24,
         courierEnabled,
         dbFallbackEnabled,
+        inventoryAwareEnabled,
         weekendDaysCsv,
         courierTimeoutMs,
         retryCount,
@@ -136,8 +189,12 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true, message: "Holiday removed." } satisfies ActionData;
   }
 
-  if (intent === "upsert_single_pincode") {
-    const pincode = String(formData.get("pincode") ?? "").trim();
+  if (intent === "upsert_single_postal_code") {
+    const country = normalizeCountryCode(formData.get("country")?.toString());
+    const postalCode = normalizePostalCode(
+      country,
+      String(formData.get("postalCode") ?? formData.get("pincode") ?? ""),
+    );
     const deliveryDays = Number(formData.get("deliveryDays") ?? 0);
     const serviceable = parseBool(formData.get("serviceable"));
     const codAvailable = parseBool(formData.get("codAvailable"));
@@ -145,25 +202,25 @@ export async function action({ request }: ActionFunctionArgs) {
     const state = String(formData.get("state") ?? "").trim() || null;
     const zone = String(formData.get("zone") ?? "").trim() || null;
 
-    if (!validateIndianPincode(pincode)) {
-      return { ok: false, message: "Please enter a valid 6-digit pincode." } satisfies ActionData;
+    if (!validatePostalCode(country, postalCode)) {
+      return { ok: false, message: "Please enter a valid postal code." } satisfies ActionData;
     }
 
     if (!Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
       return { ok: false, message: "Delivery days should be between 0 and 30." } satisfies ActionData;
     }
 
-    await prisma.pincode.upsert({
-      where: { pincode },
-      create: { pincode, deliveryDays, serviceable, codAvailable, city, state, zone },
+    await prisma.postalCode.upsert({
+      where: { shop_country_postalCode: { shop, country, postalCode } },
+      create: { shop, country, postalCode, deliveryDays, serviceable, codAvailable, city, state, zone },
       update: { deliveryDays, serviceable, codAvailable, city, state, zone },
     });
 
-    return { ok: true, message: "Pincode saved." } satisfies ActionData;
+    return { ok: true, message: "Postal code saved." } satisfies ActionData;
   }
 
   if (intent === "bulk_import_csv") {
-    const file = formData.get("pincodeCsv");
+    const file = formData.get("postalCodeCsv") ?? formData.get("pincodeCsv");
     if (!(file instanceof File)) {
       return { ok: false, message: "Please upload a CSV file." } satisfies ActionData;
     }
@@ -182,7 +239,9 @@ export async function action({ request }: ActionFunctionArgs) {
     let failed = 0;
 
     for (const row of rows.slice(0, 10000)) {
-      const pincode = String(row.pincode ?? "").trim();
+      const hasLegacyPincodeColumn = typeof row.pincode === "string" && !row.country;
+      const country = normalizeCountryCode(row.country ?? (hasLegacyPincodeColumn ? "IN" : "US"));
+      const postalCode = normalizePostalCode(country, String(row.postal_code ?? row.postalcode ?? row.pincode ?? ""));
       const deliveryDays = Number(row.delivery_days ?? row.deliverydays ?? "");
       const serviceable = String(row.serviceable ?? "true").toLowerCase() !== "false";
       const codAvailable = String(row.cod_available ?? row.codavailable ?? "false").toLowerCase() === "true";
@@ -190,14 +249,14 @@ export async function action({ request }: ActionFunctionArgs) {
       const state = String(row.state ?? "").trim() || null;
       const zone = String(row.zone ?? "").trim() || null;
 
-      if (!validateIndianPincode(pincode) || !Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
+      if (!validatePostalCode(country, postalCode) || !Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
         failed += 1;
         continue;
       }
 
-      await prisma.pincode.upsert({
-        where: { pincode },
-        create: { pincode, deliveryDays, serviceable, codAvailable, city, state, zone },
+      await prisma.postalCode.upsert({
+        where: { shop_country_postalCode: { shop, country, postalCode } },
+        create: { shop, country, postalCode, deliveryDays, serviceable, codAvailable, city, state, zone },
         update: { deliveryDays, serviceable, codAvailable, city, state, zone },
       });
       success += 1;
@@ -225,11 +284,14 @@ export async function action({ request }: ActionFunctionArgs) {
     let failed = 0;
 
     for (const line of lines) {
-      const [pincodeRaw, daysRaw, serviceableRaw, codRaw, cityRaw, stateRaw, zoneRaw] = line
-        .split(",")
-        .map((x) => x.trim());
+      const parts = line.split(",").map((x) => x.trim());
+      const isLegacyRow = parts.length === 7;
+      const [countryRaw, postalCodeRaw, daysRaw, serviceableRaw, codRaw, cityRaw, stateRaw, zoneRaw] = isLegacyRow
+        ? ["IN", ...parts]
+        : parts;
 
-      const pincode = pincodeRaw ?? "";
+      const country = normalizeCountryCode(countryRaw);
+      const postalCode = normalizePostalCode(country, postalCodeRaw ?? "");
       const deliveryDays = Number(daysRaw ?? "");
       const serviceable = String(serviceableRaw ?? "true").toLowerCase() !== "false";
       const codAvailable = String(codRaw ?? "false").toLowerCase() === "true";
@@ -237,14 +299,14 @@ export async function action({ request }: ActionFunctionArgs) {
       const state = stateRaw || null;
       const zone = zoneRaw || null;
 
-      if (!validateIndianPincode(pincode) || !Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
+      if (!validatePostalCode(country, postalCode) || !Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
         failed += 1;
         continue;
       }
 
-      await prisma.pincode.upsert({
-        where: { pincode },
-        create: { pincode, deliveryDays, serviceable, codAvailable, city, state, zone },
+      await prisma.postalCode.upsert({
+        where: { shop_country_postalCode: { shop, country, postalCode } },
+        create: { shop, country, postalCode, deliveryDays, serviceable, codAvailable, city, state, zone },
         update: { deliveryDays, serviceable, codAvailable, city, state, zone },
       });
       success += 1;
@@ -263,226 +325,451 @@ export default function DeliverySettingsPage() {
   const data = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const isSaving = fetcher.state !== "idle";
+  const [settings, setSettings] = useState({
+    cutoffHour24: String(data.setting.cutoffHour24),
+    weekendDaysCsv: data.setting.weekendDaysCsv,
+    courierTimeoutMs: String(data.setting.courierTimeoutMs),
+    retryCount: String(data.setting.retryCount),
+    holidaysCsv: data.setting.holidaysCsv,
+    courierEnabled: data.courierIntegrationAvailable && data.setting.courierEnabled,
+    dbFallbackEnabled: data.setting.dbFallbackEnabled,
+    inventoryAwareEnabled: data.setting.inventoryAwareEnabled,
+  });
+  const [holidayDate, setHolidayDate] = useState("");
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvRejected, setCsvRejected] = useState(false);
+  const [postalCodeForm, setPostalCodeForm] = useState({
+    country: "US",
+    postalCode: "",
+    deliveryDays: "",
+    zone: "",
+    city: "",
+    state: "",
+    serviceable: true,
+    codAvailable: false,
+  });
+  const [manualRows, setManualRows] = useState("");
   const holidays = data.setting.holidaysCsv
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean)
     .sort();
+  const tableRows = data.samplePostalCodes.map((row) => [
+    row.country,
+    row.postalCode,
+    row.deliveryDays,
+    row.serviceable ? <Badge tone="success">Yes</Badge> : <Badge tone="critical">No</Badge>,
+    row.codAvailable ? <Badge tone="success">Yes</Badge> : <Badge>No</Badge>,
+    row.city ?? "-",
+    row.state ?? "-",
+  ]);
+
+  const submitCsvImport = () => {
+    if (!csvFile) return;
+
+    const formData = new FormData();
+    formData.append("intent", "bulk_import_csv");
+    formData.append("postalCodeCsv", csvFile);
+    fetcher.submit(formData, {
+      method: "post",
+      encType: "multipart/form-data",
+    });
+  };
 
   return (
-    <s-page heading="Delivery settings">
-      <div className="delivery-admin">
-        <div className="delivery-admin__hero">
-          <h2>Setup in minutes</h2>
-          <p>Configure delivery rules, upload pincodes in bulk, and keep holidays updated from one screen.</p>
-          <div className="delivery-admin__meta">
-            <span>{data.shop}</span>
-            <span>{data.samplePincodes.length} pincodes shown</span>
-          </div>
-        </div>
+    <Page
+      title="Delivery settings"
+      subtitle="Manage delivery rules, postal code coverage, and storefront estimates."
+      titleMetadata={<Badge tone="info">{`${data.samplePostalCodes.length} records`}</Badge>}
+    >
+      <Layout>
+        <Layout.Section>
+          <BlockStack gap="400">
+            {fetcher.data ? (
+              <Banner tone={fetcher.data.ok ? "success" : "critical"}>
+                {fetcher.data.message}
+              </Banner>
+            ) : null}
 
-        {fetcher.data ? (
-          <div className={`delivery-admin__alert ${fetcher.data.ok ? "success" : "error"}`}>{fetcher.data.message}</div>
-        ) : null}
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between" gap="300" blockAlign="center">
+                  <BlockStack gap="100">
+                    <Text as="h2" variant="headingMd">
+                      Quick settings
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Active shop: {data.shop}
+                    </Text>
+                  </BlockStack>
+                  <Badge tone={settings.courierEnabled ? "success" : "attention"}>
+                    {settings.courierEnabled ? "Courier enabled" : "DB fallback"}
+                  </Badge>
+                </InlineStack>
 
-        <s-section heading="1) Quick settings">
-          <fetcher.Form method="post" className="delivery-admin__card">
-            <input type="hidden" name="intent" value="save_settings" />
-            <div className="delivery-admin__grid two">
-              <label className="field">
-                <span>Cutoff hour (0-23)</span>
-                <input name="cutoffHour24" type="number" min={0} max={23} defaultValue={data.setting.cutoffHour24} />
-              </label>
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="save_settings" />
+                  <FormLayout>
+                    <FormLayout.Group condensed>
+                      <TextField
+                        label="Cutoff hour"
+                        name="cutoffHour24"
+                        type="number"
+                        min={0}
+                        max={23}
+                        value={settings.cutoffHour24}
+                        onChange={(value) =>
+                          setSettings((current) => ({ ...current, cutoffHour24: value }))
+                        }
+                        autoComplete="off"
+                        helpText="Use 24-hour format, from 0 to 23."
+                      />
+                      <TextField
+                        label="Weekend days"
+                        name="weekendDaysCsv"
+                        value={settings.weekendDaysCsv}
+                        onChange={(value) =>
+                          setSettings((current) => ({ ...current, weekendDaysCsv: value }))
+                        }
+                        autoComplete="off"
+                        placeholder="0 or 0,6"
+                        helpText="0 is Sunday and 6 is Saturday."
+                      />
+                    </FormLayout.Group>
 
-              <label className="field">
-                <span>Weekend days (0=Sun, 6=Sat)</span>
-                <input name="weekendDaysCsv" type="text" defaultValue={data.setting.weekendDaysCsv} placeholder="0 or 0,6" />
-              </label>
+                    <FormLayout.Group condensed>
+                      <TextField
+                        label="Courier timeout"
+                        name="courierTimeoutMs"
+                        type="number"
+                        min={500}
+                        suffix="ms"
+                        value={settings.courierTimeoutMs}
+                        onChange={(value) =>
+                          setSettings((current) => ({ ...current, courierTimeoutMs: value }))
+                        }
+                        autoComplete="off"
+                      />
+                      <TextField
+                        label="Retry count"
+                        name="retryCount"
+                        type="number"
+                        min={0}
+                        max={3}
+                        value={settings.retryCount}
+                        onChange={(value) =>
+                          setSettings((current) => ({ ...current, retryCount: value }))
+                        }
+                        autoComplete="off"
+                      />
+                    </FormLayout.Group>
 
-              <label className="field">
-                <span>Courier timeout (ms)</span>
-                <input name="courierTimeoutMs" type="number" min={500} defaultValue={data.setting.courierTimeoutMs} />
-              </label>
+                    <TextField
+                      label="Holidays CSV"
+                      name="holidaysCsv"
+                      value={settings.holidaysCsv}
+                      onChange={(value) =>
+                        setSettings((current) => ({ ...current, holidaysCsv: value }))
+                      }
+                      autoComplete="off"
+                      placeholder="2026-01-26,2026-08-15"
+                      helpText="Use YYYY-MM-DD dates separated by commas."
+                    />
 
-              <label className="field">
-                <span>Retry count (0-3)</span>
-                <input name="retryCount" type="number" min={0} max={3} defaultValue={data.setting.retryCount} />
-              </label>
-            </div>
+                    <Checkbox
+                      label="Enable courier API as primary source"
+                      name="courierEnabled"
+                      checked={settings.courierEnabled}
+                      disabled={!data.courierIntegrationAvailable}
+                      helpText={
+                        data.courierIntegrationAvailable
+                          ? "Use the configured courier provider before falling back to uploaded postal code records. India-only courier checks use Shiprocket."
+                          : "Courier provider credentials are not configured. Uploaded postal code records will be used."
+                      }
+                      onChange={(checked) =>
+                        setSettings((current) => ({ ...current, courierEnabled: checked }))
+                      }
+                    />
+                    <Checkbox
+                      label="Enable DB fallback"
+                      name="dbFallbackEnabled"
+                      checked={settings.dbFallbackEnabled}
+                      onChange={(checked) =>
+                        setSettings((current) => ({ ...current, dbFallbackEnabled: checked }))
+                      }
+                    />
+                    <Checkbox
+                      label="Enable inventory-aware delivery estimates"
+                      name="inventoryAwareEnabled"
+                      checked={settings.inventoryAwareEnabled}
+                      helpText="The storefront estimate uses the selected variant only when it is in stock."
+                      onChange={(checked) =>
+                        setSettings((current) => ({
+                          ...current,
+                          inventoryAwareEnabled: checked,
+                        }))
+                      }
+                    />
 
-            <label className="field" style={{ marginTop: 12 }}>
-              <span>Holidays CSV (YYYY-MM-DD)</span>
-              <input name="holidaysCsv" type="text" defaultValue={data.setting.holidaysCsv} placeholder="2026-01-26,2026-08-15" />
-            </label>
+                    <Button submit variant="primary" loading={isSaving}>
+                      Save settings
+                    </Button>
+                  </FormLayout>
+                </fetcher.Form>
+              </BlockStack>
+            </Card>
 
-            <div className="delivery-admin__checks">
-              <label>
-                <input name="courierEnabled" type="checkbox" defaultChecked={data.setting.courierEnabled} /> Enable courier API as primary source
-              </label>
-              <label>
-                <input name="dbFallbackEnabled" type="checkbox" defaultChecked={data.setting.dbFallbackEnabled} /> Enable DB fallback
-              </label>
-            </div>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Bulk postal code upload
+                </Text>
+                <Text as="p" tone="subdued">
+                  CSV columns: country, postal_code, delivery_days,
+                  serviceable, cod_available, city, state, zone.
+                </Text>
+                <DropZone
+                  accept=".csv,text/csv"
+                  allowMultiple={false}
+                  error={csvRejected}
+                  onDropAccepted={(files) => {
+                    setCsvRejected(false);
+                    setCsvFile(files[0] ?? null);
+                  }}
+                  onDropRejected={() => {
+                    setCsvRejected(true);
+                    setCsvFile(null);
+                  }}
+                >
+                  <DropZone.FileUpload actionHint="Accepts one CSV file up to 2MB" />
+                </DropZone>
+                {csvFile ? (
+                  <Text as="p" tone="subdued">
+                    Selected file: {csvFile.name}
+                  </Text>
+                ) : null}
+                <InlineStack gap="300">
+                  <Button
+                    variant="primary"
+                    disabled={!csvFile || isSaving}
+                    loading={isSaving && Boolean(csvFile)}
+                    onClick={submitCsvImport}
+                  >
+                    Import CSV
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
 
-            <button type="submit" className="primary-btn" disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save settings"}
-            </button>
-          </fetcher.Form>
-        </s-section>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Add one postal code
+                </Text>
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="upsert_single_postal_code" />
+                  <FormLayout>
+                    <FormLayout.Group condensed>
+                      <Select
+                        label="Country"
+                        name="country"
+                        options={COUNTRY_OPTIONS}
+                        value={postalCodeForm.country}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, country: value }))
+                        }
+                      />
+                      <TextField
+                        label="Postal / ZIP code"
+                        name="postalCode"
+                        value={postalCodeForm.postalCode}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, postalCode: value }))
+                        }
+                        placeholder="10001 or SW1A 1AA"
+                        autoComplete="postal-code"
+                        requiredIndicator
+                      />
+                      <TextField
+                        label="Delivery days"
+                        name="deliveryDays"
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={postalCodeForm.deliveryDays}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, deliveryDays: value }))
+                        }
+                        placeholder="2"
+                        autoComplete="off"
+                        requiredIndicator
+                      />
+                      <TextField
+                        label="Zone"
+                        name="zone"
+                        value={postalCodeForm.zone}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, zone: value }))
+                        }
+                        placeholder="metro"
+                        autoComplete="off"
+                      />
+                    </FormLayout.Group>
 
-        <s-section heading="2) Holiday dates">
-          <div className="delivery-admin__card">
-            <fetcher.Form method="post" className="delivery-admin__inline-form">
-              <input type="hidden" name="intent" value="add_holiday" />
-              <input type="date" name="holidayDate" required />
-              <button type="submit" className="primary-btn" disabled={isSaving}>Add holiday</button>
-            </fetcher.Form>
+                    <FormLayout.Group condensed>
+                      <TextField
+                        label="City"
+                        name="city"
+                        value={postalCodeForm.city}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, city: value }))
+                        }
+                        placeholder="Mumbai"
+                        autoComplete="address-level2"
+                      />
+                      <TextField
+                        label="State"
+                        name="state"
+                        value={postalCodeForm.state}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, state: value }))
+                        }
+                        placeholder="Maharashtra"
+                        autoComplete="address-level1"
+                      />
+                    </FormLayout.Group>
 
-            <div className="delivery-admin__chips">
-              {holidays.length === 0 ? (
-                <span className="delivery-admin__muted">No holidays added yet.</span>
-              ) : (
-                holidays.map((holiday) => (
-                  <fetcher.Form key={holiday} method="post">
-                    <input type="hidden" name="intent" value="remove_holiday" />
-                    <input type="hidden" name="holidayDate" value={holiday} />
-                    <button type="submit" className="chip-btn">
-                      {holiday} x
-                    </button>
-                  </fetcher.Form>
-                ))
-              )}
-            </div>
-          </div>
-        </s-section>
+                    <Checkbox
+                      label="Serviceable"
+                      name="serviceable"
+                      checked={postalCodeForm.serviceable}
+                      onChange={(checked) =>
+                        setPostalCodeForm((current) => ({ ...current, serviceable: checked }))
+                      }
+                    />
+                    <Checkbox
+                      label="COD available"
+                      name="codAvailable"
+                      checked={postalCodeForm.codAvailable}
+                      onChange={(checked) =>
+                        setPostalCodeForm((current) => ({ ...current, codAvailable: checked }))
+                      }
+                    />
 
-        <s-section heading="3) Bulk pincode upload">
-          <div className="delivery-admin__card">
-            <p className="delivery-admin__muted">CSV columns: <code>pincode,delivery_days,serviceable,cod_available,city,state,zone</code></p>
-            <fetcher.Form method="post" encType="multipart/form-data" className="delivery-admin__inline-form">
-              <input type="hidden" name="intent" value="bulk_import_csv" />
-              <input type="file" name="pincodeCsv" accept=".csv,text/csv" required />
-              <button type="submit" className="primary-btn" disabled={isSaving}>Import CSV</button>
-            </fetcher.Form>
-          </div>
-        </s-section>
+                    <Button submit variant="primary" loading={isSaving}>
+                      Save postal code
+                    </Button>
+                  </FormLayout>
+                </fetcher.Form>
+              </BlockStack>
+            </Card>
 
-        <s-section heading="4) Add one pincode">
-          <fetcher.Form method="post" className="delivery-admin__card">
-            <input type="hidden" name="intent" value="upsert_single_pincode" />
-            <div className="delivery-admin__grid three">
-              <label className="field">
-                <span>Pincode</span>
-                <input name="pincode" placeholder="400001" maxLength={6} required />
-              </label>
-              <label className="field">
-                <span>Delivery days</span>
-                <input name="deliveryDays" type="number" min={0} max={30} placeholder="2" required />
-              </label>
-              <label className="field">
-                <span>Zone</span>
-                <input name="zone" placeholder="metro" />
-              </label>
-              <label className="field">
-                <span>City</span>
-                <input name="city" placeholder="Mumbai" />
-              </label>
-              <label className="field">
-                <span>State</span>
-                <input name="state" placeholder="Maharashtra" />
-              </label>
-            </div>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Add multiple postal codes manually
+                </Text>
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="bulk_manual_rows" />
+                  <FormLayout>
+                    <TextField
+                      label="Manual rows"
+                      name="manualRows"
+                      value={manualRows}
+                      onChange={setManualRows}
+                      multiline={7}
+                      monospaced
+                      autoComplete="off"
+                      placeholder={
+                        "US,10001,2,true,true,New York,New York,metro\nGB,SW1A 1AA,3,true,false,London,England,metro"
+                      }
+                      helpText="One row per line, comma separated: country, postal_code, delivery_days, serviceable, cod_available, city, state, zone."
+                      requiredIndicator
+                    />
+                    <Button submit variant="primary" loading={isSaving}>
+                      Save manual rows
+                    </Button>
+                  </FormLayout>
+                </fetcher.Form>
+              </BlockStack>
+            </Card>
 
-            <div className="delivery-admin__checks" style={{ marginTop: 12 }}>
-              <label><input name="serviceable" type="checkbox" defaultChecked /> Serviceable</label>
-              <label><input name="codAvailable" type="checkbox" /> COD available</label>
-            </div>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Recent records
+                </Text>
+                <DataTable
+                  columnContentTypes={["text", "text", "numeric", "text", "text", "text", "text"]}
+                  headings={["Country", "Postal code", "Days", "Serviceable", "COD", "City", "State"]}
+                  rows={tableRows}
+                  increasedTableDensity
+                />
+              </BlockStack>
+            </Card>
+          </BlockStack>
+        </Layout.Section>
 
-            <button type="submit" className="primary-btn" disabled={isSaving}>Save pincode</button>
-          </fetcher.Form>
-        </s-section>
+        <Layout.Section variant="oneThird">
+          <BlockStack gap="400">
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Holiday dates
+                </Text>
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="add_holiday" />
+                  <FormLayout>
+                    <TextField
+                      label="Holiday date"
+                      name="holidayDate"
+                      type="date"
+                      value={holidayDate}
+                      onChange={setHolidayDate}
+                      autoComplete="off"
+                      requiredIndicator
+                    />
+                    <Button submit variant="primary" loading={isSaving}>
+                      Add holiday
+                    </Button>
+                  </FormLayout>
+                </fetcher.Form>
 
-        <s-section heading="5) Add multiple pincodes manually">
-          <fetcher.Form method="post" className="delivery-admin__card">
-            <input type="hidden" name="intent" value="bulk_manual_rows" />
-            <p className="delivery-admin__muted" style={{ marginTop: 0 }}>
-              One row per line, comma separated: <code>pincode,delivery_days,serviceable,cod_available,city,state,zone</code>
-            </p>
-            <textarea
-              name="manualRows"
-              rows={7}
-              placeholder={"400001,2,true,true,Mumbai,Maharashtra,metro\n560001,4,true,false,Bengaluru,Karnataka,metro"}
-              className="delivery-admin__textarea"
-              required
-            />
-            <div style={{ marginTop: 10 }}>
-              <button type="submit" className="primary-btn" disabled={isSaving}>Save manual rows</button>
-            </div>
-          </fetcher.Form>
-        </s-section>
+                {holidays.length === 0 ? (
+                  <Text as="p" tone="subdued">
+                    No holidays added yet.
+                  </Text>
+                ) : (
+                  <InlineStack gap="200">
+                    {holidays.map((holiday) => (
+                      <fetcher.Form key={holiday} method="post">
+                        <input type="hidden" name="intent" value="remove_holiday" />
+                        <input type="hidden" name="holidayDate" value={holiday} />
+                        <Button submit size="slim">
+                          {holiday} x
+                        </Button>
+                      </fetcher.Form>
+                    ))}
+                  </InlineStack>
+                )}
+              </BlockStack>
+            </Card>
 
-        <s-section heading="6) Recent records">
-          <div className="delivery-admin__card delivery-admin__table-wrap">
-            <table className="delivery-admin__table">
-              <thead>
-                <tr>
-                  <th>Pincode</th>
-                  <th>Days</th>
-                  <th>Serviceable</th>
-                  <th>COD</th>
-                  <th>City</th>
-                  <th>State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.samplePincodes.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.pincode}</td>
-                    <td>{row.deliveryDays}</td>
-                    <td>{row.serviceable ? "Yes" : "No"}</td>
-                    <td>{row.codAvailable ? "Yes" : "No"}</td>
-                    <td>{row.city ?? "-"}</td>
-                    <td>{row.state ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </s-section>
-      </div>
-
-      <style>{`
-        .delivery-admin { display: grid; gap: 14px; }
-        .delivery-admin__hero { border: 1px solid #d8dee8; border-radius: 14px; padding: 18px; background: linear-gradient(135deg,#f8fbff,#f4f7f2); }
-        .delivery-admin__hero h2 { margin: 0; font-size: 18px; color: #102a43; }
-        .delivery-admin__hero p { margin: 6px 0 0; color: #334e68; font-size: 14px; }
-        .delivery-admin__meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-        .delivery-admin__meta span { background: #e6eff8; color: #102a43; font-size: 12px; padding: 4px 8px; border-radius: 999px; }
-        .delivery-admin__alert { border-radius: 10px; padding: 10px 12px; font-size: 13px; border: 1px solid; }
-        .delivery-admin__alert.success { background: #edfdf5; border-color: #86efac; color: #166534; }
-        .delivery-admin__alert.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
-        .delivery-admin__card { border: 1px solid #d8dee8; border-radius: 12px; padding: 14px; background: #ffffff; }
-        .delivery-admin__grid { display: grid; gap: 10px; }
-        .delivery-admin__grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .delivery-admin__grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        .field { display: grid; gap: 6px; font-size: 13px; color: #243b53; }
-        .field input { border: 1px solid #bcccdc; border-radius: 8px; min-height: 36px; padding: 8px 10px; font-size: 14px; }
-        .delivery-admin__checks { display: grid; gap: 8px; margin: 14px 0; font-size: 13px; color: #243b53; }
-        .delivery-admin__inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-        .delivery-admin__chips { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
-        .delivery-admin__muted { color: #627d98; font-size: 13px; }
-        .primary-btn { background: #0b6bcb; color: #fff; border: 0; border-radius: 8px; min-height: 36px; padding: 0 12px; font-size: 13px; cursor: pointer; }
-        .primary-btn:disabled { opacity: .65; cursor: not-allowed; }
-        .chip-btn { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 999px; min-height: 30px; padding: 0 10px; font-size: 12px; cursor: pointer; }
-        .delivery-admin__table-wrap { overflow-x: auto; }
-        .delivery-admin__textarea { width: 100%; border: 1px solid #bcccdc; border-radius: 8px; padding: 10px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace; }
-        .delivery-admin__table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .delivery-admin__table th { text-align: left; color: #334e68; padding: 8px; border-bottom: 1px solid #d9e2ec; }
-        .delivery-admin__table td { padding: 8px; border-bottom: 1px solid #eef2f6; color: #102a43; }
-        @media (max-width: 860px) {
-          .delivery-admin__grid.two, .delivery-admin__grid.three { grid-template-columns: 1fr; }
-        }
-      `}</style>
-    </s-page>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Review checklist
+                </Text>
+                <Text as="p" tone="subdued">
+                  Keep delivery messages accurate, avoid test data in production,
+                  and verify the storefront extension before Shopify App Store
+                  submission.
+                </Text>
+              </BlockStack>
+            </Card>
+          </BlockStack>
+        </Layout.Section>
+      </Layout>
+    </Page>
   );
 }

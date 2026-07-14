@@ -1,0 +1,327 @@
+{% liquid
+  assign block_id = block.id | replace: '-', ''
+  assign heading_text = block.settings.heading | default: 'Check delivery availability'
+  assign button_text = block.settings.button_text | default: 'Check'
+  assign cod_enabled = block.settings.cod_enabled
+  assign selected_country = localization.country.iso_code | default: 'US'
+%}
+
+<div class="pin-checker" id="pin-checker-{{ block_id }}" data-cod="{{ cod_enabled }}">
+  <h3 class="pin-checker__heading">{{ heading_text }}</h3>
+  <p class="pin-checker__sub">Enter your country and postal / ZIP code to check delivery date.</p>
+  <div class="pin-checker__row">
+    <select
+      class="pin-checker__select"
+      name="country"
+      aria-label="Select country"
+      id="pin-country-{{ block_id }}"
+    >
+      {% if localization.available_countries.size > 0 %}
+        {% for country in localization.available_countries %}
+          <option value="{{ country.iso_code }}" {% if country.iso_code == selected_country %}selected{% endif %}>{{ country.name }}</option>
+        {% endfor %}
+      {% else %}
+        <option value="{{ selected_country }}" selected>{{ selected_country }}</option>
+      {% endif %}
+    </select>
+    <input
+      class="pin-checker__input"
+      type="text"
+      name="postal_code"
+      autocomplete="postal-code"
+      inputmode="text"
+      placeholder="Postal / ZIP code"
+      aria-label="Enter postal or ZIP code"
+      id="pin-input-{{ block_id }}"
+    >
+    <button class="pin-checker__button" type="button" id="pin-btn-{{ block_id }}">{{ button_text }}</button>
+  </div>
+  <p class="pin-checker__result" id="pin-result-{{ block_id }}" aria-live="polite"></p>
+</div>
+
+<style>
+  #pin-checker-{{ block_id }} {
+    --pc-border: #e5e7eb;
+    --pc-heading: #111827;
+    --pc-sub: #6b7280;
+    --pc-input-border: #d1d5db;
+    --pc-focus: #111827;
+    --pc-btn: #111827;
+    --pc-btn-hover: #000000;
+  }
+  .pin-checker {
+    border: 1px solid var(--pc-border);
+    border-radius: 10px;
+    padding: 14px;
+    background: #ffffff;
+  }
+  .pin-checker__heading {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--pc-heading);
+  }
+  .pin-checker__sub {
+    margin: 4px 0 10px;
+    color: var(--pc-sub);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .pin-checker__row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .pin-checker__select,
+  .pin-checker__input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--pc-input-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    background: #ffffff;
+    color: #1f2937;
+  }
+  .pin-checker__select {
+    flex: 0 0 34%;
+  }
+  .pin-checker__select:focus,
+  .pin-checker__input:focus {
+    outline: 2px solid rgba(17, 24, 39, 0.25);
+    outline-offset: 1px;
+    border-color: var(--pc-focus);
+  }
+  @supports (color: color-mix(in srgb, black 50%, white)) {
+    .pin-checker__select:focus,
+    .pin-checker__input:focus {
+      outline: 2px solid color-mix(in srgb, var(--pc-focus) 25%, transparent);
+    }
+  }
+  .pin-checker__button {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 10px 16px;
+    background: var(--pc-btn);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+  .pin-checker__button:hover {
+    background: var(--pc-btn-hover);
+  }
+  .pin-checker__button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  .pin-checker__result {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: #f8fafc;
+    font-size: 13px;
+    color: #1f2937;
+    min-height: 18px;
+    display: none;
+  }
+  .pin-checker__result[data-state='loading'] {
+    display: block;
+    color: #1d4f91;
+    background: #f0f7ff;
+    border-color: #c9e0fb;
+  }
+  .pin-checker__result[data-state='error'] {
+    display: block;
+    color: #b91c1c;
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+  .pin-checker__result[data-state='success'] {
+    display: block;
+    color: #065f46;
+    background: #ecfdf3;
+    border-color: #a7f3d0;
+  }
+  @media (max-width: 640px) {
+    .pin-checker__row {
+      flex-direction: column;
+    }
+    .pin-checker__button {
+      width: 100%;
+    }
+  }
+</style>
+
+<script>
+  (() => {
+    const root = document.getElementById('pin-checker-{{ block_id }}');
+    if (!root) return;
+
+    const countrySelect = document.getElementById('pin-country-{{ block_id }}');
+    const pinInput = document.getElementById('pin-input-{{ block_id }}');
+    const button = document.getElementById('pin-btn-{{ block_id }}');
+    const result = document.getElementById('pin-result-{{ block_id }}');
+    const cod = root.dataset.cod === 'true';
+
+    const toVariantGid = (value) => {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (raw.indexOf('gid://shopify/ProductVariant/') === 0) {
+        return raw;
+      }
+      const numeric = raw.replace(/\D/g, '');
+      return numeric ? `gid://shopify/ProductVariant/${numeric}` : '';
+    };
+
+    const getSelectedVariantId = () => {
+      const search = [
+        'form[action*="/cart/add"] [name="id"]',
+        'form[action*="/cart/add"] [name="variant"]',
+        'form[data-type="add-to-cart-form"] [name="id"]',
+        'input[name="id"]',
+        'select[name="id"]',
+        '[name="id"][type="hidden"]',
+        '[data-variant-id]'
+      ];
+
+      for (const selector of search) {
+        const el = document.querySelector(selector);
+        if (!el) continue;
+        const value = el.value || (el.dataset && el.dataset.variantId) || '';
+        const gid = toVariantGid(value);
+        if (gid) return gid;
+      }
+
+      const fromUrl = new URLSearchParams(window.location.search).get('variant');
+      return toVariantGid(fromUrl);
+    };
+
+    const getQuantity = () => {
+      const quantityInput = document.querySelector('form[action*="/cart/add"] [name="quantity"], form[data-type="add-to-cart-form"] [name="quantity"], input[name="quantity"]');
+      const parsed = Number(quantityInput && quantityInput.value ? quantityInput.value : '1');
+      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+    };
+
+    const setResult = (message, state) => {
+      result.textContent = message;
+      result.setAttribute('data-state', state || '');
+    };
+
+    const patterns = {
+      AU: /^\d{4}$/,
+      CA: /^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/,
+      DE: /^\d{5}$/,
+      ES: /^\d{5}$/,
+      FR: /^\d{5}$/,
+      GB: /^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$/,
+      IN: /^[1-9][0-9]{5}$/,
+      IT: /^\d{5}$/,
+      JP: /^\d{3}-?\d{4}$/,
+      NL: /^\d{4}\s?[A-Z]{2}$/,
+      NZ: /^\d{4}$/,
+      US: /^\d{5}(-?\d{4})?$/
+    };
+
+    const normalizeCountry = (country) => /^[A-Z]{2}$/.test(country || '') ? country : 'US';
+
+    const normalizePostalCode = (country, value) => {
+      const code = String(value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+      if (['IN', 'AU', 'DE', 'ES', 'FR', 'IT', 'NZ'].includes(country)) return code.replace(/\D/g, '');
+      if (country === 'US' || country === 'JP') return code.replace(/\s+/g, '');
+      return code;
+    };
+
+    const validate = (country, code) => {
+      const pattern = patterns[country];
+      if (pattern) return pattern.test(code);
+      return /^[A-Z0-9][A-Z0-9 -]{1,18}[A-Z0-9]$/.test(code);
+    };
+
+    const runCheck = async () => {
+      const country = normalizeCountry(countrySelect && countrySelect.value);
+      const pin = normalizePostalCode(country, pinInput.value || '');
+      pinInput.value = pin;
+
+      if (!validate(country, pin)) {
+        setResult('Please enter a valid postal code.', 'error');
+        return;
+      }
+
+      setResult('Checking delivery availability...', 'loading');
+      button.disabled = true;
+
+      try {
+        const query = new URLSearchParams({
+          country: country,
+          postal_code: pin,
+          cod: cod ? '1' : '0',
+          qty: String(getQuantity())
+        });
+
+        const variantId = getSelectedVariantId();
+        if (variantId) {
+          query.set('variantId', variantId);
+        }
+
+        const response = await fetch(`/apps/delivery-checker?${query.toString()}`, {
+          method: 'GET',
+          headers: { Accept: 'application/json' }
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          setResult('Unable to check this postal code right now. Please retry.', 'error');
+          return;
+        }
+
+        setResult(data.message || 'Unable to check this postal code right now.', data.available ? 'success' : 'error');
+      } catch (error) {
+        setResult('Network issue while checking this postal code. Please retry.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    button.addEventListener('click', runCheck);
+    pinInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        runCheck();
+      }
+    });
+  })();
+</script>
+
+{% schema %}
+{
+    "name": "Delivery checker",
+  "target": "section",
+  "enabled_on": {
+    "templates": ["product"]
+  },
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Check delivery availability"
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button label",
+      "default": "Check"
+    },
+    {
+      "type": "checkbox",
+      "id": "cod_enabled",
+      "label": "Request COD availability",
+      "default": true
+    }
+  ]
+}
+{% endschema %}

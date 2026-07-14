@@ -6,14 +6,63 @@ export type DeliveryComputationInput = {
   now?: Date;
 };
 
-const DEFAULT_LOCALE = "en-IN";
+const DEFAULT_LOCALE = "en";
 
-export function normalizePincode(pin: string): string {
-  return pin.replace(/\D/g, "").trim();
+const POSTAL_CODE_PATTERNS: Record<string, RegExp> = {
+  AU: /^\d{4}$/,
+  CA: /^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/,
+  DE: /^\d{5}$/,
+  ES: /^\d{5}$/,
+  FR: /^\d{5}$/,
+  GB: /^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$/,
+  IN: /^[1-9][0-9]{5}$/,
+  IT: /^\d{5}$/,
+  JP: /^\d{3}-?\d{4}$/,
+  NL: /^\d{4}\s?[A-Z]{2}$/,
+  NZ: /^\d{4}$/,
+  US: /^\d{5}(-?\d{4})?$/,
+};
+
+export function normalizeCountryCode(country: string | null | undefined): string {
+  const normalized = String(country ?? "")
+    .trim()
+    .toUpperCase();
+
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : "US";
 }
 
-export function validateIndianPincode(pin: string): boolean {
-  return /^[1-9][0-9]{5}$/.test(pin);
+export function normalizePostalCode(country: string, postalCode: string): string {
+  const countryCode = normalizeCountryCode(country);
+  const value = String(postalCode ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+
+  if (["IN", "AU", "DE", "ES", "FR", "IT", "NZ"].includes(countryCode)) {
+    return value.replace(/\D/g, "");
+  }
+
+  if (countryCode === "US") {
+    return value.replace(/\s+/g, "");
+  }
+
+  if (countryCode === "JP") {
+    return value.replace(/\s+/g, "");
+  }
+
+  return value;
+}
+
+export function validatePostalCode(country: string, postalCode: string): boolean {
+  const countryCode = normalizeCountryCode(country);
+  const normalized = normalizePostalCode(countryCode, postalCode);
+  const pattern = POSTAL_CODE_PATTERNS[countryCode];
+
+  if (pattern) {
+    return pattern.test(normalized);
+  }
+
+  return /^[A-Z0-9][A-Z0-9 -]{1,18}[A-Z0-9]$/.test(normalized);
 }
 
 export function parseCsvToStringSet(csv: string): Set<string> {

@@ -1,20 +1,22 @@
+/* eslint-env node */
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const pincodes = [
-    { pincode: "400001", city: "Mumbai", state: "Maharashtra", deliveryDays: 2, codAvailable: true },
-    { pincode: "110001", city: "New Delhi", state: "Delhi", deliveryDays: 3, codAvailable: true },
-    { pincode: "560001", city: "Bengaluru", state: "Karnataka", deliveryDays: 3, codAvailable: false },
-    { pincode: "700001", city: "Kolkata", state: "West Bengal", deliveryDays: 4, codAvailable: true },
+  const postalCodes = [
+    { country: "US", postalCode: "10001", city: "New York", state: "New York", deliveryDays: 2, codAvailable: false },
+    { country: "GB", postalCode: "SW1A 1AA", city: "London", state: "England", deliveryDays: 3, codAvailable: false },
+    { country: "CA", postalCode: "M5V 3L9", city: "Toronto", state: "Ontario", deliveryDays: 4, codAvailable: false },
+    { country: "AU", postalCode: "2000", city: "Sydney", state: "New South Wales", deliveryDays: 3, codAvailable: false },
+    { country: "IN", postalCode: "400001", city: "Mumbai", state: "Maharashtra", deliveryDays: 2, codAvailable: true },
   ];
 
-  for (const row of pincodes) {
-    await prisma.pincode.upsert({
-      where: { pincode: row.pincode },
+  for (const row of postalCodes) {
+    await prisma.postalCode.upsert({
+      where: { shop_country_postalCode: { shop: "default", country: row.country, postalCode: row.postalCode } },
       update: row,
-      create: row,
+      create: { shop: "default", ...row },
     });
   }
 
