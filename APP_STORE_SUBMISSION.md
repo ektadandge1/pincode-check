@@ -15,8 +15,12 @@ App details: Incode Track adds a product-page delivery availability checker thro
 Feature ideas:
 - Add a postal and ZIP code checker to product pages without theme code edits.
 - Upload serviceable country/postal-code coverage by CSV or enter records manually.
+- Export CSV records, sync from a published Google Sheet CSV URL, and review failed import rows.
 - Show estimated delivery dates using cutoff, weekend, and holiday rules.
 - Display COD availability for each serviceable postal code.
+- Show delivery charges and custom storefront messages.
+- Disable Add to Cart when delivery is unavailable.
+- View privacy-safe delivery lookup analytics.
 - Optionally check selected variant inventory before showing delivery estimates.
 
 Suggested category: Store design or Shipping and delivery, depending on available Partner Dashboard categories.
@@ -53,8 +57,9 @@ Demo store URL: Link directly to a product page where the Delivery availability 
 6. Save the app block on the product template.
 7. Open a product page on the storefront.
 8. Select `United States`, enter `10001`, and confirm the app shows a successful delivery estimate.
-9. Enter an invalid postal code like `123` and confirm the app shows a validation message.
-10. Optional: enable inventory-aware delivery estimates and test a selected product variant.
+9. Enter an unavailable postal code and confirm the app shows the unavailable message.
+10. Optional: enable Add-to-Cart blocking and confirm the add button disables after an unavailable lookup.
+11. Open Analytics and confirm the lookup was recorded without customer personal data.
 
 ## Required Dashboard Items
 

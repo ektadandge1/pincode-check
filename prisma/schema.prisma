@@ -44,6 +44,11 @@ model PostalCode {
   serviceable   Boolean  @default(true)
   deliveryDays  Int
   codAvailable  Boolean  @default(false)
+  deliveryCharge Float?
+  currency      String?
+  sameDayAvailable Boolean @default(false)
+  nextDayAvailable Boolean @default(false)
+  expressAvailable Boolean @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -62,6 +67,59 @@ model DeliverySetting {
   courierEnabled    Boolean  @default(false)
   dbFallbackEnabled Boolean  @default(true)
   inventoryAwareEnabled Boolean @default(false)
+  disableAddToCart  Boolean  @default(false)
+  successMessage    String   @default("Delivery by {date}. {cod_message}{delivery_charge_message}")
+  unavailableMessage String  @default("Sorry, delivery is not available for this postal code.")
+  codAvailableMessage String @default("COD available.")
+  codUnavailableMessage String @default("Prepaid only.")
+  deliveryChargeMessage String @default(" Delivery charge: {currency}{delivery_charge}.")
+  googleSheetCsvUrl String?
+  lastGoogleSheetSyncAt DateTime?
+  lastGoogleSheetSyncStatus String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+model ImportJob {
+  id           Int      @id @default(autoincrement())
+  shop         String
+  source       String
+  status       String
+  totalRows    Int      @default(0)
+  successRows  Int      @default(0)
+  failedRows   Int      @default(0)
+  errorSummary String?
+  createdAt    DateTime @default(now())
+
+  @@index([shop, createdAt])
+}
+
+model ImportError {
+  id          Int      @id @default(autoincrement())
+  importJobId Int
+  rowNumber   Int
+  rawRow      String
+  reason      String
+  createdAt   DateTime @default(now())
+
+  @@index([importJobId])
+}
+
+model PostalCodeSearchEvent {
+  id           Int      @id @default(autoincrement())
+  shop         String
+  country      String
+  postalCode   String
+  productId    String?
+  variantId    String?
+  city         String?
+  state        String?
+  available    Boolean
+  codAvailable Boolean?
+  deliveryDays Int?
+  source       String
+  createdAt    DateTime @default(now())
+
+  @@index([shop, createdAt])
+  @@index([shop, country, postalCode])
 }

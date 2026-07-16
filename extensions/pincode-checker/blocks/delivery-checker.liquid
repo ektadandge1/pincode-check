@@ -166,6 +166,39 @@
     const button = document.getElementById('pin-btn-{{ block_id }}');
     const result = document.getElementById('pin-result-{{ block_id }}');
     const cod = root.dataset.cod === 'true';
+    const storageKey = 'incodeTrackDeliveryCheck';
+
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(storageKey) || '{}');
+      if (saved.country && countrySelect) countrySelect.value = saved.country;
+      if (saved.postalCode && pinInput) pinInput.value = saved.postalCode;
+    } catch (error) {}
+
+    const getAddToCartButtons = () => Array.from(document.querySelectorAll([
+      'form[action*="/cart/add"] button[type="submit"]',
+      'form[data-type="add-to-cart-form"] button[type="submit"]',
+      'button[name="add"]',
+      '.product-form__submit'
+    ].join(',')));
+
+    const setAddToCartDisabled = (disabled) => {
+      getAddToCartButtons().forEach((submitButton) => {
+        if (!submitButton.dataset.incodeOriginalDisabled) {
+          submitButton.dataset.incodeOriginalDisabled = submitButton.disabled ? 'true' : 'false';
+        }
+        if (disabled) {
+          submitButton.disabled = true;
+          submitButton.setAttribute('aria-disabled', 'true');
+          return;
+        }
+        submitButton.disabled = submitButton.dataset.incodeOriginalDisabled === 'true';
+        if (submitButton.disabled) {
+          submitButton.setAttribute('aria-disabled', 'true');
+        } else {
+          submitButton.removeAttribute('aria-disabled');
+        }
+      });
+    };
 
     const toVariantGid = (value) => {
       const raw = String(value || '').trim();
@@ -248,6 +281,7 @@
 
       if (!validate(country, pin)) {
         setResult('Please enter a valid postal code.', 'error');
+        setAddToCartDisabled(false);
         return;
       }
 
@@ -278,9 +312,15 @@
           return;
         }
 
+        try {
+          window.localStorage.setItem(storageKey, JSON.stringify({ country: country, postalCode: pin }));
+        } catch (error) {}
+
         setResult(data.message || 'Unable to check this postal code right now.', data.available ? 'success' : 'error');
+        setAddToCartDisabled(Boolean(data.disable_add_to_cart && !data.available));
       } catch (error) {
         setResult('Network issue while checking this postal code. Please retry.', 'error');
+        setAddToCartDisabled(false);
       } finally {
         button.disabled = false;
       }

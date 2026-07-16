@@ -33,6 +33,12 @@ type DeliveryResult = {
   delivery_days?: number;
   estimated_date?: string;
   cod_available?: boolean;
+  delivery_charge?: number | null;
+  currency?: string | null;
+  same_day_available?: boolean;
+  next_day_available?: boolean;
+  express_available?: boolean;
+  disable_add_to_cart?: boolean;
   message: string;
 };
 
@@ -53,6 +59,12 @@ const DEFAULT_SETTINGS = {
   inventoryAwareEnabled: false,
   holidayCsv: "",
   weekendDaysCsv: "0",
+  disableAddToCart: false,
+  successMessage: "Delivery by {date}. {cod_message}{delivery_charge_message}",
+  unavailableMessage: "Sorry, delivery is not available for this postal code.",
+  codAvailableMessage: "COD available.",
+  codUnavailableMessage: "Prepaid only.",
+  deliveryChargeMessage: " Delivery charge: {currency}{delivery_charge}.",
 };
 
 const CHECK_CACHE_TTL_MS = 60_000;
@@ -85,7 +97,40 @@ async function getShopSettings(shop?: string) {
     inventoryAwareEnabled: record.inventoryAwareEnabled,
     holidayCsv: record.holidaysCsv,
     weekendDaysCsv: record.weekendDaysCsv,
+    disableAddToCart: record.disableAddToCart,
+    successMessage: record.successMessage,
+    unavailableMessage: record.unavailableMessage,
+    codAvailableMessage: record.codAvailableMessage,
+    codUnavailableMessage: record.codUnavailableMessage,
+    deliveryChargeMessage: record.deliveryChargeMessage,
   };
+}
+
+function formatTemplate(template: string, values: Record<string, string | number | null | undefined>): string {
+  return template.replace(/\{([a-z_]+)\}/g, (_match, key: string) => {
+    const value = values[key];
+    return value === null || value === undefined ? "" : String(value);
+  }).replace(/\s+/g, " ").trim();
+}
+
+async function trackSearchEvent(input: CheckDeliveryInput, result: DeliveryResult) {
+  if (!input.shop) return;
+  try {
+    await prisma.postalCodeSearchEvent.create({
+      data: {
+        shop: input.shop,
+        country: result.country,
+        postalCode: result.postal_code,
+        variantId: input.variantId,
+        available: result.available,
+        codAvailable: result.cod_available,
+        deliveryDays: result.delivery_days,
+        source: result.source,
+      },
+    });
+  } catch {
+    // Analytics must never block a shopper-facing delivery check.
+  }
 }
 
 async function checkVariantSellableQuantity(
@@ -250,6 +295,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const cacheKey = [input.shop ?? "default", country, normalizedPostalCode, input.codRequested ? "cod" : "prepaid"].join("|");
   const cached = !settings.inventoryAwareEnabled ? checkCache.get(cacheKey) : undefined;
   if (cached && cached.expiresAt > Date.now()) {
+    await trackSearchEvent(input, cached.result);
     return cached.result;
   }
 
@@ -301,6 +347,11 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   let deliveryDays: number | null = null;
   let codAvailable = false;
   let courierName: string | undefined;
+  let deliveryCharge: number | null = null;
+  let currency: string | null = null;
+  let sameDayAvailable = false;
+  let nextDayAvailable = false;
+  let expressAvailable = false;
 
   if (settings.courierEnabled && country === "IN") {
     const courier = await resolveCourierEstimate(
@@ -327,6 +378,11 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       source = "db_fallback";
       deliveryDays = postalCode.deliveryDays;
       codAvailable = postalCode.codAvailable;
+      deliveryCharge = postalCode.deliveryCharge;
+      currency = postalCode.currency;
+      sameDayAvailable = postalCode.sameDayAvailable;
+      nextDayAvailable = postalCode.nextDayAvailable;
+      expressAvailable = postalCode.expressAvailable;
     }
   }
 
@@ -336,11 +392,16 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       country,
       postal_code: normalizedPostalCode,
       source: "none",
-      message: "Sorry, delivery is not available for this postal code.",
+      disable_add_to_cart: settings.disableAddToCart,
+      message: formatTemplate(settings.unavailableMessage, {
+        country,
+        postal_code: normalizedPostalCode,
+      }),
     } satisfies DeliveryResult;
     if (!settings.inventoryAwareEnabled) {
       checkCache.set(cacheKey, { expiresAt: Date.now() + CHECK_CACHE_TTL_MS, result });
     }
+    await trackSearchEvent(input, result);
     return result;
   }
 
@@ -353,7 +414,23 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
 
   const estimatedDateIso = toYyyyMmDd(estimatedDate);
   const prettyDate = formatReadableDate(estimatedDate);
-  const codLabel = codAvailable ? "COD available" : "Prepaid only";
+  const codMessage = codAvailable ? settings.codAvailableMessage : settings.codUnavailableMessage;
+  const deliveryChargeMessage = deliveryCharge !== null && currency
+    ? formatTemplate(settings.deliveryChargeMessage, {
+        currency,
+        delivery_charge: deliveryCharge,
+      })
+    : "";
+  const message = formatTemplate(settings.successMessage, {
+    date: prettyDate,
+    days: deliveryDays,
+    country,
+    postal_code: normalizedPostalCode,
+    cod_message: codMessage,
+    delivery_charge_message: deliveryChargeMessage,
+    delivery_charge: deliveryCharge,
+    currency,
+  });
 
   const result = {
     available: true,
@@ -365,13 +442,20 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     delivery_days: deliveryDays,
     estimated_date: estimatedDateIso,
     cod_available: codAvailable,
-    message: `Delivery by ${prettyDate}. ${codLabel}.`,
+    delivery_charge: deliveryCharge,
+    currency,
+    same_day_available: sameDayAvailable,
+    next_day_available: nextDayAvailable,
+    express_available: expressAvailable,
+    disable_add_to_cart: settings.disableAddToCart,
+    message,
   };
 
   if (!settings.inventoryAwareEnabled) {
     checkCache.set(cacheKey, { expiresAt: Date.now() + CHECK_CACHE_TTL_MS, result });
   }
 
+  await trackSearchEvent(input, result);
   return result;
 }
 

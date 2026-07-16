@@ -9,7 +9,9 @@ Incode Track is a Shopify public app that adds a country-aware postal and ZIP co
 - App proxy endpoint for storefront delivery availability requests.
 - Shop-scoped, country-scoped postal code records and delivery settings.
 - CSV import and manual postal code management.
+- CSV export, Google Sheet manual sync, and import validation reports.
 - Holiday, weekend, cutoff, COD, and inventory-aware delivery rules.
+- Delivery charges, custom storefront messages, Add-to-Cart blocking, and basic lookup analytics.
 - Mandatory Shopify privacy compliance webhooks.
 
 ## Shopify Requirements Covered Locally
@@ -48,10 +50,10 @@ Incode Track is a Shopify public app that adds a country-aware postal and ZIP co
 Supported columns:
 
 ```csv
-country,postal_code,delivery_days,serviceable,cod_available,city,state,zone
-US,10001,2,true,false,New York,New York,metro
-GB,SW1A 1AA,3,true,false,London,England,metro
-IN,400001,2,true,true,Mumbai,Maharashtra,metro
+country,postal_code,delivery_days,serviceable,cod_available,delivery_charge,currency,city,state,zone,same_day,next_day,express
+US,10001,2,true,false,8,USD,New York,New York,metro,false,true,true
+GB,SW1A 1AA,3,true,false,5,GBP,London,England,metro,false,false,true
+IN,400001,2,true,true,50,INR,Mumbai,Maharashtra,metro,false,true,true
 ```
 
 `country`, `postal_code`, and `delivery_days` are required. Other columns are optional. Legacy India CSVs that use `pincode` are still accepted and treated as `IN`.

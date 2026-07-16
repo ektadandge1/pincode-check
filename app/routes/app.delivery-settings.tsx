@@ -20,7 +20,10 @@ import {
 } from "@shopify/polaris";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { parseCsv } from "../utils/csv.server";
+import {
+  fetchGoogleSheetCsv,
+  importPostalCodesFromCsv,
+} from "../services/postal-code-importer.server";
 import {
   normalizeCountryCode,
   normalizePostalCode,
@@ -83,6 +86,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     take: 150,
   });
 
+  const recentImports = await prisma.importJob.findMany({
+    where: { shop },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
+
   return {
     shop,
     courierIntegrationAvailable: hasCourierIntegrationConfig(),
@@ -95,8 +104,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       weekendDaysCsv: "0",
       courierTimeoutMs: 2000,
       retryCount: 1,
+      disableAddToCart: false,
+      successMessage: "Delivery by {date}. {cod_message}{delivery_charge_message}",
+      unavailableMessage: "Sorry, delivery is not available for this postal code.",
+      codAvailableMessage: "COD available.",
+      codUnavailableMessage: "Prepaid only.",
+      deliveryChargeMessage: " Delivery charge: {currency}{delivery_charge}.",
+      googleSheetCsvUrl: "",
+      lastGoogleSheetSyncAt: null,
+      lastGoogleSheetSyncStatus: null,
     },
     samplePostalCodes: rows,
+    recentImports,
   };
 }
 
@@ -113,10 +132,16 @@ export async function action({ request }: ActionFunctionArgs) {
       : false;
     const dbFallbackEnabled = parseBool(formData.get("dbFallbackEnabled"));
     const inventoryAwareEnabled = parseBool(formData.get("inventoryAwareEnabled"));
+    const disableAddToCart = parseBool(formData.get("disableAddToCart"));
     const weekendDaysCsv = String(formData.get("weekendDaysCsv") ?? "0").trim() || "0";
     const courierTimeoutMs = Math.max(500, Number(formData.get("courierTimeoutMs") ?? 2000));
     const retryCount = Math.max(0, Math.min(3, Number(formData.get("retryCount") ?? 1)));
     const holidaysCsv = normalizeHolidayList(String(formData.get("holidaysCsv") ?? ""));
+    const successMessage = String(formData.get("successMessage") ?? "").trim();
+    const unavailableMessage = String(formData.get("unavailableMessage") ?? "").trim();
+    const codAvailableMessage = String(formData.get("codAvailableMessage") ?? "").trim();
+    const codUnavailableMessage = String(formData.get("codUnavailableMessage") ?? "").trim();
+    const deliveryChargeMessage = String(formData.get("deliveryChargeMessage") ?? "").trim();
 
     await prisma.deliverySetting.upsert({
       where: { shop },
@@ -126,24 +151,90 @@ export async function action({ request }: ActionFunctionArgs) {
         courierEnabled,
         dbFallbackEnabled,
         inventoryAwareEnabled,
+        disableAddToCart,
         weekendDaysCsv,
         courierTimeoutMs,
         retryCount,
         holidaysCsv,
+        successMessage,
+        unavailableMessage,
+        codAvailableMessage,
+        codUnavailableMessage,
+        deliveryChargeMessage,
       },
       update: {
         cutoffHour24,
         courierEnabled,
         dbFallbackEnabled,
         inventoryAwareEnabled,
+        disableAddToCart,
         weekendDaysCsv,
         courierTimeoutMs,
         retryCount,
         holidaysCsv,
+        successMessage,
+        unavailableMessage,
+        codAvailableMessage,
+        codUnavailableMessage,
+        deliveryChargeMessage,
       },
     });
 
     return { ok: true, message: "Settings saved." } satisfies ActionData;
+  }
+
+  if (intent === "save_google_sheet") {
+    const googleSheetCsvUrl = String(formData.get("googleSheetCsvUrl") ?? "").trim() || null;
+    if (googleSheetCsvUrl) {
+      try {
+        const url = new URL(googleSheetCsvUrl);
+        if (url.protocol !== "https:" || !["docs.google.com", "drive.google.com"].includes(url.hostname)) {
+          return { ok: false, message: "Use a published HTTPS Google Sheets CSV URL." } satisfies ActionData;
+        }
+      } catch {
+        return { ok: false, message: "Enter a valid Google Sheets CSV URL." } satisfies ActionData;
+      }
+    }
+
+    await prisma.deliverySetting.upsert({
+      where: { shop },
+      update: { googleSheetCsvUrl },
+      create: { shop, googleSheetCsvUrl },
+    });
+
+    return { ok: true, message: "Google Sheet URL saved." } satisfies ActionData;
+  }
+
+  if (intent === "sync_google_sheet") {
+    const setting = await prisma.deliverySetting.findUnique({ where: { shop } });
+    if (!setting?.googleSheetCsvUrl) {
+      return { ok: false, message: "Save a Google Sheet CSV URL first." } satisfies ActionData;
+    }
+
+    try {
+      const csv = await fetchGoogleSheetCsv(setting.googleSheetCsvUrl);
+      const result = await importPostalCodesFromCsv(shop, csv, "google_sheet");
+      await prisma.deliverySetting.update({
+        where: { shop },
+        data: {
+          lastGoogleSheetSyncAt: new Date(),
+          lastGoogleSheetSyncStatus: result.status,
+        },
+      });
+      return {
+        ok: result.status !== "failed",
+        message: `Google Sheet sync ${result.status}. Success: ${result.successRows}, Failed: ${result.failedRows}.`,
+      } satisfies ActionData;
+    } catch (error) {
+      await prisma.deliverySetting.update({
+        where: { shop },
+        data: {
+          lastGoogleSheetSyncAt: new Date(),
+          lastGoogleSheetSyncStatus: "failed",
+        },
+      });
+      return { ok: false, message: error instanceof Error ? error.message : "Google Sheet sync failed." } satisfies ActionData;
+    }
   }
 
   if (intent === "add_holiday") {
@@ -201,19 +292,56 @@ export async function action({ request }: ActionFunctionArgs) {
     const city = String(formData.get("city") ?? "").trim() || null;
     const state = String(formData.get("state") ?? "").trim() || null;
     const zone = String(formData.get("zone") ?? "").trim() || null;
+    const deliveryChargeRaw = String(formData.get("deliveryCharge") ?? "").trim();
+    const deliveryCharge = deliveryChargeRaw ? Number(deliveryChargeRaw) : null;
+    const currency = String(formData.get("currency") ?? "").trim().toUpperCase() || null;
+    const sameDayAvailable = parseBool(formData.get("sameDayAvailable"));
+    const nextDayAvailable = parseBool(formData.get("nextDayAvailable"));
+    const expressAvailable = parseBool(formData.get("expressAvailable"));
 
     if (!validatePostalCode(country, postalCode)) {
       return { ok: false, message: "Please enter a valid postal code." } satisfies ActionData;
     }
 
-    if (!Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
-      return { ok: false, message: "Delivery days should be between 0 and 30." } satisfies ActionData;
+    if (!Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 60) {
+      return { ok: false, message: "Delivery days should be between 0 and 60." } satisfies ActionData;
+    }
+
+    if (deliveryCharge !== null && (!Number.isFinite(deliveryCharge) || deliveryCharge < 0 || !currency)) {
+      return { ok: false, message: "Delivery charge requires a positive amount and 3-letter currency." } satisfies ActionData;
     }
 
     await prisma.postalCode.upsert({
       where: { shop_country_postalCode: { shop, country, postalCode } },
-      create: { shop, country, postalCode, deliveryDays, serviceable, codAvailable, city, state, zone },
-      update: { deliveryDays, serviceable, codAvailable, city, state, zone },
+      create: {
+        shop,
+        country,
+        postalCode,
+        deliveryDays,
+        serviceable,
+        codAvailable,
+        deliveryCharge,
+        currency,
+        sameDayAvailable,
+        nextDayAvailable,
+        expressAvailable,
+        city,
+        state,
+        zone,
+      },
+      update: {
+        deliveryDays,
+        serviceable,
+        codAvailable,
+        deliveryCharge,
+        currency,
+        sameDayAvailable,
+        nextDayAvailable,
+        expressAvailable,
+        city,
+        state,
+        zone,
+      },
     });
 
     return { ok: true, message: "Postal code saved." } satisfies ActionData;
@@ -225,46 +353,16 @@ export async function action({ request }: ActionFunctionArgs) {
       return { ok: false, message: "Please upload a CSV file." } satisfies ActionData;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      return { ok: false, message: "CSV should be smaller than 2MB." } satisfies ActionData;
+    if (file.size > 8 * 1024 * 1024) {
+      return { ok: false, message: "CSV should be smaller than 8MB." } satisfies ActionData;
     }
 
     const text = await file.text();
-    const rows = parseCsv(text);
-    if (rows.length === 0) {
-      return { ok: false, message: "CSV has no data rows." } satisfies ActionData;
-    }
-
-    let success = 0;
-    let failed = 0;
-
-    for (const row of rows.slice(0, 10000)) {
-      const hasLegacyPincodeColumn = typeof row.pincode === "string" && !row.country;
-      const country = normalizeCountryCode(row.country ?? (hasLegacyPincodeColumn ? "IN" : "US"));
-      const postalCode = normalizePostalCode(country, String(row.postal_code ?? row.postalcode ?? row.pincode ?? ""));
-      const deliveryDays = Number(row.delivery_days ?? row.deliverydays ?? "");
-      const serviceable = String(row.serviceable ?? "true").toLowerCase() !== "false";
-      const codAvailable = String(row.cod_available ?? row.codavailable ?? "false").toLowerCase() === "true";
-      const city = String(row.city ?? "").trim() || null;
-      const state = String(row.state ?? "").trim() || null;
-      const zone = String(row.zone ?? "").trim() || null;
-
-      if (!validatePostalCode(country, postalCode) || !Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
-        failed += 1;
-        continue;
-      }
-
-      await prisma.postalCode.upsert({
-        where: { shop_country_postalCode: { shop, country, postalCode } },
-        create: { shop, country, postalCode, deliveryDays, serviceable, codAvailable, city, state, zone },
-        update: { deliveryDays, serviceable, codAvailable, city, state, zone },
-      });
-      success += 1;
-    }
+    const result = await importPostalCodesFromCsv(shop, text, "csv");
 
     return {
-      ok: true,
-      message: `CSV import completed. Success: ${success}, Failed: ${failed}.`,
+      ok: result.status !== "failed",
+      message: `CSV import ${result.status}. Success: ${result.successRows}, Failed: ${result.failedRows}.`,
     } satisfies ActionData;
   }
 
@@ -279,42 +377,15 @@ export async function action({ request }: ActionFunctionArgs) {
       .map((line) => line.trim())
       .filter(Boolean)
       .slice(0, 1000);
-
-    let success = 0;
-    let failed = 0;
-
-    for (const line of lines) {
-      const parts = line.split(",").map((x) => x.trim());
-      const isLegacyRow = parts.length === 7;
-      const [countryRaw, postalCodeRaw, daysRaw, serviceableRaw, codRaw, cityRaw, stateRaw, zoneRaw] = isLegacyRow
-        ? ["IN", ...parts]
-        : parts;
-
-      const country = normalizeCountryCode(countryRaw);
-      const postalCode = normalizePostalCode(country, postalCodeRaw ?? "");
-      const deliveryDays = Number(daysRaw ?? "");
-      const serviceable = String(serviceableRaw ?? "true").toLowerCase() !== "false";
-      const codAvailable = String(codRaw ?? "false").toLowerCase() === "true";
-      const city = cityRaw || null;
-      const state = stateRaw || null;
-      const zone = zoneRaw || null;
-
-      if (!validatePostalCode(country, postalCode) || !Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 30) {
-        failed += 1;
-        continue;
-      }
-
-      await prisma.postalCode.upsert({
-        where: { shop_country_postalCode: { shop, country, postalCode } },
-        create: { shop, country, postalCode, deliveryDays, serviceable, codAvailable, city, state, zone },
-        update: { deliveryDays, serviceable, codAvailable, city, state, zone },
-      });
-      success += 1;
-    }
+    const csv = [
+      "country,postal_code,delivery_days,serviceable,cod_available,city,state,zone,delivery_charge,currency,same_day,next_day,express",
+      ...lines,
+    ].join("\n");
+    const result = await importPostalCodesFromCsv(shop, csv, "csv");
 
     return {
-      ok: true,
-      message: `Manual import completed. Success: ${success}, Failed: ${failed}.`,
+      ok: result.status !== "failed",
+      message: `Manual import ${result.status}. Success: ${result.successRows}, Failed: ${result.failedRows}.`,
     } satisfies ActionData;
   }
 
@@ -334,7 +405,14 @@ export default function DeliverySettingsPage() {
     courierEnabled: data.courierIntegrationAvailable && data.setting.courierEnabled,
     dbFallbackEnabled: data.setting.dbFallbackEnabled,
     inventoryAwareEnabled: data.setting.inventoryAwareEnabled,
+    disableAddToCart: data.setting.disableAddToCart,
+    successMessage: data.setting.successMessage,
+    unavailableMessage: data.setting.unavailableMessage,
+    codAvailableMessage: data.setting.codAvailableMessage,
+    codUnavailableMessage: data.setting.codUnavailableMessage,
+    deliveryChargeMessage: data.setting.deliveryChargeMessage,
   });
+  const [googleSheetCsvUrl, setGoogleSheetCsvUrl] = useState(data.setting.googleSheetCsvUrl ?? "");
   const [holidayDate, setHolidayDate] = useState("");
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvRejected, setCsvRejected] = useState(false);
@@ -345,8 +423,13 @@ export default function DeliverySettingsPage() {
     zone: "",
     city: "",
     state: "",
+    deliveryCharge: "",
+    currency: "",
     serviceable: true,
     codAvailable: false,
+    sameDayAvailable: false,
+    nextDayAvailable: false,
+    expressAvailable: false,
   });
   const [manualRows, setManualRows] = useState("");
   const holidays = data.setting.holidaysCsv
@@ -358,10 +441,19 @@ export default function DeliverySettingsPage() {
     row.country,
     row.postalCode,
     row.deliveryDays,
-    row.serviceable ? <Badge tone="success">Yes</Badge> : <Badge tone="critical">No</Badge>,
-    row.codAvailable ? <Badge tone="success">Yes</Badge> : <Badge>No</Badge>,
+    row.serviceable ? <Badge key={`${row.id}-serviceable`} tone="success">Yes</Badge> : <Badge key={`${row.id}-serviceable`} tone="critical">No</Badge>,
+    row.codAvailable ? <Badge key={`${row.id}-cod`} tone="success">Yes</Badge> : <Badge key={`${row.id}-cod`}>No</Badge>,
+    row.deliveryCharge !== null && row.deliveryCharge !== undefined ? `${row.currency ?? ""} ${row.deliveryCharge}`.trim() : "-",
     row.city ?? "-",
     row.state ?? "-",
+  ]);
+  const importRows = data.recentImports.map((job) => [
+    new Date(job.createdAt).toLocaleString(),
+    job.source === "google_sheet" ? "Google Sheet" : "CSV",
+    <Badge key={`${job.id}-status`} tone={job.status === "completed" ? "success" : job.status === "partial" ? "attention" : "critical"}>{job.status}</Badge>,
+    job.totalRows,
+    job.successRows,
+    job.failedRows > 0 ? <Button key={`${job.id}-download`} url={`/app/import-errors/${job.id}`} size="slim">Download</Button> : "-",
   ]);
 
   const submitCsvImport = () => {
@@ -510,6 +602,65 @@ export default function DeliverySettingsPage() {
                         }))
                       }
                     />
+                    <Checkbox
+                      label="Disable Add to Cart when delivery is unavailable"
+                      name="disableAddToCart"
+                      checked={settings.disableAddToCart}
+                      helpText="The storefront widget disables common product form buttons after an unavailable lookup."
+                      onChange={(checked) =>
+                        setSettings((current) => ({ ...current, disableAddToCart: checked }))
+                      }
+                    />
+
+                    <TextField
+                      label="Success message template"
+                      name="successMessage"
+                      value={settings.successMessage}
+                      onChange={(value) =>
+                        setSettings((current) => ({ ...current, successMessage: value }))
+                      }
+                      autoComplete="off"
+                      helpText="Variables: {date}, {days}, {cod_message}, {delivery_charge_message}, {country}, {postal_code}."
+                    />
+                    <TextField
+                      label="Unavailable message"
+                      name="unavailableMessage"
+                      value={settings.unavailableMessage}
+                      onChange={(value) =>
+                        setSettings((current) => ({ ...current, unavailableMessage: value }))
+                      }
+                      autoComplete="off"
+                    />
+                    <FormLayout.Group condensed>
+                      <TextField
+                        label="COD available message"
+                        name="codAvailableMessage"
+                        value={settings.codAvailableMessage}
+                        onChange={(value) =>
+                          setSettings((current) => ({ ...current, codAvailableMessage: value }))
+                        }
+                        autoComplete="off"
+                      />
+                      <TextField
+                        label="COD unavailable message"
+                        name="codUnavailableMessage"
+                        value={settings.codUnavailableMessage}
+                        onChange={(value) =>
+                          setSettings((current) => ({ ...current, codUnavailableMessage: value }))
+                        }
+                        autoComplete="off"
+                      />
+                    </FormLayout.Group>
+                    <TextField
+                      label="Delivery charge message"
+                      name="deliveryChargeMessage"
+                      value={settings.deliveryChargeMessage}
+                      onChange={(value) =>
+                        setSettings((current) => ({ ...current, deliveryChargeMessage: value }))
+                      }
+                      autoComplete="off"
+                      helpText="Shown only when a delivery charge exists. Variables: {currency}, {delivery_charge}."
+                    />
 
                     <Button submit variant="primary" loading={isSaving}>
                       Save settings
@@ -526,7 +677,8 @@ export default function DeliverySettingsPage() {
                 </Text>
                 <Text as="p" tone="subdued">
                   CSV columns: country, postal_code, delivery_days,
-                  serviceable, cod_available, city, state, zone.
+                  serviceable, cod_available, delivery_charge, currency, city,
+                  state, zone, same_day, next_day, express.
                 </Text>
                 <DropZone
                   accept=".csv,text/csv"
@@ -557,7 +709,61 @@ export default function DeliverySettingsPage() {
                   >
                     Import CSV
                   </Button>
+                  <Button url="/app/delivery-export">Export CSV</Button>
                 </InlineStack>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Google Sheet sync
+                </Text>
+                <Text as="p" tone="subdued">
+                  Paste a published Google Sheets CSV URL, then sync rows using the same import validation as CSV upload.
+                </Text>
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="save_google_sheet" />
+                  <FormLayout>
+                    <TextField
+                      label="Google Sheet CSV URL"
+                      name="googleSheetCsvUrl"
+                      value={googleSheetCsvUrl}
+                      onChange={setGoogleSheetCsvUrl}
+                      autoComplete="off"
+                      placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv"
+                    />
+                    <InlineStack gap="300">
+                      <Button submit loading={isSaving}>Save URL</Button>
+                    </InlineStack>
+                  </FormLayout>
+                </fetcher.Form>
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="sync_google_sheet" />
+                  <Button submit variant="primary" loading={isSaving}>Sync now</Button>
+                </fetcher.Form>
+                <Text as="p" tone="subdued">
+                  Last sync: {data.setting.lastGoogleSheetSyncAt ? new Date(data.setting.lastGoogleSheetSyncAt).toLocaleString() : "Never"}
+                  {data.setting.lastGoogleSheetSyncStatus ? ` (${data.setting.lastGoogleSheetSyncStatus})` : ""}
+                </Text>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Import history
+                </Text>
+                {importRows.length > 0 ? (
+                  <DataTable
+                    columnContentTypes={["text", "text", "text", "numeric", "numeric", "text"]}
+                    headings={["Date", "Source", "Status", "Rows", "Success", "Failed rows"]}
+                    rows={importRows}
+                    increasedTableDensity
+                  />
+                ) : (
+                  <Text as="p" tone="subdued">No imports yet.</Text>
+                )}
               </BlockStack>
             </Card>
 
@@ -639,6 +845,32 @@ export default function DeliverySettingsPage() {
                       />
                     </FormLayout.Group>
 
+                    <FormLayout.Group condensed>
+                      <TextField
+                        label="Delivery charge"
+                        name="deliveryCharge"
+                        type="number"
+                        min={0}
+                        value={postalCodeForm.deliveryCharge}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, deliveryCharge: value }))
+                        }
+                        placeholder="50"
+                        autoComplete="off"
+                      />
+                      <TextField
+                        label="Currency"
+                        name="currency"
+                        value={postalCodeForm.currency}
+                        onChange={(value) =>
+                          setPostalCodeForm((current) => ({ ...current, currency: value.toUpperCase() }))
+                        }
+                        placeholder="INR"
+                        maxLength={3}
+                        autoComplete="off"
+                      />
+                    </FormLayout.Group>
+
                     <Checkbox
                       label="Serviceable"
                       name="serviceable"
@@ -653,6 +885,30 @@ export default function DeliverySettingsPage() {
                       checked={postalCodeForm.codAvailable}
                       onChange={(checked) =>
                         setPostalCodeForm((current) => ({ ...current, codAvailable: checked }))
+                      }
+                    />
+                    <Checkbox
+                      label="Same-day delivery available"
+                      name="sameDayAvailable"
+                      checked={postalCodeForm.sameDayAvailable}
+                      onChange={(checked) =>
+                        setPostalCodeForm((current) => ({ ...current, sameDayAvailable: checked }))
+                      }
+                    />
+                    <Checkbox
+                      label="Next-day delivery available"
+                      name="nextDayAvailable"
+                      checked={postalCodeForm.nextDayAvailable}
+                      onChange={(checked) =>
+                        setPostalCodeForm((current) => ({ ...current, nextDayAvailable: checked }))
+                      }
+                    />
+                    <Checkbox
+                      label="Express delivery available"
+                      name="expressAvailable"
+                      checked={postalCodeForm.expressAvailable}
+                      onChange={(checked) =>
+                        setPostalCodeForm((current) => ({ ...current, expressAvailable: checked }))
                       }
                     />
 
@@ -681,9 +937,9 @@ export default function DeliverySettingsPage() {
                       monospaced
                       autoComplete="off"
                       placeholder={
-                        "US,10001,2,true,true,New York,New York,metro\nGB,SW1A 1AA,3,true,false,London,England,metro"
+                        "US,10001,2,true,true,New York,New York,metro,8,USD,false,true,true\nGB,SW1A 1AA,3,true,false,London,England,metro,5,GBP,false,false,true"
                       }
-                      helpText="One row per line, comma separated: country, postal_code, delivery_days, serviceable, cod_available, city, state, zone."
+                      helpText="One row per line: country, postal_code, delivery_days, serviceable, cod_available, city, state, zone, delivery_charge, currency, same_day, next_day, express."
                       requiredIndicator
                     />
                     <Button submit variant="primary" loading={isSaving}>
@@ -700,8 +956,8 @@ export default function DeliverySettingsPage() {
                   Recent records
                 </Text>
                 <DataTable
-                  columnContentTypes={["text", "text", "numeric", "text", "text", "text", "text"]}
-                  headings={["Country", "Postal code", "Days", "Serviceable", "COD", "City", "State"]}
+                  columnContentTypes={["text", "text", "numeric", "text", "text", "text", "text", "text"]}
+                  headings={["Country", "Postal code", "Days", "Serviceable", "COD", "Charge", "City", "State"]}
                   rows={tableRows}
                   increasedTableDensity
                 />

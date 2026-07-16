@@ -27,6 +27,7 @@ export default function App() {
             Home
           </a>
           <a href="/app/delivery-settings">Delivery settings</a>
+          <a href="/app/analytics">Analytics</a>
           <a href="/app/additional">Help</a>
         </NavMenu>
         <Outlet />
