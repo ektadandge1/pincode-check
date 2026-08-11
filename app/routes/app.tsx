@@ -8,12 +8,15 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
+import { type BillingContext, requireActiveBilling } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const activeBilling = await requireActiveBilling(session.shop, billing as unknown as BillingContext, url.pathname);
 
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", activePlan: activeBilling.plan };
 };
 
 export default function App() {
@@ -28,6 +31,7 @@ export default function App() {
           </a>
           <a href="/app/delivery-settings">Delivery settings</a>
           <a href="/app/analytics">Analytics</a>
+          <a href="/app/plans">Plans</a>
           <a href="/app/additional">Help</a>
         </NavMenu>
         <Outlet />

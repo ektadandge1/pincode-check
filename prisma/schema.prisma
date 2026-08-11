@@ -80,6 +80,16 @@ model DeliverySetting {
   updatedAt         DateTime @updatedAt
 }
 
+model AppSubscription {
+  id                Int      @id @default(autoincrement())
+  shop              String   @unique
+  plan              String
+  shopifySubscriptionId String?
+  status            String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 model ImportJob {
   id           Int      @id @default(autoincrement())
   shop         String

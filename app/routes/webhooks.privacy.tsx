@@ -11,6 +11,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       db.importError.deleteMany({ where: { importJobId: { in: importJobs.map((job) => job.id) } } }),
       db.importJob.deleteMany({ where: { shop } }),
       db.postalCodeSearchEvent.deleteMany({ where: { shop } }),
+      db.appSubscription.deleteMany({ where: { shop } }),
       db.postalCode.deleteMany({ where: { shop } }),
       db.deliverySetting.deleteMany({ where: { shop } }),
       db.session.deleteMany({ where: { shop } }),

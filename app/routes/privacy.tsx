@@ -50,6 +50,19 @@ export default function PrivacyPolicy() {
                     Storefront shoppers enter a country and postal code only to receive an
                     immediate delivery availability response.
                   </Text>
+                  <Text as="p">
+                    To help merchants understand delivery-checker usage, the app
+                    can record search analytics such as country, postal code,
+                    whether delivery was available, estimated delivery days,
+                    product ID, variant ID, and timestamp. These events do not
+                    include shopper names or contact details.
+                  </Text>
+                  <Text as="p">
+                    If a merchant imports coverage by CSV or Google Sheet, the app
+                    stores the imported delivery records, validation errors, import
+                    job details, and the Google Sheet CSV URL configured by the
+                    merchant.
+                  </Text>
                 </BlockStack>
 
                 <BlockStack gap="200">
@@ -68,6 +81,12 @@ export default function PrivacyPolicy() {
                     serviceability. If no courier provider is configured, checks
                     use only the merchant&apos;s uploaded postal code records.
                   </Text>
+                  <Text as="p">
+                    The storefront theme app extension may use browser localStorage
+                    to remember the shopper&apos;s last searched country and postal code
+                    on that browser, so the checker can prefill the same values on
+                    later product-page visits.
+                  </Text>
                 </BlockStack>
 
                 <BlockStack gap="200">
@@ -77,9 +96,10 @@ export default function PrivacyPolicy() {
                   <Text as="p">
                     When a shop requests deletion or Shopify sends a shop redact
                     webhook, shop-owned app data is deleted from the app
-                    database. The app also responds to Shopify mandatory privacy
-                    webhooks for customer data requests and customer redaction
-                    requests.
+                    database, including settings, delivery coverage, import jobs,
+                    import errors, analytics, and app subscription cache records.
+                    The app also responds to Shopify mandatory privacy webhooks for
+                    customer data requests and customer redaction requests.
                   </Text>
                 </BlockStack>
 

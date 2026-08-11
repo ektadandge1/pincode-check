@@ -24,6 +24,7 @@ import {
   fetchGoogleSheetCsv,
   importPostalCodesFromCsv,
 } from "../services/postal-code-importer.server";
+import { type BillingContext, getActiveBilling, requireFeature } from "../services/billing.server";
 import {
   normalizeCountryCode,
   normalizePostalCode,
@@ -73,8 +74,9 @@ function hasCourierIntegrationConfig() {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
   const shop = session.shop;
+  const activeBilling = await getActiveBilling(shop, billing as unknown as BillingContext);
 
   const setting =
     (await prisma.deliverySetting.findUnique({ where: { shop } })) ??
@@ -116,12 +118,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     samplePostalCodes: rows,
     recentImports,
+    activePlan: activeBilling.plan,
+    features: activeBilling.features,
   };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
   const shop = session.shop;
+  const activeBilling = await getActiveBilling(shop, billing as unknown as BillingContext);
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
 
@@ -132,16 +137,16 @@ export async function action({ request }: ActionFunctionArgs) {
       : false;
     const dbFallbackEnabled = parseBool(formData.get("dbFallbackEnabled"));
     const inventoryAwareEnabled = parseBool(formData.get("inventoryAwareEnabled"));
-    const disableAddToCart = parseBool(formData.get("disableAddToCart"));
+    const disableAddToCart = activeBilling.features.disableAddToCart ? parseBool(formData.get("disableAddToCart")) : false;
     const weekendDaysCsv = String(formData.get("weekendDaysCsv") ?? "0").trim() || "0";
     const courierTimeoutMs = Math.max(500, Number(formData.get("courierTimeoutMs") ?? 2000));
     const retryCount = Math.max(0, Math.min(3, Number(formData.get("retryCount") ?? 1)));
     const holidaysCsv = normalizeHolidayList(String(formData.get("holidaysCsv") ?? ""));
-    const successMessage = String(formData.get("successMessage") ?? "").trim();
-    const unavailableMessage = String(formData.get("unavailableMessage") ?? "").trim();
-    const codAvailableMessage = String(formData.get("codAvailableMessage") ?? "").trim();
-    const codUnavailableMessage = String(formData.get("codUnavailableMessage") ?? "").trim();
-    const deliveryChargeMessage = String(formData.get("deliveryChargeMessage") ?? "").trim();
+    const successMessage = activeBilling.features.customMessages ? String(formData.get("successMessage") ?? "").trim() : "Delivery by {date}. {cod_message}{delivery_charge_message}";
+    const unavailableMessage = activeBilling.features.customMessages ? String(formData.get("unavailableMessage") ?? "").trim() : "Sorry, delivery is not available for this postal code.";
+    const codAvailableMessage = activeBilling.features.customMessages ? String(formData.get("codAvailableMessage") ?? "").trim() : "COD available.";
+    const codUnavailableMessage = activeBilling.features.customMessages ? String(formData.get("codUnavailableMessage") ?? "").trim() : "Prepaid only.";
+    const deliveryChargeMessage = activeBilling.features.customMessages ? String(formData.get("deliveryChargeMessage") ?? "").trim() : " Delivery charge: {currency}{delivery_charge}.";
 
     await prisma.deliverySetting.upsert({
       where: { shop },
@@ -184,6 +189,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === "save_google_sheet") {
+    requireFeature(activeBilling, "googleSheetSync");
     const googleSheetCsvUrl = String(formData.get("googleSheetCsvUrl") ?? "").trim() || null;
     if (googleSheetCsvUrl) {
       try {
@@ -206,6 +212,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === "sync_google_sheet") {
+    requireFeature(activeBilling, "googleSheetSync");
     const setting = await prisma.deliverySetting.findUnique({ where: { shop } });
     if (!setting?.googleSheetCsvUrl) {
       return { ok: false, message: "Save a Google Sheet CSV URL first." } satisfies ActionData;
@@ -213,7 +220,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     try {
       const csv = await fetchGoogleSheetCsv(setting.googleSheetCsvUrl);
-      const result = await importPostalCodesFromCsv(shop, csv, "google_sheet");
+      const result = await importPostalCodesFromCsv(shop, csv, "google_sheet", {
+        maxRows: activeBilling.features.maxPostalCodes,
+        allowDeliveryCharges: activeBilling.features.deliveryCharges,
+      });
       await prisma.deliverySetting.update({
         where: { shop },
         data: {
@@ -292,9 +302,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const city = String(formData.get("city") ?? "").trim() || null;
     const state = String(formData.get("state") ?? "").trim() || null;
     const zone = String(formData.get("zone") ?? "").trim() || null;
-    const deliveryChargeRaw = String(formData.get("deliveryCharge") ?? "").trim();
+    const deliveryChargeRaw = activeBilling.features.deliveryCharges ? String(formData.get("deliveryCharge") ?? "").trim() : "";
     const deliveryCharge = deliveryChargeRaw ? Number(deliveryChargeRaw) : null;
-    const currency = String(formData.get("currency") ?? "").trim().toUpperCase() || null;
+    const currency = activeBilling.features.deliveryCharges ? String(formData.get("currency") ?? "").trim().toUpperCase() || null : null;
     const sameDayAvailable = parseBool(formData.get("sameDayAvailable"));
     const nextDayAvailable = parseBool(formData.get("nextDayAvailable"));
     const expressAvailable = parseBool(formData.get("expressAvailable"));
@@ -358,7 +368,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const text = await file.text();
-    const result = await importPostalCodesFromCsv(shop, text, "csv");
+    const result = await importPostalCodesFromCsv(shop, text, "csv", {
+      maxRows: activeBilling.features.maxPostalCodes,
+      allowDeliveryCharges: activeBilling.features.deliveryCharges,
+    });
 
     return {
       ok: result.status !== "failed",
@@ -381,7 +394,10 @@ export async function action({ request }: ActionFunctionArgs) {
       "country,postal_code,delivery_days,serviceable,cod_available,city,state,zone,delivery_charge,currency,same_day,next_day,express",
       ...lines,
     ].join("\n");
-    const result = await importPostalCodesFromCsv(shop, csv, "csv");
+    const result = await importPostalCodesFromCsv(shop, csv, "csv", {
+      maxRows: activeBilling.features.maxPostalCodes,
+      allowDeliveryCharges: activeBilling.features.deliveryCharges,
+    });
 
     return {
       ok: result.status !== "failed",
@@ -472,7 +488,7 @@ export default function DeliverySettingsPage() {
     <Page
       title="Delivery settings"
       subtitle="Manage delivery rules, postal code coverage, and storefront estimates."
-      titleMetadata={<Badge tone="info">{`${data.samplePostalCodes.length} records`}</Badge>}
+      titleMetadata={<Badge tone="info">{data.activePlan ? `${data.activePlan} plan` : "No plan"}</Badge>}
     >
       <Layout>
         <Layout.Section>
@@ -480,6 +496,12 @@ export default function DeliverySettingsPage() {
             {fetcher.data ? (
               <Banner tone={fetcher.data.ok ? "success" : "critical"}>
                 {fetcher.data.message}
+              </Banner>
+            ) : null}
+
+            {!data.features.googleSheetSync || !data.features.analytics || !data.features.csvExport ? (
+              <Banner tone="info">
+                Some features are plan-gated. Open Plans to upgrade or change your subscription.
               </Banner>
             ) : null}
 
@@ -616,6 +638,7 @@ export default function DeliverySettingsPage() {
                       label="Success message template"
                       name="successMessage"
                       value={settings.successMessage}
+                      disabled={!data.features.customMessages}
                       onChange={(value) =>
                         setSettings((current) => ({ ...current, successMessage: value }))
                       }
@@ -626,6 +649,7 @@ export default function DeliverySettingsPage() {
                       label="Unavailable message"
                       name="unavailableMessage"
                       value={settings.unavailableMessage}
+                      disabled={!data.features.customMessages}
                       onChange={(value) =>
                         setSettings((current) => ({ ...current, unavailableMessage: value }))
                       }
@@ -636,6 +660,7 @@ export default function DeliverySettingsPage() {
                         label="COD available message"
                         name="codAvailableMessage"
                         value={settings.codAvailableMessage}
+                        disabled={!data.features.customMessages}
                         onChange={(value) =>
                           setSettings((current) => ({ ...current, codAvailableMessage: value }))
                         }
@@ -645,6 +670,7 @@ export default function DeliverySettingsPage() {
                         label="COD unavailable message"
                         name="codUnavailableMessage"
                         value={settings.codUnavailableMessage}
+                        disabled={!data.features.customMessages}
                         onChange={(value) =>
                           setSettings((current) => ({ ...current, codUnavailableMessage: value }))
                         }
@@ -655,6 +681,7 @@ export default function DeliverySettingsPage() {
                       label="Delivery charge message"
                       name="deliveryChargeMessage"
                       value={settings.deliveryChargeMessage}
+                      disabled={!data.features.customMessages}
                       onChange={(value) =>
                         setSettings((current) => ({ ...current, deliveryChargeMessage: value }))
                       }
@@ -709,7 +736,7 @@ export default function DeliverySettingsPage() {
                   >
                     Import CSV
                   </Button>
-                  <Button url="/app/delivery-export">Export CSV</Button>
+                  <Button url={data.features.csvExport ? "/app/delivery-export" : undefined} disabled={!data.features.csvExport}>Export CSV</Button>
                 </InlineStack>
               </BlockStack>
             </Card>
@@ -719,8 +746,8 @@ export default function DeliverySettingsPage() {
                 <Text as="h2" variant="headingMd">
                   Google Sheet sync
                 </Text>
-                <Text as="p" tone="subdued">
-                  Paste a published Google Sheets CSV URL, then sync rows using the same import validation as CSV upload.
+                  <Text as="p" tone="subdued">
+                  Paste a published Google Sheets CSV URL, then sync rows using the same import validation as CSV upload. Requires Starter or Advanced.
                 </Text>
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="save_google_sheet" />
@@ -729,18 +756,19 @@ export default function DeliverySettingsPage() {
                       label="Google Sheet CSV URL"
                       name="googleSheetCsvUrl"
                       value={googleSheetCsvUrl}
+                      disabled={!data.features.googleSheetSync}
                       onChange={setGoogleSheetCsvUrl}
                       autoComplete="off"
                       placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv"
                     />
                     <InlineStack gap="300">
-                      <Button submit loading={isSaving}>Save URL</Button>
+                      <Button submit loading={isSaving} disabled={!data.features.googleSheetSync}>Save URL</Button>
                     </InlineStack>
                   </FormLayout>
                 </fetcher.Form>
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="sync_google_sheet" />
-                  <Button submit variant="primary" loading={isSaving}>Sync now</Button>
+                  <Button submit variant="primary" loading={isSaving} disabled={!data.features.googleSheetSync}>Sync now</Button>
                 </fetcher.Form>
                 <Text as="p" tone="subdued">
                   Last sync: {data.setting.lastGoogleSheetSyncAt ? new Date(data.setting.lastGoogleSheetSyncAt).toLocaleString() : "Never"}
@@ -754,7 +782,9 @@ export default function DeliverySettingsPage() {
                 <Text as="h2" variant="headingMd">
                   Import history
                 </Text>
-                {importRows.length > 0 ? (
+                {!data.features.importReports ? (
+                  <Text as="p" tone="subdued">Import reports require Starter or Advanced.</Text>
+                ) : importRows.length > 0 ? (
                   <DataTable
                     columnContentTypes={["text", "text", "text", "numeric", "numeric", "text"]}
                     headings={["Date", "Source", "Status", "Rows", "Success", "Failed rows"]}
@@ -852,6 +882,7 @@ export default function DeliverySettingsPage() {
                         type="number"
                         min={0}
                         value={postalCodeForm.deliveryCharge}
+                        disabled={!data.features.deliveryCharges}
                         onChange={(value) =>
                           setPostalCodeForm((current) => ({ ...current, deliveryCharge: value }))
                         }
@@ -862,6 +893,7 @@ export default function DeliverySettingsPage() {
                         label="Currency"
                         name="currency"
                         value={postalCodeForm.currency}
+                        disabled={!data.features.deliveryCharges}
                         onChange={(value) =>
                           setPostalCodeForm((current) => ({ ...current, currency: value.toUpperCase() }))
                         }

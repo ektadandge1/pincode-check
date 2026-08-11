@@ -16,6 +16,11 @@ type ImportResult = {
   status: "completed" | "failed" | "partial";
 };
 
+type ImportOptions = {
+  maxRows?: number;
+  allowDeliveryCharges?: boolean;
+};
+
 type ValidatedPostalCodeData = {
   shop: string;
   country: string;
@@ -60,13 +65,14 @@ function getDeliveryDays(row: CsvRow): number {
   return Number(row.delivery_days ?? row.deliverydays ?? "");
 }
 
-function validateRow(row: CsvRow): { ok: true; data: ValidatedPostalCodeData } | { ok: false; reason: string } {
+function validateRow(row: CsvRow, options: ImportOptions = {}): { ok: true; data: ValidatedPostalCodeData } | { ok: false; reason: string } {
   const hasLegacyPincodeColumn = typeof row.pincode === "string" && !row.country;
   const country = normalizeCountryCode(row.country ?? (hasLegacyPincodeColumn ? "IN" : "US"));
   const postalCode = normalizePostalCode(country, getPostalCode(row));
   const deliveryDays = getDeliveryDays(row);
-  const deliveryCharge = parseOptionalMoney(row.delivery_charge ?? row.deliverycharge);
-  const currency = normalizeCurrency(row.currency);
+  const parsedDeliveryCharge = parseOptionalMoney(row.delivery_charge ?? row.deliverycharge);
+  const deliveryCharge = options.allowDeliveryCharges === false ? null : parsedDeliveryCharge;
+  const currency = options.allowDeliveryCharges === false ? null : normalizeCurrency(row.currency);
 
   if (!validatePostalCode(country, postalCode)) {
     return { ok: false, reason: "Invalid postal code for country." };
@@ -76,7 +82,7 @@ function validateRow(row: CsvRow): { ok: true; data: ValidatedPostalCodeData } |
     return { ok: false, reason: "Delivery days must be an integer from 0 to 60." };
   }
 
-  if (Number.isNaN(deliveryCharge)) {
+  if (Number.isNaN(parsedDeliveryCharge)) {
     return { ok: false, reason: "Delivery charge must be a positive number." };
   }
 
@@ -105,8 +111,8 @@ function validateRow(row: CsvRow): { ok: true; data: ValidatedPostalCodeData } |
   };
 }
 
-export async function importPostalCodesFromCsv(shop: string, content: string, source: ImportSource): Promise<ImportResult> {
-  const rows = parseCsv(content).slice(0, 100_000);
+export async function importPostalCodesFromCsv(shop: string, content: string, source: ImportSource, options: ImportOptions = {}): Promise<ImportResult> {
+  const rows = parseCsv(content).slice(0, options.maxRows ?? 100_000);
   const job = await prisma.importJob.create({
     data: {
       shop,
@@ -123,7 +129,7 @@ export async function importPostalCodesFromCsv(shop: string, content: string, so
   const errors: Array<{ importJobId: number; rowNumber: number; rawRow: string; reason: string }> = [];
 
   for (const [index, row] of rows.entries()) {
-    const validation = validateRow(row);
+    const validation = validateRow(row, options);
     if (!validation.ok) {
       failedRows += 1;
       errors.push({

@@ -36,8 +36,8 @@ export default function AdditionalPage() {
                 Setup checklist
               </Text>
               <Text as="p" tone="subdued">
-                Use these steps before submitting the app for Shopify App Store
-                review or enabling it on a production storefront.
+                Use these steps to turn on delivery availability checks for your
+                product pages.
               </Text>
               <List type="number">
                 <List.Item>Configure cutoff time, weekends, and holidays.</List.Item>

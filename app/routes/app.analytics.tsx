@@ -12,6 +12,7 @@ import {
 } from "@shopify/polaris";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { type BillingContext, getActiveBilling, requireFeature } from "../services/billing.server";
 
 function topCounts<T extends string>(values: T[], limit = 10) {
   const counts = new Map<string, number>();
@@ -23,7 +24,9 @@ function topCounts<T extends string>(values: T[], limit = 10) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
+  const activeBilling = await getActiveBilling(session.shop, billing as unknown as BillingContext);
+  requireFeature(activeBilling, "analytics");
   const events = await prisma.postalCodeSearchEvent.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },
