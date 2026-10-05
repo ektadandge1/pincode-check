@@ -1,0 +1,500 @@
+.pin-checker [hidden] { display: none !important; }
+.pin-checker .pin-checker__header {
+display: flex;
+gap: 12px;
+align-items: flex-start;
+margin-bottom: 14px;
+}
+.pin-checker .pin-checker__mark {
+flex: 0 0 auto;
+width: 10px;
+height: 34px;
+border-radius: 999px;
+background: var(--pc-btn);
+}
+.pin-checker .pin-checker__heading {
+margin: 0;
+font: inherit;
+font-size: var(--pc-heading-size);
+font-weight: 700;
+line-height: 1.35;
+color: var(--pc-heading);
+}
+.pin-checker .pin-checker__sub {
+margin: 3px 0 0;
+color: var(--pc-sub);
+font-size: 13px;
+line-height: 1.45;
+}
+.pin-checker .pin-checker__row {
+display: grid;
+grid-template-columns: minmax(110px, 0.8fr) minmax(140px, 1.4fr) auto;
+gap: 10px;
+align-items: end;
+}
+.pin-checker .pin-checker__label {
+position: absolute;
+width: 1px;
+height: 1px;
+overflow: hidden;
+clip: rect(0 0 0 0);
+white-space: nowrap;
+}
+.pin-checker .pin-checker__select,
+.pin-checker .pin-checker__input {
+min-width: 0;
+border: 1px solid var(--pc-input-border);
+border-radius: 10px;
+min-height: 46px;
+padding: 11px 12px;
+font: inherit;
+font-size: 14px;
+background: #ffffff;
+color: #1f2937;
+transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pin-checker .pin-checker__select:focus,
+.pin-checker .pin-checker__input:focus {
+outline: none;
+border-color: var(--pc-focus);
+box-shadow: 0 0 0 3px rgba(43, 38, 64, 0.14);
+}
+.pin-checker .pin-checker__button {
+border: 1px solid transparent;
+border-radius: 10px;
+min-height: 46px;
+padding: 11px 18px;
+background: var(--pc-btn);
+color: var(--pc-btn-text);
+font: inherit;
+font-size: 14px;
+font-weight: 700;
+cursor: pointer;
+transition: filter 0.15s ease, transform 0.15s ease;
+}
+.pin-checker .pin-checker__button:hover {
+filter: brightness(0.92);
+transform: translateY(-1px);
+}
+.pin-checker .pin-checker__button:disabled {
+opacity: 0.62;
+cursor: not-allowed;
+transform: none;
+}
+.pin-checker .pin-checker__button:focus-visible,
+.pin-checker .pin-checker__location-action:focus-visible,
+.pin-checker .pin-checker__select:focus-visible,
+.pin-checker .pin-checker__input:focus-visible {
+outline: 2px solid var(--pc-focus);
+outline-offset: 2px;
+}
+.pin-checker .pin-checker__saved-location {
+display: flex;
+align-items: baseline;
+justify-content: space-between;
+gap: 10px;
+margin-top: 8px;
+color: var(--pc-sub);
+font-size: 11px;
+line-height: 1.4;
+}
+.pin-checker .pin-checker__location-action {
+flex: 0 0 auto;
+border: 0;
+padding: 2px;
+background: transparent;
+color: var(--pc-focus);
+font: inherit;
+font-weight: 700;
+text-decoration: underline;
+text-underline-offset: 2px;
+cursor: pointer;
+}
+.pin-checker .pin-checker__result {
+margin: 12px 0 0;
+padding: 10px 12px;
+border-radius: 10px;
+border: 1px solid transparent;
+background: #f8fafc;
+font-size: 13px;
+line-height: 1.45;
+font-weight: 500;
+color: #1f2937;
+display: none;
+}
+.pin-checker .pin-checker__result[data-state='loading'] {
+display: block;
+color: #1d4f91;
+background: #f0f7ff;
+border-color: #c9e0fb;
+}
+.pin-checker .pin-checker__result[data-state='error'] {
+display: block;
+color: #b91c1c;
+background: #fef2f2;
+border-color: #fecaca;
+}
+.pin-checker .pin-checker__result[data-state='success'] {
+display: block;
+color: #065f46;
+background: #ecfdf3;
+border-color: #a7f3d0;
+}
+.pin-checker .pin-checker__details {
+margin-top: 10px;
+}
+.pin-checker .pin-checker__journey {
+display: grid;
+grid-template-columns: repeat(3, minmax(0, 1fr));
+overflow: hidden;
+margin: 14px 0;
+border: 1px solid var(--pc-journey-active);
+border-radius: 12px;
+background: var(--pc-journey-bg);
+}
+.pin-checker .pin-checker__journey-step {
+position: relative;
+display: grid;
+min-height: 96px;
+align-content: center;
+gap: 4px;
+padding: 10px 6px;
+color: var(--pc-heading);
+font-size: 11px;
+text-align: center;
+}
+.pin-checker .pin-checker__journey-step:not(:last-child)::after {
+position: absolute;
+z-index: 0;
+top: 31px;
+left: calc(50% + 17px);
+right: calc(-50% + 17px);
+border-top: 2px dotted var(--pc-journey-line);
+content: '';
+}
+.pin-checker[data-line-style='dashed'] .pin-checker__journey-step:not(:last-child)::after { border-top-style: dashed; }
+.pin-checker[data-line-style='solid'] .pin-checker__journey-step:not(:last-child)::after { border-top-style: solid; }
+.pin-checker[data-line-style='none'] .pin-checker__journey-step:not(:last-child)::after { display: none; }
+.pin-checker:not([data-line-style='none']) .pin-checker__journey-step + .pin-checker__journey-step { border-left: 0; }
+.pin-checker:not([data-line-style='none']) .pin-checker__journey-step--active { background: transparent; }
+.pin-checker:not([data-line-style='none']) .pin-checker__journey-step--active .pin-checker__journey-marker {
+box-shadow: inset 0 0 0 2px var(--pc-journey-line);
+}
+.pin-checker[data-template='progress-track'] .pin-checker__journey {
+overflow: visible;
+border-top: 4px solid var(--pc-journey-line);
+border-radius: 0 0 12px 12px;
+}
+.pin-checker[data-template='progress-track'] .pin-checker__journey-step:not(:last-child)::after { display: none; }
+.pin-checker[data-template='progress-track'] .pin-checker__journey-marker {
+margin-top: -22px;
+background: var(--pc-journey-line);
+color: #fff;
+}
+.pin-checker[data-template='ring-milestones'] .pin-checker__journey-marker {
+width: 42px;
+height: 42px;
+border: 3px solid var(--pc-journey-line);
+background: #fff;
+}
+.pin-checker[data-template='ring-milestones'] .pin-checker__journey-step:not(:last-child)::after {
+top: 40px;
+left: calc(50% + 25px);
+right: calc(-50% + 25px);
+border-top-width: 4px;
+}
+.pin-checker[data-template='cyan-arrows'] .pin-checker__journey {
+gap: 2px;
+background: transparent;
+}
+.pin-checker[data-template='cyan-arrows'] .pin-checker__journey-step {
+background: var(--pc-journey-bg);
+clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%, 9px 50%);
+}
+.pin-checker[data-template='cyan-arrows'] .pin-checker__journey-step:first-child {
+clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%);
+}
+.pin-checker[data-template='cyan-arrows'] .pin-checker__journey-step:not(:last-child)::after { display: none; }
+.pin-checker[data-template='warm-steps'] .pin-checker__journey-marker { border-radius: 8px; }
+.pin-checker[data-template='compact-strip'] .pin-checker__journey-step {
+min-height: 64px;
+gap: 2px;
+}
+.pin-checker[data-template='compact-strip'] .pin-checker__journey-marker {
+width: 18px;
+height: 18px;
+margin-block: 0;
+}
+.pin-checker .pin-checker__journey-step + .pin-checker__journey-step {
+border-left: 1px solid var(--pc-journey-active);
+}
+.pin-checker .pin-checker__journey-step--active {
+background: var(--pc-journey-active);
+}
+.pin-checker .pin-checker__journey-marker {
+position: relative;
+z-index: 1;
+display: grid;
+width: 24px;
+height: 24px;
+margin: 0 auto;
+place-items: center;
+border-radius: 999px;
+background: rgba(255, 255, 255, 0.76);
+color: var(--pc-heading);
+font-weight: 800;
+}
+.pin-checker .pin-checker__journey-icon {
+display: none;
+width: 16px;
+height: 16px;
+overflow: visible;
+fill: none;
+stroke: currentColor;
+stroke-linecap: round;
+stroke-linejoin: round;
+stroke-width: 1.8;
+}
+.pin-checker .pin-checker__journey-step strong {
+font-size: 11px;
+line-height: 1.25;
+}
+.pin-checker .pin-checker__journey-step small {
+font-size: 10px;
+opacity: 0.76;
+}
+.pin-checker[data-icon-style='delivery'] .pin-checker__journey-number,
+.pin-checker[data-icon-style='duotone'] .pin-checker__journey-number,
+.pin-checker[data-icon-style='minimal'] .pin-checker__journey-number,
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-number {
+display: none;
+}
+.pin-checker[data-icon-style='delivery'] .pin-checker__journey-icon,
+.pin-checker[data-icon-style='duotone'] .pin-checker__journey-icon {
+display: block;
+}
+.pin-checker[data-icon-style='duotone'] .pin-checker__journey-icon {
+fill: currentColor;
+fill-opacity: 0.12;
+}
+.pin-checker[data-icon-style='minimal'] .pin-checker__journey-marker {
+width: 10px;
+height: 10px;
+margin-block: 7px;
+background: currentColor;
+}
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(1) .pin-checker__journey-marker::before { content: '\1F6D2'; font-size: 14px; }
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(2) .pin-checker__journey-marker::before { content: '\1F4E6'; font-size: 14px; }
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(3) .pin-checker__journey-marker::before { content: '\1F3E0'; font-size: 14px; }
+.pin-checker[data-animation='soft'] .pin-checker__journey-step {
+animation: pin-checker-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.pin-checker[data-animation='soft'] .pin-checker__journey-step:nth-child(2) { animation-delay: 100ms; }
+.pin-checker[data-animation='soft'] .pin-checker__journey-step:nth-child(3) { animation-delay: 200ms; }
+.pin-checker[data-animation='route'] .pin-checker__journey-marker {
+animation: pin-checker-route 2.4s ease-in-out infinite;
+}
+.pin-checker[data-animation='pulse'] .pin-checker__journey-marker {
+animation: pin-checker-pulse 2.1s ease-in-out infinite;
+}
+.pin-checker[data-animation='route'] .pin-checker__journey-step:nth-child(2) .pin-checker__journey-marker,
+.pin-checker[data-animation='pulse'] .pin-checker__journey-step:nth-child(2) .pin-checker__journey-marker { animation-delay: 350ms; }
+.pin-checker[data-animation='route'] .pin-checker__journey-step:nth-child(3) .pin-checker__journey-marker,
+.pin-checker[data-animation='pulse'] .pin-checker__journey-step:nth-child(3) .pin-checker__journey-marker { animation-delay: 700ms; }
+.pin-checker[data-animation='float'] .pin-checker__journey-marker {
+animation: pin-checker-float 2.6s ease-in-out infinite;
+}
+.pin-checker[data-animation='float'] .pin-checker__journey-step:nth-child(2) .pin-checker__journey-marker { animation-delay: 220ms; }
+.pin-checker[data-animation='float'] .pin-checker__journey-step:nth-child(3) .pin-checker__journey-marker { animation-delay: 440ms; }
+.pin-checker[data-animation='shimmer'] .pin-checker__journey {
+background-image: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.42) 50%, transparent 75%);
+background-size: 220% 100%;
+animation: pin-checker-shimmer 2.8s ease-in-out infinite;
+}
+@keyframes pin-checker-rise {
+from { opacity: 0; transform: translateY(8px); }
+to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pin-checker-shimmer {
+from { background-position: 140% 0; }
+to { background-position: -80% 0; }
+}
+@keyframes pin-checker-float {
+0%, 100% { transform: translateY(0); }
+50% { transform: translateY(-5px) rotate(2deg); }
+}
+@keyframes pin-checker-pulse {
+0%, 60%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+18% { transform: scale(1.12); box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.24); }
+}
+@keyframes pin-checker-route {
+0%, 70%, 100% { transform: scale(1); opacity: 0.72; }
+18%, 38% { transform: scale(1.14); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+.pin-checker,
+.pin-checker .pin-checker__journey,
+.pin-checker .pin-checker__journey-step,
+.pin-checker .pin-checker__journey-marker {
+animation: none !important;
+transition: none !important;
+}
+}
+.pin-checker .pin-checker__countdown {
+margin: 0 0 8px;
+font-size: 13px;
+line-height: 1.45;
+}
+.pin-checker .pin-checker__countdown strong {
+display: inline-flex;
+gap: 4px;
+font-variant-numeric: tabular-nums;
+}
+.pin-checker .pin-checker__countdown strong > span small { display: none; }
+.pin-checker[data-template='countdown-focus'] .pin-checker__countdown {
+display: grid;
+gap: 8px;
+padding: 12px;
+border-radius: 12px;
+background: var(--pc-journey-bg);
+text-align: center;
+}
+.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong {
+display: grid;
+grid-template-columns: repeat(3, 1fr);
+gap: 6px;
+}
+.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong > span {
+display: grid;
+gap: 3px;
+}
+.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong > span b {
+border-radius: 7px;
+background: var(--pc-card);
+padding: 7px 3px;
+color: var(--pc-heading);
+}
+.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong > span small {
+display: block;
+color: var(--pc-sub);
+font-size: 9px;
+font-weight: 500;
+}
+.pin-checker .pin-checker__options {
+display: flex;
+flex-wrap: wrap;
+gap: 7px;
+margin: 0;
+padding: 0;
+list-style: none;
+}
+.pin-checker .pin-checker__option {
+display: inline-flex;
+align-items: center;
+gap: 5px;
+padding: 5px 9px;
+border: 1px solid #d1d5db;
+border-radius: 999px;
+background: #f9fafb;
+color: #4b5563;
+font-size: 12px;
+line-height: 1.3;
+}
+.pin-checker .pin-checker__option[data-available='true'] {
+border-color: #a7f3d0;
+background: #ecfdf3;
+color: #065f46;
+}
+.pin-checker .pin-checker__option-mark {
+font-weight: 800;
+}
+.pin-checker .pin-checker__methods {
+margin-top: 12px;
+}
+.pin-checker .pin-checker__method-fieldset {
+display: grid;
+gap: 8px;
+margin: 0;
+padding: 0;
+border: 0;
+}
+.pin-checker .pin-checker__method-legend,
+.pin-checker .pin-checker__method-label {
+margin-bottom: 7px;
+color: var(--pc-heading);
+font-size: 13px;
+font-weight: 700;
+}
+.pin-checker .pin-checker__method-card {
+display: grid;
+grid-template-columns: auto minmax(0, 1fr);
+gap: 3px 9px;
+padding: 11px 12px;
+border: 1px solid var(--pc-input-border);
+border-radius: 10px;
+background: var(--pc-card);
+color: var(--pc-heading);
+cursor: pointer;
+}
+.pin-checker .pin-checker__method-card:has(input:checked) {
+border-color: var(--pc-focus);
+box-shadow: 0 0 0 2px color-mix(in srgb, var(--pc-focus) 18%, transparent);
+}
+.pin-checker .pin-checker__method-card input {
+margin: 3px 0 0;
+accent-color: var(--pc-focus);
+}
+.pin-checker .pin-checker__method-card strong {
+font-size: 13px;
+}
+.pin-checker .pin-checker__method-copy,
+.pin-checker .pin-checker__method-dates {
+grid-column: 2;
+color: var(--pc-sub);
+font-size: 11px;
+line-height: 1.4;
+}
+.pin-checker .pin-checker__method-select {
+width: 100%;
+min-height: 44px;
+padding: 10px 12px;
+border: 1px solid var(--pc-input-border);
+border-radius: 10px;
+background: var(--pc-card);
+color: var(--pc-heading);
+font: inherit;
+}
+.pin-checker .pin-checker__method-card:focus-within,
+.pin-checker .pin-checker__method-select:focus-visible {
+outline: 2px solid var(--pc-focus);
+outline-offset: 2px;
+}
+.pin-checker .pin-checker__method-summary {
+margin: 9px 0 0;
+color: var(--pc-heading);
+font-size: 12px;
+font-weight: 600;
+line-height: 1.45;
+}
+.pin-checker .pin-checker__method-disclaimer {
+margin: 5px 0 0;
+color: var(--pc-sub);
+font-size: 10px;
+line-height: 1.4;
+}
+[data-pincode-atc-disabled='true'] {
+cursor: not-allowed !important;
+opacity: 0.62;
+}
+@media (max-width: 640px) {
+.pin-checker .pin-checker__row {
+grid-template-columns: 1fr;
+}
+.pin-checker .pin-checker__button {
+width: 100%;
+}
+.pin-checker .pin-checker__journey-step {
+min-height: 86px;
+padding-inline: 4px;
+}
+}

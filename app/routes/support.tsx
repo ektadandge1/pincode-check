@@ -3,14 +3,15 @@ import { useLoaderData } from "react-router";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import {
   AppProvider as PolarisProvider,
+  Banner,
   BlockStack,
+  Button,
   Card,
   Layout,
   List,
   Page,
   Text,
 } from "@shopify/polaris";
-import "@shopify/polaris/build/esm/styles.css";
 
 export const meta: MetaFunction = () => [
   { title: "Support | Incode Track" },
@@ -30,7 +31,12 @@ export default function Support() {
 
   return (
     <PolarisProvider i18n={enTranslations}>
-      <Page title="Support" subtitle="Setup and troubleshooting for Incode Track">
+      <div className="incode-public">
+      <Page title="Support" subtitle="Setup and troubleshooting for Incode Track" narrowWidth backAction={{ content: "Incode Track", url: "/" }}>
+        <BlockStack gap="500">
+          <Banner title="Get useful help faster" tone="info">
+            Include your shop domain, product URL, selected variant, and a sample postal code when contacting support.
+          </Banner>
         <Layout>
           <Layout.Section>
             <Card>
@@ -63,9 +69,9 @@ export default function Support() {
                     CSV format
                   </Text>
                   <Text as="p">
-                    Supported columns are country, postal_code, delivery_days,
-                    serviceable, cod_available, city, state, and zone. The
-                    country, postal_code, and delivery_days columns are required.
+                    Required columns are country, postal_code, and delivery_days.
+                    Optional columns include serviceable, cod_available, delivery_charge,
+                    currency, city, state, zone, same_day, next_day, and express.
                   </Text>
                 </BlockStack>
 
@@ -93,17 +99,16 @@ export default function Support() {
                   <Text as="h2" variant="headingLg">
                     Contact
                   </Text>
-                  <Text as="p">
-                    {contactEmail
-                      ? `For support requests, contact ${contactEmail}.`
-                      : "Use the support email and contact details configured in the Shopify App Store listing for Incode Track."}
-                  </Text>
+                  <Text as="p">{contactEmail ? "Our team can help with setup, imports, targeting, and storefront behavior." : "Use the support contact in the Shopify App Store listing for Incode Track."}</Text>
+                  {contactEmail ? <Button url={`mailto:${contactEmail}`} variant="primary">Email {contactEmail}</Button> : null}
                 </BlockStack>
               </BlockStack>
             </Card>
           </Layout.Section>
         </Layout>
+        </BlockStack>
       </Page>
+      </div>
     </PolarisProvider>
   );
 }

@@ -1,0 +1,52 @@
+{
+  "delivery_checker": {
+    "schema": {
+      "name": "Delivery checker",
+      "heading_label": "Heading",
+      "supporting_text_label": "Supporting text",
+      "button_label": "Button label",
+      "cod_enabled_label": "Request COD availability",
+      "auto_check_saved_address_label": "Auto-check saved customer address",
+      "auto_check_saved_address_info": "Uses the logged-in customer's default address when available. This does not use precise IP location.",
+      "show_cutoff_countdown_label": "Show delivery cutoff countdown",
+      "show_cutoff_countdown_info": "Shown only when the API response includes a valid cutoff timestamp.",
+      "appearance": "Appearance",
+      "background_label": "Background",
+      "text_label": "Text",
+      "button_color_label": "Button",
+      "button_text_color_label": "Button text",
+      "corner_radius_label": "Corner radius",
+      "show_delivery_journey_label": "Show delivery journey",
+      "show_delivery_journey_info": "Show Order now, Ready to ship, and At your doorstep after a successful check.",
+      "journey_background_label": "Journey background color",
+      "journey_active_label": "Journey active step color"
+    }
+  },
+  "delivery_embed": {
+    "schema": {
+      "name": "Delivery ETA",
+      "button_label": "Button label",
+      "heading_label": "Panel heading",
+      "auto_check_saved_address_label": "Auto-check saved customer address",
+      "auto_check_saved_address_info": "Uses the logged-in customer's default address when available. This does not use precise IP location.",
+      "show_product_card_eta_label": "Show ETA on collection and search product cards",
+      "show_product_card_eta_info": "Shows an estimated delivery range only. It does not claim postal-code serviceability.",
+      "accent_color_label": "Accent color",
+      "text_color_label": "Text color",
+      "card_color_label": "Card color"
+    }
+  },
+  "automatic_eta": {
+    "schema": {
+      "name": "Estimated delivery ETA",
+      "eyebrow_label": "Small heading",
+      "heading_label": "Heading",
+      "show_journey_label": "Show delivery journey",
+      "accent_color_label": "Accent color",
+      "text_color_label": "Text color",
+      "card_color_label": "Card color",
+      "journey_color_label": "Journey background",
+      "corner_radius_label": "Corner radius"
+    }
+  }
+}

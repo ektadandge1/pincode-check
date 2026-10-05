@@ -1,0 +1,7 @@
+{
+  "heading": "Order delivery estimate",
+  "estimatedDelivery": "Estimated delivery: {range}",
+  "expectedDispatch": "Expected dispatch: {date}",
+  "postalCode": "Postal code: {postalCode}",
+  "dateRange": "{start} to {end}"
+}

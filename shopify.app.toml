@@ -5,9 +5,11 @@ name = "Incode Track"
 application_url = "https://example.com"
 embedded = true
 
+[sidekick]
+extensions_summary = "Inspect delivery coverage, ETA settings, fulfillment locations, shipping methods, and delivery lookup performance"
+
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-04"
@@ -26,7 +28,7 @@ api_version = "2026-04"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_app_proxy"
+scopes = "read_inventory,read_locations,read_orders,read_products,read_shipping,write_app_proxy,write_orders"
 
 [auth]
 redirect_urls = [ "https://example.com/auth/callback" ]

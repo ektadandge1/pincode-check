@@ -1,51 +1,56 @@
 export type CsvRow = Record<string, string>;
 
-function parseLine(line: string): string[] {
-  const values: string[] = [];
-  let current = "";
+export function parseCsv(content: string): CsvRow[] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let value = "";
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
+  const pushValue = () => {
+    record.push(value.trim());
+    value = "";
+  };
+  const pushRecord = () => {
+    pushValue();
+    if (record.some((field) => field.length > 0)) records.push(record);
+    record = [];
+  };
 
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
     if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
+      if (inQuotes && content[index + 1] === '"') {
+        value += '"';
+        index += 1;
       } else {
         inQuotes = !inQuotes;
       }
-      continue;
+    } else if (char === "," && !inQuotes) {
+      pushValue();
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && content[index + 1] === "\n") index += 1;
+      pushRecord();
+    } else {
+      value += char;
     }
-
-    if (char === "," && !inQuotes) {
-      values.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += char;
   }
 
-  values.push(current.trim());
-  return values;
-}
+  if (inQuotes) throw new Error("CSV contains an unclosed quoted field.");
+  if (value.length > 0 || record.length > 0) pushRecord();
 
-export function parseCsv(content: string): CsvRow[] {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  if (lines.length < 2) {
+  if (records.length < 2) {
     return [];
   }
 
-  const headers = parseLine(lines[0]).map((header) => header.toLowerCase());
+  const headers = records[0].map((header, index) =>
+    (index === 0 ? header.replace(/^\uFEFF/, "") : header).trim().toLowerCase(),
+  );
+  if (headers.some((header) => !header)) throw new Error("CSV contains an empty column name.");
+  if (new Set(headers).size !== headers.length) throw new Error("CSV contains duplicate column names.");
+
   const rows: CsvRow[] = [];
 
-  for (const line of lines.slice(1)) {
-    const values = parseLine(line);
+  for (const values of records.slice(1)) {
     const row: CsvRow = {};
 
     headers.forEach((header, index) => {

@@ -1,0 +1,7 @@
+{
+  "heading": "ऑर्डर डिलीवरी अनुमान",
+  "estimatedDelivery": "अनुमानित डिलीवरी: {range}",
+  "expectedDispatch": "अनुमानित प्रेषण: {date}",
+  "postalCode": "पिन कोड: {postalCode}",
+  "dateRange": "{start} से {end}"
+}

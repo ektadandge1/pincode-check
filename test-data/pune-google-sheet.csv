@@ -1,0 +1,16 @@
+country,postal_code,delivery_days,serviceable,cod_available,delivery_charge,currency,city,state,zone,same_day,next_day,express
+IN,412101,3,true,true,55,INR,Lonavala,Maharashtra,Pune Outskirts,false,true,true
+IN,412105,3,true,false,45,INR,Pune,Maharashtra,Pune Outskirts,false,false,true
+IN,412115,2,true,true,50,INR,Pune,Maharashtra,Pune West,false,true,true
+IN,412201,4,true,false,40,INR,Pune,Maharashtra,Pune Outskirts,false,false,true
+IN,412202,4,true,true,45,INR,Pune,Maharashtra,Pune Outskirts,false,false,true
+IN,412207,3,true,true,50,INR,Pune,Maharashtra,Pune North,false,true,true
+IN,412216,3,true,false,40,INR,Pune,Maharashtra,Pune North,false,false,true
+IN,412301,4,true,true,45,INR,Pune,Maharashtra,Pune Outskirts,false,false,true
+IN,412307,4,true,false,40,INR,Pune,Maharashtra,Pune Outskirts,false,false,true
+IN,412*,3,true,true,50,INR,Pune,Maharashtra,Pune Outskirts,false,true,true
+IN,411100-411199,3,true,false,45,INR,Pune,Maharashtra,Pune Metro,false,true,true
+IN,411200-411299,4,true,true,50,INR,Pune,Maharashtra,Pune East,false,false,true
+IN,411300-411399,4,false,false,0,INR,Pune,Maharashtra,Pune Restricted,false,false,false
+IN,411400-411499,5,true,false,60,INR,Pune,Maharashtra,Pune Outskirts,false,false,true
+IN,411500-411599,5,true,true,60,INR,Pune,Maharashtra,Pune Outskirts,false,false,true

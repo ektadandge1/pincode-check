@@ -1,15 +1,14 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { clearPlanAccessCache } from "../services/partner-api.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, session } = await authenticate.webhook(request);
+  const { shop } = await authenticate.webhook(request);
 
-  // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-  // If this webhook already ran, the session may have been deleted previously.
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
-  }
+  // Uninstall webhooks are idempotent and can arrive after a session expires.
+  await db.session.deleteMany({ where: { shop } });
+  clearPlanAccessCache(shop);
 
   return new Response(null, { status: 200 });
 };

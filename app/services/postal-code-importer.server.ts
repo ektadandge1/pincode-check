@@ -2,11 +2,23 @@ import prisma from "../db.server";
 import { parseCsv, type CsvRow } from "../utils/csv.server";
 import {
   normalizeCountryCode,
-  normalizePostalCode,
+  parsePostalPattern,
   validatePostalCode,
 } from "../utils/delivery.server";
 
 type ImportSource = "csv" | "google_sheet";
+
+export type PostalImportPolicy = {
+  patterns: boolean;
+  zones: boolean;
+  deliveryOptions: boolean;
+};
+
+const FULL_IMPORT_POLICY: PostalImportPolicy = {
+  patterns: true,
+  zones: true,
+  deliveryOptions: true,
+};
 
 type ImportResult = {
   jobId: number;
@@ -20,6 +32,10 @@ type ValidatedPostalCodeData = {
   shop: string;
   country: string;
   postalCode: string;
+  patternType: string;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+  zoneName: string | null;
   deliveryDays: number;
   serviceable: boolean;
   codAvailable: boolean;
@@ -33,11 +49,12 @@ type ValidatedPostalCodeData = {
   zone: string | null;
 };
 
-function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+function parseBoolean(value: string | undefined, fallback: boolean): boolean | null {
   const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
   if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
   if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
-  return fallback;
+  return null;
 }
 
 function parseOptionalMoney(value: string | undefined): number | null {
@@ -62,13 +79,47 @@ function getDeliveryDays(row: CsvRow): number {
 
 function validateRow(row: CsvRow): { ok: true; data: ValidatedPostalCodeData } | { ok: false; reason: string } {
   const hasLegacyPincodeColumn = typeof row.pincode === "string" && !row.country;
-  const country = normalizeCountryCode(row.country ?? (hasLegacyPincodeColumn ? "IN" : "US"));
-  const postalCode = normalizePostalCode(country, getPostalCode(row));
+  const rawCountry = String(row.country ?? (hasLegacyPincodeColumn ? "IN" : "")).trim();
+  const rawDeliveryDays = String(row.delivery_days ?? row.deliverydays ?? "").trim();
+  const rawPostalPattern = getPostalCode(row);
+  if (!rawCountry) return { ok: false, reason: "Country is required." };
+  if (!/^[A-Za-z]{2}$/.test(rawCountry)) return { ok: false, reason: "Country must be a 2-letter ISO code." };
+  if (!rawDeliveryDays) return { ok: false, reason: "Delivery days is required." };
+
+  const country = normalizeCountryCode(rawCountry);
+  const explicitType = String(row.pattern_type ?? row.patterntype ?? "").trim().toLowerCase();
+  const parsedPattern = parsePostalPattern(country, rawPostalPattern);
+  if (!parsedPattern) {
+    return {
+      ok: false,
+      reason: "Invalid postal pattern. Use a postal code, a range like 10000-10999, or a wildcard like 123*.",
+    };
+  }
+  if (
+    explicitType &&
+    explicitType !== parsedPattern.type &&
+    !(explicitType === "exact" && parsedPattern.type === "exact")
+  ) {
+    if (["exact", "range", "wildcard"].includes(explicitType) && explicitType !== parsedPattern.type) {
+      return { ok: false, reason: `pattern_type "${explicitType}" does not match postal_code "${rawPostalPattern}".` };
+    }
+  }
+
+  const postalCode = parsedPattern.pattern;
+  const patternType = parsedPattern.type;
+  const rangeStart = parsedPattern.type === "range" ? parsedPattern.start : null;
+  const rangeEnd = parsedPattern.type === "range" ? parsedPattern.end : null;
+  const zoneName = String(row.zone ?? "").trim() || null;
   const deliveryDays = getDeliveryDays(row);
   const deliveryCharge = parseOptionalMoney(row.delivery_charge ?? row.deliverycharge);
   const currency = normalizeCurrency(row.currency);
+  const serviceable = parseBoolean(row.serviceable, true);
+  const codAvailable = parseBoolean(row.cod_available ?? row.codavailable, false);
+  const sameDayAvailable = parseBoolean(row.same_day ?? row.sameday, false);
+  const nextDayAvailable = parseBoolean(row.next_day ?? row.nextday, false);
+  const expressAvailable = parseBoolean(row.express ?? row.express_available ?? row.expressavailable, false);
 
-  if (!validatePostalCode(country, postalCode)) {
+  if (patternType === "exact" && !validatePostalCode(country, postalCode)) {
     return { ok: false, reason: "Invalid postal code for country." };
   }
 
@@ -84,29 +135,77 @@ function validateRow(row: CsvRow): { ok: true; data: ValidatedPostalCodeData } |
     return { ok: false, reason: "Currency is required when delivery_charge is set." };
   }
 
+  if ([serviceable, codAvailable, sameDayAvailable, nextDayAvailable, expressAvailable].includes(null)) {
+    return { ok: false, reason: "Boolean fields must use true/false, yes/no, or 1/0." };
+  }
+
+  if (zoneName && zoneName.length > 60) {
+    return { ok: false, reason: "Zone name must be 60 characters or fewer." };
+  }
+
   return {
     ok: true,
     data: {
       shop: "",
       country,
       postalCode,
+      patternType,
+      rangeStart,
+      rangeEnd,
+      zoneName,
       deliveryDays,
-      serviceable: parseBoolean(row.serviceable, true),
-      codAvailable: parseBoolean(row.cod_available ?? row.codavailable, false),
+      serviceable: serviceable as boolean,
+      codAvailable: codAvailable as boolean,
       deliveryCharge,
       currency,
-      sameDayAvailable: parseBoolean(row.same_day ?? row.sameday, false),
-      nextDayAvailable: parseBoolean(row.next_day ?? row.nextday, false),
-      expressAvailable: parseBoolean(row.express ?? row.express_available ?? row.expressavailable, false),
+      sameDayAvailable: sameDayAvailable as boolean,
+      nextDayAvailable: nextDayAvailable as boolean,
+      expressAvailable: expressAvailable as boolean,
       city: String(row.city ?? "").trim() || null,
       state: String(row.state ?? "").trim() || null,
-      zone: String(row.zone ?? "").trim() || null,
+      zone: zoneName,
     },
   };
 }
 
-export async function importPostalCodesFromCsv(shop: string, content: string, source: ImportSource): Promise<ImportResult> {
-  const rows = parseCsv(content).slice(0, 100_000);
+async function ensureZoneId(shop: string, zoneName: string | null, country: string): Promise<number | null> {
+  if (!zoneName) return null;
+
+  const existing = await prisma.zone.findUnique({
+    where: { shop_name: { shop, name: zoneName } },
+  });
+  if (existing) return existing.id;
+
+  const created = await prisma.zone.create({
+    data: {
+      shop,
+      name: zoneName,
+      country,
+      priority: 100,
+      enabled: true,
+    },
+  });
+  return created.id;
+}
+
+export async function importPostalCodesFromCsv(
+  shop: string,
+  content: string,
+  source: ImportSource,
+  policy: PostalImportPolicy = FULL_IMPORT_POLICY,
+): Promise<ImportResult> {
+  if (content.length > 8 * 1024 * 1024) throw new Error("CSV should be smaller than 8MB.");
+  const rows = parseCsv(content);
+  if (rows.length === 0) throw new Error("CSV must include a header and at least one data row.");
+  if (rows.length > 100_000) throw new Error("CSV cannot contain more than 100,000 data rows.");
+
+  const headers = new Set(Object.keys(rows[0]));
+  const hasPostalCode = headers.has("postal_code") || headers.has("postalcode") || headers.has("pincode");
+  const hasDeliveryDays = headers.has("delivery_days") || headers.has("deliverydays");
+  const legacyIndiaFormat = headers.has("pincode") && !headers.has("country");
+  if (!hasPostalCode || !hasDeliveryDays || (!headers.has("country") && !legacyIndiaFormat)) {
+    throw new Error("CSV requires country, postal_code, and delivery_days columns. Legacy pincode CSVs may omit country.");
+  }
   const job = await prisma.importJob.create({
     data: {
       shop,
@@ -135,7 +234,45 @@ export async function importPostalCodesFromCsv(shop: string, content: string, so
       continue;
     }
 
+    if (!policy.patterns && validation.data.patternType !== "exact") {
+      failedRows += 1;
+      errors.push({
+        importJobId: job.id,
+        rowNumber: index + 2,
+        rawRow: JSON.stringify(row),
+        reason: "ZIP ranges and wildcards require the Advanced plan.",
+      });
+      continue;
+    }
+    if (!policy.zones && validation.data.zoneName) {
+      failedRows += 1;
+      errors.push({
+        importJobId: job.id,
+        rowNumber: index + 2,
+        rawRow: JSON.stringify(row),
+        reason: "Zones require the Advanced plan.",
+      });
+      continue;
+    }
+    if (
+      !policy.deliveryOptions &&
+      (validation.data.deliveryCharge !== null ||
+        validation.data.sameDayAvailable ||
+        validation.data.nextDayAvailable ||
+        validation.data.expressAvailable)
+    ) {
+      failedRows += 1;
+      errors.push({
+        importJobId: job.id,
+        rowNumber: index + 2,
+        rawRow: JSON.stringify(row),
+        reason: "Delivery charges and speed options require the Advanced plan.",
+      });
+      continue;
+    }
+
     const data = { ...validation.data, shop };
+    const zoneId = await ensureZoneId(shop, data.zoneName, data.country);
     await prisma.postalCode.upsert({
       where: {
         shop_country_postalCode: {
@@ -144,8 +281,31 @@ export async function importPostalCodesFromCsv(shop: string, content: string, so
           postalCode: data.postalCode,
         },
       },
-      create: data,
+      create: {
+        shop,
+        country: data.country,
+        postalCode: data.postalCode,
+        patternType: data.patternType,
+        rangeStart: data.rangeStart,
+        rangeEnd: data.rangeEnd,
+        zoneId,
+        zone: data.zone,
+        deliveryDays: data.deliveryDays,
+        serviceable: data.serviceable,
+        codAvailable: data.codAvailable,
+        deliveryCharge: data.deliveryCharge,
+        currency: data.currency,
+        sameDayAvailable: data.sameDayAvailable,
+        nextDayAvailable: data.nextDayAvailable,
+        expressAvailable: data.expressAvailable,
+        city: data.city,
+        state: data.state,
+      },
       update: {
+        patternType: data.patternType,
+        rangeStart: data.rangeStart,
+        rangeEnd: data.rangeEnd,
+        zoneId,
         deliveryDays: data.deliveryDays,
         serviceable: data.serviceable,
         codAvailable: data.codAvailable,

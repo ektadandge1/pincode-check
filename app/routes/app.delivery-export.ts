@@ -1,9 +1,12 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { resolvePlanAccess } from "../services/partner-api.server";
+import { requireFeature } from "../services/plans.server";
 
 function csvValue(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
+  let text = value === null || value === undefined ? "" : String(value);
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
   if (/[",\n\r]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;
   }
@@ -11,15 +14,21 @@ function csvValue(value: unknown): string {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const access = await resolvePlanAccess({ shop: session.shop, admin });
+  requireFeature(access, "export");
   const rows = await prisma.postalCode.findMany({
     where: { shop: session.shop },
-    orderBy: [{ country: "asc" }, { postalCode: "asc" }],
+    orderBy: [{ country: "asc" }, { patternType: "asc" }, { postalCode: "asc" }],
+    include: {
+      zoneGroup: { select: { name: true } },
+    },
   });
 
   const headers = [
     "country",
     "postal_code",
+    "pattern_type",
     "delivery_days",
     "serviceable",
     "cod_available",
@@ -39,6 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       [
         row.country,
         row.postalCode,
+        row.patternType,
         row.deliveryDays,
         row.serviceable,
         row.codAvailable,
@@ -46,7 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         row.currency ?? "",
         row.city ?? "",
         row.state ?? "",
-        row.zone ?? "",
+        row.zoneGroup?.name ?? row.zone ?? "",
         row.sameDayAvailable,
         row.nextDayAvailable,
         row.expressAvailable,

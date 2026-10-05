@@ -1,13 +1,13 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import {
+  Badge,
+  Banner,
   BlockStack,
   Button,
   Card,
   InlineStack,
   Layout,
-  Link,
-  List,
   Page,
   Text,
 } from "@shopify/polaris";
@@ -15,71 +15,102 @@ import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-
   return {
     shop: session.shop,
     apiKey: process.env.SHOPIFY_API_KEY || "",
+    supportEmail: process.env.SUPPORT_EMAIL || "",
   };
 };
 
 export default function AdditionalPage() {
-  const { shop, apiKey } = useLoaderData<typeof loader>();
+  const { shop, apiKey, supportEmail } = useLoaderData<typeof loader>();
   const themeEditorUrl = `https://${shop}/admin/themes/current/editor?template=product&addAppBlockId=${apiKey}/delivery-checker&target=mainSection`;
 
   return (
-    <Page title="Help">
-      <Layout>
-        <Layout.Section>
-          <Card>
+    <Page title="Setup guide" subtitle="Launch, test, and troubleshoot your delivery experience.">
+      <BlockStack gap="500">
+        <Banner title="Recommended launch sequence" tone="info">
+          Configure behavior first, add coverage second, then publish and test the theme block. This prevents shoppers from seeing incomplete results.
+        </Banner>
+        <Layout>
+          <Layout.Section>
             <BlockStack gap="400">
-              <Text as="h2" variant="headingLg">
-                Setup checklist
-              </Text>
-              <Text as="p" tone="subdued">
-                Use these steps before submitting the app for Shopify App Store
-                review or enabling it on a production storefront.
-              </Text>
-              <List type="number">
-                <List.Item>Configure cutoff time, weekends, and holidays.</List.Item>
-                <List.Item>Upload serviceable country and postal code coverage by CSV.</List.Item>
-                <List.Item>Add manual overrides for priority locations.</List.Item>
-                <List.Item>
-                  Add the Delivery availability checker app block to the product template in
-                  the Theme Editor.
-                </List.Item>
-                <List.Item>
-                  Test a valid serviceable postal code and an unavailable postal code on a
-                  product page before publishing.
-                </List.Item>
-              </List>
-              <InlineStack gap="300">
-                <Button url={themeEditorUrl} target="_blank" variant="primary">
-                  Add block in Theme Editor
-                </Button>
-                <Button url="/app/delivery-settings">Open delivery settings</Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+              <Card>
+                <BlockStack gap="400">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h2" variant="headingLg">Launch in four steps</Text>
+                    <Badge tone="info">About 10 minutes</Badge>
+                  </InlineStack>
+                  {[
+                    ["1", "Set delivery behavior", "Choose weekends, cutoff time, messages, inventory checks, and Add-to-Cart protection.", "/app/delivery-settings#behavior", "Configure"],
+                    ["2", "Add coverage", "Upload a CSV or create exact codes, ranges, and wildcard rules. Group them into zones when priorities overlap.", "/app/delivery-settings#coverage", "Add coverage"],
+                    ["3", "Set product targeting", "Apply PIN enforcement globally or override it for product IDs, collection handles, and product tags.", "/app/delivery-settings#targeting", "Set targets"],
+                    ["4", "Publish and test", "Add the app block to the product template. Test one serviceable and one unavailable postal code before publishing.", themeEditorUrl, "Open editor"],
+                  ].map(([number, title, description, url, action]) => (
+                    <div className="incode-step" key={number}>
+                      <span className="incode-step__number">{number}</span>
+                      <BlockStack gap="050">
+                        <Text as="h3" fontWeight="semibold">{title}</Text>
+                        <Text as="p" tone="subdued">{description}</Text>
+                      </BlockStack>
+                      <Button url={url} external={url.startsWith("https://")} size="slim">{action}</Button>
+                    </div>
+                  ))}
+                </BlockStack>
+              </Card>
 
-        <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingMd">
-                CSV format
-              </Text>
-              <Text as="p" tone="subdued">
-                Required columns are country, postal_code, and delivery_days.
-                Optional columns are serviceable, cod_available, city, state,
-                and zone.
-              </Text>
-              <InlineStack>
-                <Link url="/app/delivery-settings">Manage delivery settings</Link>
-              </InlineStack>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingLg">CSV reference</Text>
+                  <Text as="p" tone="subdued">
+                    Required columns: <strong>country</strong>, <strong>postal_code</strong>, and <strong>delivery_days</strong>. Imports accept up to 100,000 rows.
+                  </Text>
+                  <code className="incode-code">country,postal_code,delivery_days,serviceable,cod_available,delivery_charge,currency,city,state,zone,same_day,next_day,express{"\n"}US,10001,2,true,true,8,USD,New York,New York,metro,true,true,true{"\n"}US,10000-10999,3,true,false,10,USD,,,metro,false,false,false{"\n"}GB,SW1A*,3,true,false,5,GBP,London,,london,false,false,true</code>
+                  <Text as="p" tone="subdued" variant="bodySm">
+                    Postal patterns can be exact, a numeric range such as 10000-10999, or a prefix wildcard such as SW1A*.
+                  </Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingLg">Order confirmation email</Text>
+                  <Text as="p" tone="subdued">Add this Liquid snippet in Shopify Admin → Settings → Notifications → Order confirmation. It displays the validated delivery range saved with the cart.</Text>
+                  <code className="incode-code">{"{% for attribute in attributes %}\n  {% if attribute.first == '_incode_delivery_date_range' and attribute.last != blank %}\n    <p><strong>Estimated delivery:</strong> {{ attribute.last }}</p>\n  {% endif %}\n{% endfor %}"}</code>
+                  <Banner tone="warning">The email estimate is shown only when a successful ZIP check saved a current delivery range. Test the notification before publishing it.</Banner>
+                </BlockStack>
+              </Card>
             </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
+          </Layout.Section>
+
+          <Layout.Section variant="oneThird">
+            <BlockStack gap="400">
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">Widget not visible?</Text>
+                  <Text as="p" tone="subdued">Confirm the app block is added to the published product template, not only a draft template.</Text>
+                  <Button url={themeEditorUrl} external fullWidth>Open Theme Editor</Button>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">Every code unavailable?</Text>
+                  <Text as="p" tone="subdued">Check the country, ensure DB fallback is enabled, and confirm an enabled rule or zone matches the code.</Text>
+                  <Button url="/app/delivery-settings#coverage" fullWidth>Review coverage</Button>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">Support</Text>
+                  <Text as="p" tone="subdued">
+                    {supportEmail ? "Include your shop domain, affected product, and a sample postal code." : "Use the support contact in the Shopify App Store listing."}
+                  </Text>
+                  {supportEmail ? <Button url={`mailto:${supportEmail}`} fullWidth>Email {supportEmail}</Button> : null}
+                </BlockStack>
+              </Card>
+            </BlockStack>
+          </Layout.Section>
+        </Layout>
+      </BlockStack>
     </Page>
   );
 }

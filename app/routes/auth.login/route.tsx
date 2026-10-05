@@ -8,7 +8,6 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
-import "@shopify/polaris/build/esm/styles.css";
 import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { login } from "../../shopify.server";

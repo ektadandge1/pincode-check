@@ -1,0 +1,280 @@
+{% liquid
+  assign eta_id = block.id | replace: '-', ''
+  assign eta_product = product
+  assign eta_product_id = ''
+  assign eta_vendor = ''
+  assign eta_tags = '[]'
+  assign eta_collections = '[]'
+  if eta_product
+    assign eta_product_id = eta_product.id
+    assign eta_vendor = eta_product.vendor
+    assign eta_tags = eta_product.tags | json
+    assign eta_collection_values = ''
+    for eta_collection in eta_product.collections limit: 20
+      assign eta_collection_json = eta_collection.handle | json
+      if eta_collection_values != ''
+        assign eta_collection_values = eta_collection_values | append: ','
+      endif
+      assign eta_collection_values = eta_collection_values | append: eta_collection_json
+    endfor
+    assign eta_collections = eta_collection_values | prepend: '[' | append: ']'
+  elsif collection
+    assign eta_collections = collection.handle | json | prepend: '[' | append: ']'
+  endif
+  assign eta_eyebrow = block.settings.eyebrow
+  if eta_eyebrow == blank
+    assign eta_eyebrow = 'automatic_eta.eyebrow' | t
+  endif
+  assign eta_heading = block.settings.heading
+  if eta_heading == blank
+    assign eta_heading = 'automatic_eta.heading' | t
+  endif
+%}
+
+<div
+  id="incode-eta-{{ eta_id }}"
+  class="incode-eta"
+  data-product-id="{{ eta_product_id | escape }}"
+  data-product-vendor="{{ eta_vendor | escape }}"
+  data-product-tags="{{ eta_tags | escape }}"
+  data-collections="{{ eta_collections | escape }}"
+  data-country="{{ localization.country.iso_code | default: 'US' | escape }}"
+  data-today="{{ 'automatic_eta.today' | t | escape }}"
+  data-unavailable="{{ 'automatic_eta.unavailable' | t | escape }}"
+  {{ block.shopify_attributes }}
+>
+  <div class="incode-eta__status" aria-live="polite">
+    <span class="incode-eta__pulse" aria-hidden="true"></span>
+    <span>{{ 'automatic_eta.calculating' | t }}</span>
+  </div>
+  <div class="incode-eta__content" hidden>
+    <p class="incode-eta__eyebrow">{{ eta_eyebrow | escape }}</p>
+    <h3 class="incode-eta__heading">
+      <span>{{ eta_heading | escape }}</span>
+      <strong data-eta-range></strong>
+    </h3>
+    {% if block.settings.show_journey %}
+      <div class="incode-eta__journey" aria-label="{{ 'automatic_eta.journey_aria_label' | t | escape }}">
+        <div class="incode-eta__step is-active">
+          <span class="incode-eta__marker" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 5h2l2 10h9l2-7H7"></path><circle cx="10" cy="19" r="1.5"></circle><circle cx="18" cy="19" r="1.5"></circle></svg>
+          </span>
+          <span>{{ 'automatic_eta.order_confirmed' | t }}</span>
+          <strong data-eta-order></strong>
+        </div>
+        <div class="incode-eta__step">
+          <span class="incode-eta__marker" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4-8-4Z"></path><path d="M4 7v10l8 4 8-4V7M12 11v10"></path></svg>
+          </span>
+          <span>{{ 'automatic_eta.ready_to_ship' | t }}</span>
+          <strong data-eta-dispatch></strong>
+        </div>
+        <div class="incode-eta__step">
+          <span class="incode-eta__marker" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v11h14V10M9 21v-7h6v7"></path></svg>
+          </span>
+          <span>{{ 'automatic_eta.at_doorstep' | t }}</span>
+          <strong data-eta-delivery></strong>
+        </div>
+      </div>
+    {% endif %}
+    <p class="incode-eta__note">{{ 'automatic_eta.note' | t }}</p>
+  </div>
+</div>
+
+<style>
+  #incode-eta-{{ eta_id }} {
+    --eta-accent: {{ block.settings.accent_color | default: '#f47d32' }};
+    --eta-card: {{ block.settings.card_color | default: '#ffffff' }};
+    --eta-panel: {{ block.settings.journey_color | default: '#fff4ec' }};
+    --eta-text: {{ block.settings.text_color | default: '#1f2937' }};
+    --eta-muted: #667085;
+    --eta-radius: {{ block.settings.corner_radius | default: 14 }}px;
+    --eta-font: inherit;
+    --eta-font-size: 14px;
+    --eta-heading-size: 17px;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 14px 0;
+    padding: 18px;
+    border: 1px solid color-mix(in srgb, var(--eta-accent) 22%, #d7dce2);
+    border-radius: var(--eta-radius);
+    background: var(--eta-card);
+    color: var(--eta-text);
+    box-shadow: 0 8px 24px rgba(17, 24, 39, .07);
+    font-family: var(--eta-font);
+    font-size: var(--eta-font-size);
+  }
+  #incode-eta-{{ eta_id }}[hidden],
+  #incode-eta-{{ eta_id }} [hidden] { display: none !important; }
+  #incode-eta-{{ eta_id }} .incode-eta__status { display: flex; align-items: center; gap: 9px; font-size: 13px; opacity: .72; }
+  #incode-eta-{{ eta_id }} .incode-eta__pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--eta-accent); animation: incodeEtaPulse 1.2s ease-in-out infinite; }
+  #incode-eta-{{ eta_id }} .incode-eta__eyebrow { margin: 0 0 6px; color: var(--eta-accent); font-size: 11px; font-weight: 800; letter-spacing: .09em; }
+  #incode-eta-{{ eta_id }} .incode-eta__heading { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 15px; font-size: var(--eta-heading-size); line-height: 1.35; }
+  #incode-eta-{{ eta_id }} .incode-eta__heading strong { color: var(--eta-accent); }
+  #incode-eta-{{ eta_id }} .incode-eta__journey { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 1px solid color-mix(in srgb, var(--eta-accent) 28%, #d7dce2); border-radius: 12px; background: var(--eta-panel); }
+  #incode-eta-{{ eta_id }} .incode-eta__step { position: relative; display: grid; justify-items: center; gap: 5px; min-width: 0; padding: 13px 8px; text-align: center; font-size: 11px; }
+  #incode-eta-{{ eta_id }} .incode-eta__step + .incode-eta__step { border-left: 1px solid color-mix(in srgb, var(--eta-accent) 24%, #d7dce2); }
+  #incode-eta-{{ eta_id }} .incode-eta__step.is-active { background: color-mix(in srgb, var(--eta-accent) 15%, transparent); }
+  #incode-eta-{{ eta_id }} .incode-eta__step > span:not(.incode-eta__marker) { opacity: .75; }
+  #incode-eta-{{ eta_id }} .incode-eta__step strong { overflow-wrap: anywhere; font-size: 11px; line-height: 1.35; }
+  #incode-eta-{{ eta_id }} .incode-eta__marker { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 50%; background: var(--eta-card); color: var(--eta-accent); box-shadow: 0 2px 8px rgba(17, 24, 39, .1); }
+  #incode-eta-{{ eta_id }} .incode-eta__marker svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  #incode-eta-{{ eta_id }} .incode-eta__note { margin: 10px 0 0; font-size: 11px; opacity: .62; }
+  @keyframes incodeEtaPulse { 50% { opacity: .35; transform: scale(.8); } }
+  @media (prefers-reduced-motion: reduce) {
+    #incode-eta-{{ eta_id }} *,
+    #incode-eta-{{ eta_id }} *::before,
+    #incode-eta-{{ eta_id }} *::after { animation: none !important; transition: none !important; }
+  }
+  @media (max-width: 480px) {
+    #incode-eta-{{ eta_id }} { padding: 14px; }
+    #incode-eta-{{ eta_id }} .incode-eta__step { padding: 11px 5px; }
+  }
+</style>
+
+<script>
+  (() => {
+    const root = document.getElementById('incode-eta-{{ eta_id }}');
+    if (!root || root.dataset.initialized === 'true') return;
+    root.dataset.initialized = 'true';
+    const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } };
+    const hasProduct = Boolean(String(root.dataset.productId || '').trim());
+    const fonts = {
+      system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      inter: "Inter, system-ui, sans-serif",
+      poppins: "Poppins, system-ui, sans-serif",
+      'dm-sans': "'DM Sans', system-ui, sans-serif",
+      jakarta: "'Plus Jakarta Sans', system-ui, sans-serif"
+    };
+    const applyStorefrontStyle = (style) => {
+      if (!style || typeof style !== 'object') return;
+      const setColor = (name, value) => {
+        if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(name, value);
+      };
+      if (fonts[style.font_family]) root.style.setProperty('--eta-font', fonts[style.font_family]);
+      if (Number.isFinite(Number(style.font_size))) root.style.setProperty('--eta-font-size', `${Number(style.font_size)}px`);
+      if (Number.isFinite(Number(style.heading_size))) root.style.setProperty('--eta-heading-size', `${Number(style.heading_size)}px`);
+      if (Number.isFinite(Number(style.border_radius))) root.style.setProperty('--eta-radius', `${Number(style.border_radius)}px`);
+      setColor('--eta-accent', style.accent_color);
+      setColor('--eta-card', style.card_background);
+      setColor('--eta-panel', style.journey_background);
+      setColor('--eta-text', style.text_color);
+      setColor('--eta-muted', style.muted_color);
+      const journey = root.querySelector('.incode-eta__journey');
+      if (journey && style.show_journey === false) journey.hidden = true;
+      if (typeof style.custom_css === 'string' && style.custom_css.length <= 5000 && !/@import|url\s*\(|expression\s*\(|javascript:|<\/?(?:script|style)/i.test(style.custom_css)) {
+        let customStyle = document.getElementById('incode-storefront-custom-css');
+        if (!customStyle) {
+          customStyle = document.createElement('style');
+          customStyle.id = 'incode-storefront-custom-css';
+          document.head.appendChild(customStyle);
+        }
+        customStyle.textContent = style.custom_css;
+      }
+    };
+    const toVariantGid = (value) => {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (raw.startsWith('gid://shopify/ProductVariant/')) return raw;
+      const numeric = raw.replace(/\D/g, '');
+      return numeric ? `gid://shopify/ProductVariant/${numeric}` : '';
+    };
+    const getSelectedVariantId = () => {
+      if (!hasProduct) return '';
+      const selectors = ['form[action*="/cart/add"] [name="id"]', 'form[action*="/cart/add"] [name="variant"]', 'input[name="id"]', 'select[name="id"]', '[data-variant-id]'];
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (!element) continue;
+        const gid = toVariantGid(element.value || element.dataset?.variantId);
+        if (gid) return gid;
+      }
+      return toVariantGid(new URLSearchParams(window.location.search).get('variant'));
+    };
+    const getQuantity = () => {
+      const input = document.querySelector('form[action*="/cart/add"] [name="quantity"], form[data-type="add-to-cart-form"] [name="quantity"], input[name="quantity"]');
+      const quantity = Number(input?.value || 1);
+      return Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+    };
+    let estimateInvalidated = false;
+    const clearPersistedEstimate = () => {
+      if (estimateInvalidated) return;
+      estimateInvalidated = true;
+      const attributes = Object.fromEntries([
+        '_incode_estimated_date',
+        '_incode_estimated_date_max',
+        '_incode_estimated_date_label',
+        '_incode_estimated_date_max_label',
+        '_incode_delivery_date_range',
+        '_incode_dispatch_date',
+        '_incode_postal_code',
+        '_incode_country',
+        '_incode_eta_message'
+      ].map((key) => [key, '']));
+      fetch('/cart/update.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'same-origin',
+        keepalive: true,
+        body: JSON.stringify({ attributes })
+      }).then((response) => {
+        if (!response.ok) estimateInvalidated = false;
+      }).catch(() => { estimateInvalidated = false; });
+    };
+    const params = new URLSearchParams({ estimate: '1' });
+    if (root.dataset.country) params.set('country', root.dataset.country);
+    if (root.dataset.productId) params.set('productId', root.dataset.productId);
+    if (root.dataset.productVendor) params.set('productVendor', root.dataset.productVendor);
+    const tags = parse(root.dataset.productTags);
+    const collections = parse(root.dataset.collections);
+    if (tags.length) params.set('productTags', tags.join('|'));
+    if (collections.length) params.set('collections', collections.join('|'));
+    if (hasProduct) {
+      const variantId = getSelectedVariantId();
+      if (variantId) params.set('variantId', variantId);
+      params.set('qty', String(getQuantity()));
+    }
+    fetch(`/apps/delivery-checker?${params.toString()}`, { headers: { Accept: 'application/json' } })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('request failed')))
+      .then((data) => {
+        applyStorefrontStyle(data.storefront_style);
+        if (data.enabled === false) { root.hidden = true; return; }
+        root.querySelector('[data-eta-range]').textContent = data.delivery_date_range || data.estimated_date_max_label || '';
+        root.querySelector('[data-eta-order]')?.append(data.order_date_label || root.dataset.today);
+        root.querySelector('[data-eta-dispatch]')?.append(data.dispatch_date_label || '');
+        root.querySelector('[data-eta-delivery]')?.append(data.estimated_date_max_label || data.estimated_date_label || '');
+        root.querySelector('.incode-eta__status').hidden = true;
+        root.querySelector('.incode-eta__content').hidden = false;
+      })
+      .catch(() => {
+        const status = root.querySelector('.incode-eta__status');
+        status.querySelector('span:last-child').textContent = root.dataset.unavailable;
+      });
+    document.addEventListener('change', (event) => {
+      if (hasProduct && event.target?.matches('[name="id"], [name="variant"], [name="quantity"]')) clearPersistedEstimate();
+    });
+    document.addEventListener('input', (event) => {
+      if (hasProduct && event.target?.matches('[name="quantity"]')) clearPersistedEstimate();
+    });
+  })();
+</script>
+
+{% schema %}
+{
+  "name": "t:automatic_eta.schema.name",
+  "target": "section",
+  "enabled_on": {
+    "templates": ["product", "collection", "index", "cart", "search", "page"]
+  },
+  "settings": [
+    { "type": "text", "id": "eyebrow", "label": "t:automatic_eta.schema.eyebrow_label" },
+    { "type": "text", "id": "heading", "label": "t:automatic_eta.schema.heading_label" },
+    { "type": "checkbox", "id": "show_journey", "label": "t:automatic_eta.schema.show_journey_label", "default": true },
+    { "type": "color", "id": "accent_color", "label": "t:automatic_eta.schema.accent_color_label", "default": "#f47d32" },
+    { "type": "color", "id": "text_color", "label": "t:automatic_eta.schema.text_color_label", "default": "#1f2937" },
+    { "type": "color", "id": "card_color", "label": "t:automatic_eta.schema.card_color_label", "default": "#ffffff" },
+    { "type": "color", "id": "journey_color", "label": "t:automatic_eta.schema.journey_color_label", "default": "#fff4ec" },
+    { "type": "range", "id": "corner_radius", "label": "t:automatic_eta.schema.corner_radius_label", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 14 }
+  ]
+}
+{% endschema %}

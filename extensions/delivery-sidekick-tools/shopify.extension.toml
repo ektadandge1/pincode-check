@@ -1,0 +1,14 @@
+api_version = "2026-07"
+
+[[extensions]]
+name = "Delivery configuration tools"
+description = "Inspect delivery coverage, ETA schedules, product rules, fulfillment locations, shipping methods, and lookup performance"
+handle = "delivery-sidekick-tools"
+uid = "e14b855a-00b3-2ac4-864c-f2ebbccccefbd543effd"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/index.js"
+target = "admin.app.tools.data"
+tools = "./tools.json"
+instructions = "./instructions.md"

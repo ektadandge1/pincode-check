@@ -14,70 +14,188 @@ datasource db {
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
 
+model Zone {
+  id        Int      @id @default(autoincrement())
+  shop      String
+  name      String
+  country   String?
+  priority  Int      @default(100)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  postalCodes PostalCode[]
+
+  @@unique([shop, name])
+  @@index([shop, country])
+}
+
 model PostalCode {
-  id            Int      @id @default(autoincrement())
-  shop          String   @default("default")
-  country       String   @default("IN")
-  postalCode    String
-  city          String?
-  state         String?
-  zone          String?
-  serviceable   Boolean  @default(true)
-  deliveryDays  Int
-  codAvailable  Boolean  @default(false)
-  deliveryCharge Float?
-  currency      String?
-  sameDayAvailable Boolean @default(false)
-  nextDayAvailable Boolean @default(false)
-  expressAvailable Boolean @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               Int      @id @default(autoincrement())
+  shop             String   @default("default")
+  country          String   @default("IN")
+  postalCode       String
+  patternType      String   @default("exact")
+  rangeStart       String?
+  rangeEnd         String?
+  zoneId           Int?
+  zoneGroup        Zone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  city             String?
+  state            String?
+  zone             String?
+  serviceable      Boolean  @default(true)
+  deliveryDays     Int
+  codAvailable     Boolean  @default(false)
+  deliveryCharge   Float?
+  currency         String?
+  sameDayAvailable Boolean  @default(false)
+  nextDayAvailable Boolean  @default(false)
+  expressAvailable Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@unique([shop, country, postalCode])
+  @@index([shop, country, patternType])
 }
 
 model DeliverySetting {
-  id                Int      @id @default(autoincrement())
-  shop              String   @unique @default("default")
-  cutoffHour24      Int      @default(14)
-  holidaysCsv       String   @default("")
-  fallbackDays      Int      @default(5)
-  weekendDaysCsv    String   @default("0")
-  courierTimeoutMs  Int      @default(2000)
-  retryCount        Int      @default(1)
-  courierEnabled    Boolean  @default(false)
-  dbFallbackEnabled Boolean  @default(true)
-  inventoryAwareEnabled Boolean @default(false)
-  disableAddToCart  Boolean  @default(false)
-  successMessage    String   @default("Delivery by {date}. {cod_message}{delivery_charge_message}")
-  unavailableMessage String  @default("Sorry, delivery is not available for this postal code.")
-  codAvailableMessage String @default("COD available.")
-  codUnavailableMessage String @default("Prepaid only.")
-  deliveryChargeMessage String @default(" Delivery charge: {currency}{delivery_charge}.")
-  googleSheetCsvUrl String?
-  lastGoogleSheetSyncAt DateTime?
-  lastGoogleSheetSyncStatus String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                           Int       @id @default(autoincrement())
+  shop                         String    @unique @default("default")
+  cutoffHour24                 Int       @default(14)
+  processingDays               Int       @default(0)
+  deliveryWindowDays           Int       @default(2)
+  dateFormat                   String    @default("weekday_day_month")
+  timeZone                     String    @default("UTC")
+  locale                       String    @default("en")
+  holidaysCsv                  String    @default("")
+  fallbackDays                 Int       @default(5)
+  weekendDaysCsv               String    @default("0")
+  courierTimeoutMs             Int       @default(2000)
+  retryCount                   Int       @default(1)
+  courierEnabled               Boolean   @default(false)
+  dbFallbackEnabled            Boolean   @default(true)
+  inventoryAwareEnabled        Boolean   @default(false)
+  disableAddToCart             Boolean   @default(false)
+  requireValidPin              Boolean   @default(false)
+  successMessage               String    @default("Delivery by {date}. {cod_message}{delivery_charge_message}")
+  unavailableMessage           String    @default("Sorry, delivery is not available for this postal code.")
+  codAvailableMessage          String    @default("COD available.")
+  codUnavailableMessage        String    @default("Prepaid only.")
+  deliveryChargeMessage        String    @default(" Delivery charge: {currency}{delivery_charge}.")
+  storefrontFontFamily         String    @default("system")
+  storefrontFontSize           Int       @default(14)
+  storefrontHeadingSize        Int       @default(18)
+  storefrontTextColor          String    @default("#16151a")
+  storefrontMutedColor         String    @default("#667085")
+  storefrontAccentColor        String    @default("#2b2640")
+  storefrontButtonColor        String    @default("#2b2640")
+  storefrontButtonTextColor    String    @default("#ffffff")
+  storefrontCardBackground     String    @default("#ffffff")
+  storefrontJourneyBackground  String    @default("#e6edff")
+  storefrontJourneyActiveColor String    @default("#9bb8f2")
+  storefrontJourneyLineColor   String    @default("#f28c52")
+  storefrontJourneyLineStyle   String    @default("dotted")
+  storefrontTemplate           String    @default("modern-card")
+  storefrontBorderRadius       Int       @default(14)
+  storefrontIconStyle          String    @default("number")
+  storefrontAnimation          String    @default("soft")
+  storefrontShowJourney        Boolean   @default(true)
+  storefrontCustomCss          String    @default("")
+  locationPriorityMode         String    @default("manual")
+  shippingMethodDisplayStyle   String    @default("visual")
+  googleSheetCsvUrl            String?
+  lastGoogleSheetSyncAt        DateTime?
+  lastGoogleSheetSyncStatus    String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+}
+
+model DeliveryTarget {
+  id                   Int      @id @default(autoincrement())
+  shop                 String
+  name                 String
+  targetKind           String
+  targetValue          String
+  countryCode          String?
+  stateRegion          String?
+  inventoryMode        String   @default("any")
+  customSuccessMessage String?
+  activationMode       String   @default("always")
+  activeFromLocal      String?
+  activeUntilLocal     String?
+  weekdaysCsv          String   @default("")
+  startTimeLocal       String?
+  endTimeLocal         String?
+  requireValidPin      Boolean  @default(true)
+  processingDays       Int?
+  transitDays          Int?
+  excluded             Boolean  @default(false)
+  enabled              Boolean  @default(true)
+  priority             Int      @default(100)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([shop, name])
+  @@index([shop, targetKind, targetValue])
+  @@index([shop, enabled, priority])
+}
+
+model FulfillmentLocationRule {
+  id                          Int      @id @default(autoincrement())
+  shop                        String
+  shopifyLocationId           String
+  name                        String
+  enabled                     Boolean  @default(true)
+  priority                    Int      @default(100)
+  processingDays              Int?
+  transitDays                 Int?
+  localDeliveryEnabled        Boolean  @default(false)
+  localDeliveryPostalCodesCsv String   @default("")
+  pickupEnabled               Boolean  @default(false)
+  pickupInstructions          String   @default("")
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@unique([shop, shopifyLocationId])
+  @@index([shop, enabled, priority])
+}
+
+model ShippingMethodRule {
+  id             Int      @id @default(autoincrement())
+  shop           String
+  handle         String
+  name           String
+  kind           String   @default("standard")
+  enabled        Boolean  @default(true)
+  priority       Int      @default(100)
+  processingDays Int?
+  transitDays    Int
+  description    String?
+  customMessage  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([shop, handle])
+  @@index([shop, enabled, priority])
 }
 
 model ImportJob {

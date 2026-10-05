@@ -1,0 +1,10 @@
+{
+  "name": "delivery-estimate-surfaces",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@preact/signals": "^2.3.1",
+    "@shopify/ui-extensions": "^2026.7.0",
+    "preact": "^10.27.2"
+  }
+}

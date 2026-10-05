@@ -1,0 +1,11 @@
+[
+  {
+    "$schema": "https://extensions.shopifycdn.com/shopifycloud/schemas/v1/tool.json",
+    "name": "get_delivery_configuration",
+    "description": "Get the store's current delivery ETA configuration and 30-day postal-code availability performance",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]

@@ -9,7 +9,6 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
-import "@shopify/polaris/build/esm/styles.css";
 
 export const meta: MetaFunction = () => [
   { title: "Privacy Policy | Incode Track" },
@@ -22,14 +21,16 @@ export const meta: MetaFunction = () => [
 
 export const loader = async () => ({
   contactEmail: process.env.PRIVACY_EMAIL || process.env.SUPPORT_EMAIL || "",
+  legalBusinessName: process.env.LEGAL_BUSINESS_NAME || "Incode Track",
 });
 
 export default function PrivacyPolicy() {
-  const { contactEmail } = useLoaderData<typeof loader>();
+  const { contactEmail, legalBusinessName } = useLoaderData<typeof loader>();
 
   return (
     <PolarisProvider i18n={enTranslations}>
-      <Page title="Privacy Policy" subtitle="Last updated: July 14, 2026">
+      <div className="incode-public">
+      <Page title="Privacy Policy" subtitle="Last updated: September 28, 2026" narrowWidth backAction={{ content: "Incode Track", url: "/" }}>
         <Layout>
           <Layout.Section>
             <Card>
@@ -47,8 +48,9 @@ export default function PrivacyPolicy() {
                   <Text as="p">
                     The app does not store customer names, addresses, emails,
                     phone numbers, orders, payments, or checkout information.
-                    Storefront shoppers enter a country and postal code only to receive an
-                    immediate delivery availability response.
+                    Storefront shoppers enter a country and postal code to receive an
+                    immediate delivery availability response. Lookup analytics retain only
+                    a shortened postal-code region, not the complete shopper entry.
                   </Text>
                 </BlockStack>
 
@@ -79,7 +81,7 @@ export default function PrivacyPolicy() {
                     webhook, shop-owned app data is deleted from the app
                     database. The app also responds to Shopify mandatory privacy
                     webhooks for customer data requests and customer redaction
-                    requests.
+                    requests. Lookup analytics are retained for up to 90 days.
                   </Text>
                 </BlockStack>
 
@@ -90,9 +92,8 @@ export default function PrivacyPolicy() {
                   <Text as="p">
                     The app uses Shopify OAuth, session-token based embedded app
                     authentication, App Bridge, HTTPS in production, and Shopify
-                    webhook verification. Production database encryption, backup
-                    encryption, and access controls must be configured in the
-                    hosting environment.
+                    webhook verification. Production hosting uses encrypted
+                    transport, restricted database access, and encrypted backups.
                   </Text>
                 </BlockStack>
 
@@ -100,10 +101,9 @@ export default function PrivacyPolicy() {
                   <Text as="h2" variant="headingLg">
                     Contact
                   </Text>
+                  <Text as="p">Data controller: {legalBusinessName}.</Text>
                   <Text as="p">
-                    {contactEmail
-                      ? `For privacy or support requests, contact ${contactEmail}.`
-                      : "For privacy or support requests, use the support contact listed in the Shopify App Store listing for Incode Track."}
+                    {contactEmail ? <>For privacy or support requests, contact <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.</> : "For privacy or support requests, use the support contact listed in the Shopify App Store listing for Incode Track."}
                   </Text>
                 </BlockStack>
               </BlockStack>
@@ -111,6 +111,7 @@ export default function PrivacyPolicy() {
           </Layout.Section>
         </Layout>
       </Page>
+      </div>
     </PolarisProvider>
   );
 }

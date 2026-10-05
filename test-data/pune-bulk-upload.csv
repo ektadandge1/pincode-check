@@ -1,0 +1,16 @@
+country,postal_code,delivery_days,serviceable,cod_available,delivery_charge,currency,city,state,zone,same_day,next_day,express
+IN,411001,2,true,true,50,INR,Pune,Maharashtra,Pune Metro,false,true,true
+IN,411002,2,true,true,50,INR,Pune,Maharashtra,Pune Metro,false,true,true
+IN,411003,3,true,false,40,INR,Pune,Maharashtra,Pune West,false,true,true
+IN,411004,2,true,true,60,INR,Pune,Maharashtra,Pune Metro,false,true,true
+IN,411005,3,true,true,50,INR,Pune,Maharashtra,Pune West,false,true,true
+IN,411006,3,true,false,40,INR,Pune,Maharashtra,Pune East,false,false,true
+IN,411007,2,true,true,50,INR,Pune,Maharashtra,Pune Metro,true,true,true
+IN,411008,3,true,true,45,INR,Pune,Maharashtra,Pune West,false,true,true
+IN,411009,3,true,false,40,INR,Pune,Maharashtra,Pune East,false,false,true
+IN,411014,2,true,true,50,INR,Pune,Maharashtra,Pune East,false,true,true
+IN,411018,3,true,true,45,INR,Pimpri-Chinchwad,Maharashtra,Pimpri-Chinchwad,false,true,true
+IN,411027,3,true,false,40,INR,Pune,Maharashtra,Pune West,false,false,true
+IN,411037,2,true,true,50,INR,Pune,Maharashtra,Pune South,false,true,true
+IN,411045,2,true,true,60,INR,Pune,Maharashtra,Pune West,false,true,true
+IN,411057,3,true,false,45,INR,Pune,Maharashtra,Pune South,false,false,true

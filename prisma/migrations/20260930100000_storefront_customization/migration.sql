@@ -1,0 +1,15 @@
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontFontFamily" TEXT NOT NULL DEFAULT 'system';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontFontSize" INTEGER NOT NULL DEFAULT 14;
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontHeadingSize" INTEGER NOT NULL DEFAULT 18;
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontTextColor" TEXT NOT NULL DEFAULT '#16151a';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontMutedColor" TEXT NOT NULL DEFAULT '#667085';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontAccentColor" TEXT NOT NULL DEFAULT '#2b2640';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontButtonColor" TEXT NOT NULL DEFAULT '#2b2640';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontButtonTextColor" TEXT NOT NULL DEFAULT '#ffffff';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontCardBackground" TEXT NOT NULL DEFAULT '#ffffff';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontJourneyBackground" TEXT NOT NULL DEFAULT '#e6edff';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontJourneyActiveColor" TEXT NOT NULL DEFAULT '#9bb8f2';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontBorderRadius" INTEGER NOT NULL DEFAULT 14;
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontIconStyle" TEXT NOT NULL DEFAULT 'number';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontAnimation" TEXT NOT NULL DEFAULT 'soft';
+ALTER TABLE "DeliverySetting" ADD COLUMN "storefrontShowJourney" BOOLEAN NOT NULL DEFAULT true;

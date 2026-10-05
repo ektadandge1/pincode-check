@@ -1,5 +1,12 @@
-import type { HeadersFunction } from "react-router";
+import type { HeadersFunction, LinksFunction } from "react-router";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
+import appStyles from "./styles.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: polarisStyles },
+  { rel: "stylesheet", href: appStyles },
+];
 
 export default function App() {
   return (
@@ -12,7 +19,6 @@ export default function App() {
           rel="stylesheet"
           href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
         />
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
         <Meta />
         <Links />
       </head>
