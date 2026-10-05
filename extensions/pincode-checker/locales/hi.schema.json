@@ -29,8 +29,8 @@
       "heading_label": "पैनल शीर्षक",
       "auto_check_saved_address_label": "सहेजे हुए ग्राहक पते की अपने आप जांच करें",
       "auto_check_saved_address_info": "उपलब्ध होने पर लॉग-इन ग्राहक के डिफ़ॉल्ट पते का उपयोग करता है। यह सटीक IP स्थान का उपयोग नहीं करता।",
-      "show_product_card_eta_label": "कलेक्शन और खोज उत्पाद कार्ड पर ETA दिखाएं",
-      "show_product_card_eta_info": "केवल अनुमानित डिलीवरी अवधि दिखाता है। यह पिन-कोड सेवा उपलब्धता का दावा नहीं करता।",
+      "show_product_card_eta_label": "उत्पाद कार्ड पर ETA दिखाएं",
+      "show_product_card_eta_info": "उत्पाद के किसी सक्रिय लक्ष्य नियम से मेल खाने पर ही अनुमानित डिलीवरी अवधि दिखाता है।",
       "accent_color_label": "एक्सेंट रंग",
       "text_color_label": "टेक्स्ट रंग",
       "card_color_label": "कार्ड रंग"

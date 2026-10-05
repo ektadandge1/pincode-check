@@ -29,8 +29,8 @@
       "heading_label": "Panel heading",
       "auto_check_saved_address_label": "Auto-check saved customer address",
       "auto_check_saved_address_info": "Uses the logged-in customer's default address when available. This does not use precise IP location.",
-      "show_product_card_eta_label": "Show ETA on collection and search product cards",
-      "show_product_card_eta_info": "Shows an estimated delivery range only. It does not claim postal-code serviceability.",
+      "show_product_card_eta_label": "Show ETA on product cards",
+      "show_product_card_eta_info": "Shows an estimated delivery range on product cards only when the product matches an enabled targeting rule.",
       "accent_color_label": "Accent color",
       "text_color_label": "Text color",
       "card_color_label": "Card color"

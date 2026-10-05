@@ -15,11 +15,11 @@ import {
 } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { requireActiveBilling } from "../services/billing.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const shop = session.shop;
   const access = await resolvePlanAccess({ shop, admin });
   const since = new Date();
@@ -101,7 +101,7 @@ export default function Index() {
           <MetricCard label="Product targets" value={data.targets} detail="Active enforcement overrides" />
           <MetricCard
             label="30-day availability"
-            value={data.access.features.analytics ? `${data.availabilityRate}%` : "Advanced"}
+            value={data.access.features.analytics ? `${data.availabilityRate}%` : "Subscription required"}
             detail={data.access.features.analytics ? `${data.searches} shopper checks` : "Upgrade for delivery analytics"}
           />
         </div>

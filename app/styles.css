@@ -249,6 +249,42 @@ body {
   letter-spacing: 0.08em;
 }
 
+.incode-preview-surface {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.incode-preview-surface__context {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.incode-preview-surface__context strong {
+  color: #111827;
+  font-size: 15px;
+}
+
+.incode-preview-surface__products {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.incode-preview-surface__products > span {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
 .incode-custom-preview {
   display: grid;
   gap: 10px;
@@ -267,11 +303,60 @@ body {
   line-height: 1.25;
 }
 
+.incode-custom-preview__country {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid;
+  border-radius: 9px;
+}
+
+.incode-custom-preview__checker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.incode-custom-preview__checker > span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid;
+  border-radius: 9px 0 0 9px;
+  color: #7a7d81;
+  font-size: 11px;
+}
+
+.incode-custom-preview__checker button {
+  border-radius: 0 9px 9px 0;
+}
+
+.incode-custom-preview__result {
+  padding: 13px 10px;
+  border-radius: 2px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.incode-custom-preview__journey-shell {
+  overflow: hidden;
+  border: 1px solid;
+  border-radius: 12px;
+  padding-top: 12px;
+  text-align: center;
+}
+
+.incode-custom-preview__journey-shell > strong {
+  font-size: 11px;
+}
+
 .incode-custom-preview__journey {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 0 0 12px 12px;
 }
 
 .incode-custom-preview__journey > div {
@@ -426,23 +511,41 @@ body {
 
 .incode-custom-preview__countdown {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  gap: 12px;
+  padding: 16px 10px;
+  border-radius: 11px;
   text-align: center;
 }
 
-.incode-custom-preview__countdown strong {
+.incode-custom-preview__countdown > strong {
+  font-size: 13px;
+}
+
+.incode-custom-preview__countdown > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  max-width: 220px;
+  margin: 0 auto;
+}
+
+.incode-custom-preview__countdown span {
+  display: grid;
+  gap: 4px;
+}
+
+.incode-custom-preview__countdown b {
   border-radius: 6px;
-  background: #c8f2ff;
-  padding: 5px 2px;
-  color: #17485c;
+  padding: 7px 3px;
+  color: inherit;
+  font-size: 20px;
   font-variant-numeric: tabular-nums;
 }
 
 .incode-custom-preview__countdown small {
-  grid-row: 2;
-  color: #4a6570;
-  font-size: 8px;
+  color: inherit;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .incode-custom-preview button {
@@ -626,6 +729,60 @@ body {
 
 .incode-countdown-preview small {
   color: #6b7280;
+}
+
+.incode-delivery-settings__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--p-color-border-secondary, #ebebeb);
+  border-radius: 12px;
+  background: var(--p-color-bg-surface, #fff);
+}
+
+.incode-delivery-settings__tabs a {
+  flex: 1 0 auto;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: var(--p-color-text-secondary, #616161);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+
+.incode-delivery-settings__tabs a:hover {
+  background: var(--p-color-bg-surface-hover, #f1f1f1);
+}
+
+.incode-delivery-settings__tabs a[aria-current="page"] {
+  background: var(--p-color-bg-fill, #303030);
+  color: var(--p-color-text-on-color, #fff);
+}
+
+.incode-delivery-settings__tabs a:focus-visible {
+  outline: 2px solid var(--p-color-border-focus, #005bd3);
+  outline-offset: 2px;
+}
+
+.incode-delivery-settings__intro {
+  display: grid;
+  gap: 8px;
+}
+
+.incode-delivery-settings .Polaris-Layout__Section {
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .incode-delivery-settings__tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .incode-delivery-settings__tabs a {
+    padding: 12px 6px;
+  }
 }
 
 @media (max-width: 900px) {

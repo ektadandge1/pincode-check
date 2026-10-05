@@ -118,6 +118,8 @@
   data-countdown-hours="{{ 'delivery_checker.countdown_hours' | t | escape }}"
   data-countdown-minutes="{{ 'delivery_checker.countdown_minutes' | t | escape }}"
   data-countdown-seconds="{{ 'delivery_checker.countdown_seconds' | t | escape }}"
+  data-estimated-delivery-label="{{ 'delivery_checker.estimated_delivery_date' | t | escape }}"
+  data-get-it-by-label="{{ 'delivery_checker.get_it_by' | t | escape }}"
   data-inline-delivery-checker
   {{ block.shopify_attributes }}
 >
@@ -129,28 +131,31 @@
     </div>
   </div>
   <div class="pin-checker__row">
-    <label class="pin-checker__label" for="pin-country-{{ block_id }}">{{ 'delivery_checker.country_label' | t }}</label>
-    <select
-      class="pin-checker__select"
-      name="country"
-      aria-label="{{ 'delivery_checker.country_aria_label' | t | escape }}"
-      id="pin-country-{{ block_id }}"
-    >
-      {% if localization.available_countries.size > 0 %}
-        {% assign selected_country_available = false %}
-        {% for country in localization.available_countries %}
-          {% if country.iso_code == selected_country %}
-            {% assign selected_country_available = true %}
-          {% endif %}
-          <option value="{{ country.iso_code | escape }}" {% if country.iso_code == selected_country %}selected{% endif %}>{{ country.name | escape }}</option>
-        {% endfor %}
-        {% unless selected_country_available %}
+    <div class="pin-checker__country-wrap">
+      <span class="pin-checker__country-flag" data-country-flag aria-hidden="true"></span>
+      <label class="pin-checker__label" for="pin-country-{{ block_id }}">{{ 'delivery_checker.country_label' | t }}</label>
+      <select
+        class="pin-checker__select"
+        name="country"
+        aria-label="{{ 'delivery_checker.country_aria_label' | t | escape }}"
+        id="pin-country-{{ block_id }}"
+      >
+        {% if localization.available_countries.size > 0 %}
+          {% assign selected_country_available = false %}
+          {% for country in localization.available_countries %}
+            {% if country.iso_code == selected_country %}
+              {% assign selected_country_available = true %}
+            {% endif %}
+            <option value="{{ country.iso_code | escape }}" {% if country.iso_code == selected_country %}selected{% endif %}>{{ country.name | escape }}</option>
+          {% endfor %}
+          {% unless selected_country_available %}
+            <option value="{{ selected_country | escape }}" selected>{{ selected_country | escape }}</option>
+          {% endunless %}
+        {% else %}
           <option value="{{ selected_country | escape }}" selected>{{ selected_country | escape }}</option>
-        {% endunless %}
-      {% else %}
-        <option value="{{ selected_country | escape }}" selected>{{ selected_country | escape }}</option>
-      {% endif %}
-    </select>
+        {% endif %}
+      </select>
+    </div>
     <label class="pin-checker__label" for="pin-input-{{ block_id }}">{{ 'delivery_checker.postal_label' | t }}</label>
     <input
       class="pin-checker__input"
@@ -181,6 +186,11 @@
   <script type="application/json" id="pin-cart-items-{{ block_id }}">{{ cart_items_json }}</script>
   <div class="pin-checker__details" id="pin-details-{{ block_id }}" hidden>
     <div class="pin-checker__journey" id="pin-journey-{{ block_id }}" hidden aria-label="{{ 'delivery_checker.journey_aria_label' | t | escape }}">
+      <div class="pin-checker__journey-title">
+        <span data-country-flag aria-hidden="true"></span>
+        <span>{{ 'delivery_checker.estimated_delivery_date' | t }}</span>
+        <strong data-journey-range></strong>
+      </div>
       <div class="pin-checker__journey-step pin-checker__journey-step--active">
         <span class="pin-checker__journey-marker">
           <span class="pin-checker__journey-number">1</span>
@@ -213,10 +223,12 @@
         <small data-journey-delivery></small>
       </div>
     </div>
-    <p class="pin-checker__countdown" id="pin-countdown-{{ block_id }}" hidden>
-      <span id="pin-countdown-label-{{ block_id }}">{{ 'delivery_checker.order_within' | t }}</span>
+    <section class="pin-checker__countdown" id="pin-countdown-{{ block_id }}" hidden aria-live="polite">
+      <span class="pin-checker__countdown-title" data-countdown-title>🔥 {{ 'delivery_checker.countdown_title' | t }} 🔥</span>
+      <span class="pin-checker__countdown-label" id="pin-countdown-label-{{ block_id }}">{{ 'delivery_checker.order_within' | t }}</span>
       <strong id="pin-countdown-value-{{ block_id }}"></strong>
-    </p>
+      <span class="pin-checker__countdown-delivery" data-countdown-delivery></span>
+    </section>
     <ul
       class="pin-checker__options"
       id="pin-options-{{ block_id }}"
@@ -242,6 +254,12 @@
     --pc-btn: {{ block.settings.button_color | default: '#2b2640' }};
     --pc-btn-text: {{ block.settings.button_text_color | default: '#ffffff' }};
     --pc-card: {{ block.settings.background_color | default: '#ffffff' }};
+    --pc-field-bg: #ffffff;
+    --pc-result-bg: #171717;
+    --pc-result-text: #ffffff;
+    --pc-countdown-bg: #06451f;
+    --pc-countdown-digit: #ff6500;
+    --pc-countdown-text: #ffffff;
     --pc-radius: {{ block.settings.corner_radius | default: 14 }}px;
     --pc-font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --pc-font-size: 14px;
@@ -335,9 +353,20 @@
       setColor('--pc-btn', style.button_color);
       setColor('--pc-btn-text', style.button_text_color);
       setColor('--pc-card', style.card_background);
+      setColor('--pc-field-bg', style.field_background);
+      setColor('--pc-input-border', style.field_border_color);
+      setColor('--pc-result-bg', style.result_background);
+      setColor('--pc-result-text', style.result_text_color);
       setColor('--pc-journey-bg', style.journey_background);
       setColor('--pc-journey-active', style.journey_active_color);
       setColor('--pc-journey-line', style.journey_line_color);
+      setColor('--pc-countdown-bg', style.countdown_background);
+      setColor('--pc-countdown-digit', style.countdown_digit_color);
+      setColor('--pc-countdown-text', style.countdown_text_color);
+      const countdownTitle = root.querySelector('[data-countdown-title]');
+      if (countdownTitle && typeof style.countdown_title === 'string' && style.countdown_title.trim()) {
+        countdownTitle.textContent = `🔥 ${style.countdown_title.trim()} 🔥`;
+      }
       root.dataset.iconStyle = String(style.icon_style || root.dataset.iconStyle || 'number');
       root.dataset.animation = String(style.animation || 'soft');
       root.dataset.lineStyle = String(style.journey_line_style || 'dotted');
@@ -472,6 +501,18 @@
       return new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short' }).format(parsed);
     };
 
+    const countryFlag = (value) => {
+      const code = String(value || '').trim().toUpperCase();
+      return /^[A-Z]{2}$/.test(code)
+        ? String.fromCodePoint(...[...code].map((character) => 127397 + character.charCodeAt(0)))
+        : '';
+    };
+
+    const updateCountryFlags = () => {
+      const flag = countryFlag(countrySelect && countrySelect.value);
+      root.querySelectorAll('[data-country-flag]').forEach((element) => { element.textContent = flag; });
+    };
+
     const renderJourney = (data) => {
       if (!journey || root.dataset.showJourney !== 'true' || !data || data.available !== true) return;
       if (journeyOrder) journeyOrder.textContent = root.dataset.journeyToday;
@@ -483,6 +524,9 @@
           ? `${earliest} - ${latest}`
           : earliest || latest || root.dataset.journeyCalculating;
       }
+      const journeyRange = journey.querySelector('[data-journey-range]');
+      if (journeyRange) journeyRange.textContent = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
+      updateCountryFlags();
       journey.hidden = false;
     };
 
@@ -642,6 +686,11 @@
       };
 
       countdownLabel.hidden = false;
+      const countdownDelivery = countdown.querySelector('[data-countdown-delivery]');
+      if (countdownDelivery) {
+        const range = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
+        countdownDelivery.textContent = range ? `${root.dataset.getItByLabel} ${range}` : '';
+      }
       countdown.hidden = false;
       updateCountdown();
       if (cutoffTime > Date.now()) countdownTimer = window.setInterval(updateCountdown, 1000);
@@ -925,6 +974,7 @@
       }
     };
     countrySelect.addEventListener('change', () => {
+      updateCountryFlags();
       clearStaleResult();
       setSavedLocationActive(false);
     }, eventOptions);
@@ -938,12 +988,14 @@
         clearStaleResult();
         if (restore) {
           if (savedCountry) countrySelect.value = savedCountry;
+          updateCountryFlags();
           pinInput.value = savedPostal;
           setSavedLocationActive(true);
           pinInput.focus();
           return;
         }
         countrySelect.value = localizationCountry;
+        updateCountryFlags();
         pinInput.value = '';
         setSavedLocationActive(false);
         pinInput.focus();
@@ -996,6 +1048,7 @@
     }, eventOptions);
 
     setSavedLocationActive(Boolean(savedPostal));
+    updateCountryFlags();
     initPolicy().then(() => {
       if (
         root.dataset.autoCheckSavedAddress === 'true'

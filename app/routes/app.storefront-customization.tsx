@@ -17,7 +17,7 @@ import {
 } from "@shopify/polaris";
 import prisma from "../db.server";
 import { isSafeStorefrontCss } from "../utils/custom-css";
-import { authenticate } from "../shopify.server";
+import { requireActiveBilling } from "../services/billing.server";
 
 type Customization = {
   storefrontFontFamily: string;
@@ -29,6 +29,10 @@ type Customization = {
   storefrontButtonColor: string;
   storefrontButtonTextColor: string;
   storefrontCardBackground: string;
+  storefrontFieldBackground: string;
+  storefrontFieldBorderColor: string;
+  storefrontResultBackground: string;
+  storefrontResultTextColor: string;
   storefrontJourneyBackground: string;
   storefrontJourneyActiveColor: string;
   storefrontJourneyLineColor: string;
@@ -38,6 +42,10 @@ type Customization = {
   storefrontIconStyle: string;
   storefrontAnimation: string;
   storefrontShowJourney: boolean;
+  storefrontCountdownBackground: string;
+  storefrontCountdownDigitColor: string;
+  storefrontCountdownTextColor: string;
+  storefrontCountdownTitle: string;
   storefrontCustomCss: string;
 };
 
@@ -53,6 +61,10 @@ const DEFAULTS: Customization = {
   storefrontButtonColor: "#2b2640",
   storefrontButtonTextColor: "#ffffff",
   storefrontCardBackground: "#ffffff",
+  storefrontFieldBackground: "#ffffff",
+  storefrontFieldBorderColor: "#d7d9dd",
+  storefrontResultBackground: "#171717",
+  storefrontResultTextColor: "#ffffff",
   storefrontJourneyBackground: "#e6edff",
   storefrontJourneyActiveColor: "#9bb8f2",
   storefrontJourneyLineColor: "#f28c52",
@@ -62,6 +74,10 @@ const DEFAULTS: Customization = {
   storefrontIconStyle: "number",
   storefrontAnimation: "soft",
   storefrontShowJourney: true,
+  storefrontCountdownBackground: "#06451f",
+  storefrontCountdownDigitColor: "#ff6500",
+  storefrontCountdownTextColor: "#ffffff",
+  storefrontCountdownTitle: "Order cutoff countdown",
   storefrontCustomCss: "",
 };
 
@@ -98,7 +114,7 @@ const LINE_OPTIONS = [
 ];
 
 const TEMPLATE_OPTIONS = [
-  { label: "Modern delivery card", value: "modern-card" },
+  { label: "ZIP checker + ETA journey (recommended)", value: "modern-card" },
   { label: "Soft segmented journey", value: "soft-segments" },
   { label: "Pastel connected timeline", value: "pastel-timeline" },
   { label: "Fresh progress track", value: "progress-track" },
@@ -119,7 +135,7 @@ const STOREFRONT_SURFACES = [
 ] as const;
 
 const TEMPLATE_PRESETS: Record<string, Partial<Customization>> = {
-  "modern-card": { storefrontCardBackground: "#ffffff", storefrontJourneyBackground: "#e6edff", storefrontJourneyActiveColor: "#9bb8f2", storefrontJourneyLineColor: "#5979bd", storefrontJourneyLineStyle: "none", storefrontIconStyle: "number", storefrontAnimation: "soft", storefrontBorderRadius: 14 },
+  "modern-card": { storefrontAccentColor: "#f45d08", storefrontButtonColor: "#f45d08", storefrontButtonTextColor: "#111111", storefrontCardBackground: "#ffffff", storefrontFieldBackground: "#ffffff", storefrontFieldBorderColor: "#d7d9dd", storefrontResultBackground: "#171717", storefrontResultTextColor: "#ffffff", storefrontJourneyBackground: "#ffffff", storefrontJourneyActiveColor: "#ffffff", storefrontJourneyLineColor: "#333333", storefrontJourneyLineStyle: "dotted", storefrontIconStyle: "delivery", storefrontAnimation: "soft", storefrontBorderRadius: 12, storefrontCountdownBackground: "#06451f", storefrontCountdownDigitColor: "#ff6500", storefrontCountdownTextColor: "#ffffff" },
   "soft-segments": { storefrontCardBackground: "#eef3ff", storefrontJourneyBackground: "#dce7ff", storefrontJourneyActiveColor: "#9bb8f2", storefrontJourneyLineColor: "#6f8fcf", storefrontJourneyLineStyle: "none", storefrontIconStyle: "duotone", storefrontAnimation: "soft", storefrontBorderRadius: 16 },
   "pastel-timeline": { storefrontCardBackground: "#fff5fc", storefrontJourneyBackground: "#f8def4", storefrontJourneyActiveColor: "#ffffff", storefrontJourneyLineColor: "#b25bac", storefrontJourneyLineStyle: "solid", storefrontIconStyle: "duotone", storefrontAnimation: "route", storefrontBorderRadius: 16 },
   "progress-track": { storefrontCardBackground: "#fbfff2", storefrontJourneyBackground: "#f4ffe3", storefrontJourneyActiveColor: "#ffffff", storefrontJourneyLineColor: "#648c1e", storefrontJourneyLineStyle: "solid", storefrontIconStyle: "minimal", storefrontAnimation: "route", storefrontBorderRadius: 12 },
@@ -139,13 +155,13 @@ function readCustomization(setting: Partial<Customization> | null): Customizatio
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session } = await requireActiveBilling(request);
   const setting = await prisma.deliverySetting.findUnique({ where: { shop: session.shop } });
   return { shop: session.shop, apiKey: process.env.SHOPIFY_API_KEY || "", customization: readCustomization(setting) };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session } = await requireActiveBilling(request);
   const formData = await request.formData();
   const customization = {
     storefrontFontFamily: String(formData.get("storefrontFontFamily") ?? "system"),
@@ -157,6 +173,10 @@ export async function action({ request }: ActionFunctionArgs) {
     storefrontButtonColor: String(formData.get("storefrontButtonColor") ?? "").trim(),
     storefrontButtonTextColor: String(formData.get("storefrontButtonTextColor") ?? "").trim(),
     storefrontCardBackground: String(formData.get("storefrontCardBackground") ?? "").trim(),
+    storefrontFieldBackground: String(formData.get("storefrontFieldBackground") ?? "").trim(),
+    storefrontFieldBorderColor: String(formData.get("storefrontFieldBorderColor") ?? "").trim(),
+    storefrontResultBackground: String(formData.get("storefrontResultBackground") ?? "").trim(),
+    storefrontResultTextColor: String(formData.get("storefrontResultTextColor") ?? "").trim(),
     storefrontJourneyBackground: String(formData.get("storefrontJourneyBackground") ?? "").trim(),
     storefrontJourneyActiveColor: String(formData.get("storefrontJourneyActiveColor") ?? "").trim(),
     storefrontJourneyLineColor: String(formData.get("storefrontJourneyLineColor") ?? "").trim(),
@@ -166,6 +186,10 @@ export async function action({ request }: ActionFunctionArgs) {
     storefrontIconStyle: String(formData.get("storefrontIconStyle") ?? "number"),
     storefrontAnimation: String(formData.get("storefrontAnimation") ?? "soft"),
     storefrontShowJourney: formData.has("storefrontShowJourney"),
+    storefrontCountdownBackground: String(formData.get("storefrontCountdownBackground") ?? "").trim(),
+    storefrontCountdownDigitColor: String(formData.get("storefrontCountdownDigitColor") ?? "").trim(),
+    storefrontCountdownTextColor: String(formData.get("storefrontCountdownTextColor") ?? "").trim(),
+    storefrontCountdownTitle: String(formData.get("storefrontCountdownTitle") ?? "").trim(),
     storefrontCustomCss: String(formData.get("storefrontCustomCss") ?? "").trim(),
   } satisfies Customization;
 
@@ -200,15 +224,25 @@ export async function action({ request }: ActionFunctionArgs) {
     customization.storefrontButtonColor,
     customization.storefrontButtonTextColor,
     customization.storefrontCardBackground,
+    customization.storefrontFieldBackground,
+    customization.storefrontFieldBorderColor,
+    customization.storefrontResultBackground,
+    customization.storefrontResultTextColor,
     customization.storefrontJourneyBackground,
     customization.storefrontJourneyActiveColor,
     customization.storefrontJourneyLineColor,
+    customization.storefrontCountdownBackground,
+    customization.storefrontCountdownDigitColor,
+    customization.storefrontCountdownTextColor,
   ];
   if (colors.some((color) => !isHex(color))) {
     return { ok: false, message: "Use six-digit hex colors such as #2B2640." } satisfies ActionData;
   }
   if (!isSafeStorefrontCss(customization.storefrontCustomCss)) {
     return { ok: false, message: "Custom CSS must be 5,000 characters or fewer and cannot load external URLs, imports, or scripts." } satisfies ActionData;
+  }
+  if (!customization.storefrontCountdownTitle || customization.storefrontCountdownTitle.length > 80) {
+    return { ok: false, message: "Countdown heading is required and must be 80 characters or fewer." } satisfies ActionData;
   }
 
   try {
@@ -255,6 +289,10 @@ export default function StorefrontCustomizationPage() {
   const { customization, shop, apiKey } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const [form, setForm] = useState(customization);
+  const [previewSurface, setPreviewSurface] = useState<string>("everywhere");
+  const previewLabel = previewSurface === "everywhere"
+    ? "Everywhere / app embed"
+    : STOREFRONT_SURFACES.find(([, template]) => template === previewSurface)?.[0] ?? "Product page";
   const update = <K extends keyof Customization>(key: K, value: Customization[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -284,9 +322,9 @@ export default function StorefrontCustomizationPage() {
                       <Text as="p" tone="subdued">Add the same delivery widget to product, collection, cart, home, search, and content pages. Checkout is intentionally excluded.</Text>
                     </BlockStack>
                     <InlineStack gap="200" wrap>
-                      <Button url={appEmbedEditorUrl} target="_blank" variant="primary">Enable everywhere</Button>
+                      <Button url={appEmbedEditorUrl} target="_blank" variant={previewSurface === "everywhere" ? "primary" : "secondary"} pressed={previewSurface === "everywhere"} onClick={() => setPreviewSurface("everywhere")}>Enable everywhere</Button>
                       {STOREFRONT_SURFACES.map(([label, template]) => (
-                        <Button key={template} url={themeEditorUrl(template)} target="_blank">Add to {label}</Button>
+                        <Button key={template} url={themeEditorUrl(template)} target="_blank" variant={previewSurface === template ? "primary" : "secondary"} pressed={previewSurface === template} onClick={() => setPreviewSurface(template)}>Add to {label}</Button>
                       ))}
                     </InlineStack>
                     <Text as="p" tone="subdued" variant="bodySm">Thank-you and order-status estimates are available through the Delivery estimate surfaces extension in Shopify’s checkout editor. Do not add an extension to checkout.</Text>
@@ -295,17 +333,20 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="300">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Template library</Text>
-                      <Text as="p" tone="subdued">Start with a complete delivery design, then customize every detail below.</Text>
+                      <Text as="h2" variant="headingLg">1. Choose a starting design</Text>
+                      <Text as="p" tone="subdued">Pick a layout first, then adjust each shopper-facing surface below.</Text>
                     </BlockStack>
                     <Select label="Storefront template" name="storefrontTemplate" options={TEMPLATE_OPTIONS} value={form.storefrontTemplate} onChange={applyTemplate} />
+                    <InlineStack align="end">
+                      <Button submit variant="primary" loading={fetcher.state !== "idle"}>Save changes</Button>
+                    </InlineStack>
                   </BlockStack>
                 </Card>
 
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Typography</Text>
+                      <Text as="h2" variant="headingLg">2. Typography</Text>
                       <Text as="p" tone="subdued">Use a confident type system without changing your theme code.</Text>
                     </BlockStack>
                     <FormLayout.Group condensed>
@@ -319,20 +360,19 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Brand colors</Text>
-                      <Text as="p" tone="subdued">Set a clear hierarchy for text, action, cards, and the delivery journey.</Text>
+                      <Text as="h2" variant="headingLg">3. Checker and country selector</Text>
+                      <Text as="p" tone="subdued">Controls the ZIP-code card, country dropdown, input, and Check button.</Text>
                     </BlockStack>
                     <FormLayout.Group condensed>
                       {([
                         ["storefrontTextColor", "Text color"],
-                        ["storefrontMutedColor", "Muted text"],
-                        ["storefrontAccentColor", "Accent color"],
-                        ["storefrontButtonColor", "Button color"],
+                        ["storefrontMutedColor", "Supporting text"],
+                        ["storefrontAccentColor", "Focus and accent"],
+                        ["storefrontButtonColor", "Check button"],
                         ["storefrontButtonTextColor", "Button text"],
-                        ["storefrontCardBackground", "Main widget background"],
-                        ["storefrontJourneyBackground", "Journey panel background"],
-                        ["storefrontJourneyActiveColor", "Active step"],
-                        ["storefrontJourneyLineColor", "Connector line"],
+                        ["storefrontCardBackground", "Checker background"],
+                        ["storefrontFieldBackground", "Input and selector background"],
+                        ["storefrontFieldBorderColor", "Input and selector border"],
                       ] as Array<[keyof Customization, string]>).map(([key, label]) => (
                         <InlineStack key={key} gap="200" blockAlign="end" wrap={false}>
                           <input className="incode-color-input" type="color" value={String(form[key])} onChange={(event) => update(key, event.currentTarget.value)} aria-label={label} />
@@ -347,9 +387,23 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Delivery journey</Text>
-                      <Text as="p" tone="subdued">Choose the visual language shoppers see after a successful PIN check.</Text>
+                      <Text as="h2" variant="headingLg">4. Delivery result and journey</Text>
+                      <Text as="p" tone="subdued">Style the result strip and order milestones shown after a successful ZIP-code check.</Text>
                     </BlockStack>
+                    <FormLayout.Group condensed>
+                      {([
+                        ["storefrontResultBackground", "Result strip background"],
+                        ["storefrontResultTextColor", "Result strip text"],
+                        ["storefrontJourneyBackground", "Journey panel background"],
+                        ["storefrontJourneyActiveColor", "Active step background"],
+                        ["storefrontJourneyLineColor", "Connector line"],
+                      ] as Array<[keyof Customization, string]>).map(([key, label]) => (
+                        <InlineStack key={key} gap="200" blockAlign="end" wrap={false}>
+                          <input className="incode-color-input" type="color" value={String(form[key])} onChange={(event) => update(key, event.currentTarget.value)} aria-label={label} />
+                          <TextField label={label} name={key} value={String(form[key])} onChange={(value) => update(key, value)} autoComplete="off" />
+                        </InlineStack>
+                      ))}
+                    </FormLayout.Group>
                     <FormLayout.Group condensed>
                       <Select label="Step icons" name="storefrontIconStyle" options={ICON_OPTIONS} value={form.storefrontIconStyle} onChange={(value) => update("storefrontIconStyle", value)} />
                       <Select label="Animation" name="storefrontAnimation" options={ANIMATION_OPTIONS} value={form.storefrontAnimation} onChange={(value) => update("storefrontAnimation", value)} />
@@ -359,9 +413,30 @@ export default function StorefrontCustomizationPage() {
                   </BlockStack>
                 </Card>
                 <Card>
+                  <BlockStack gap="400">
+                    <BlockStack gap="100">
+                      <Text as="h2" variant="headingLg">5. Countdown timer</Text>
+                      <Text as="p" tone="subdued">Customize the cutoff timer independently. Enable “Show cutoff countdown” in the theme block to display it.</Text>
+                    </BlockStack>
+                    <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="Example: Cyber Monday Countdown" />
+                    <FormLayout.Group condensed>
+                      {([
+                        ["storefrontCountdownBackground", "Panel background"],
+                        ["storefrontCountdownDigitColor", "Number tile background"],
+                        ["storefrontCountdownTextColor", "Countdown text"],
+                      ] as Array<[keyof Customization, string]>).map(([key, label]) => (
+                        <InlineStack key={key} gap="200" blockAlign="end" wrap={false}>
+                          <input className="incode-color-input" type="color" value={String(form[key])} onChange={(event) => update(key, event.currentTarget.value)} aria-label={label} />
+                          <TextField label={label} name={key} value={String(form[key])} onChange={(value) => update(key, value)} autoComplete="off" />
+                        </InlineStack>
+                      ))}
+                    </FormLayout.Group>
+                  </BlockStack>
+                </Card>
+                <Card>
                   <BlockStack gap="300">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Developer CSS</Text>
+                      <Text as="h2" variant="headingLg">Advanced CSS</Text>
                       <Text as="p" tone="subdued">Optional CSS for advanced visual adjustments. External URLs, imports, and scripts are blocked. Arbitrary JavaScript is intentionally not supported.</Text>
                     </BlockStack>
                     <TextField
@@ -388,8 +463,32 @@ export default function StorefrontCustomizationPage() {
                     <Text as="h2" variant="headingMd">Live preview</Text>
                     <span className="incode-preview-live">LIVE</span>
                   </InlineStack>
+                  <div className="incode-preview-surface" aria-live="polite" aria-atomic="true">
+                    <Text as="p" variant="headingSm">{previewLabel}</Text>
+                    <div className="incode-preview-surface__context" data-surface={previewSurface}>
+                      {previewSurface === "product" ? (
+                        <><strong>Everyday tote bag</strong><span>$39.00 · In stock</span><span>Delivery checker below the product details</span></>
+                      ) : previewSurface === "collection" || previewSurface === "search" ? (
+                        <>
+                          <strong>{previewSurface === "collection" ? "Everyday essentials" : 'Results for "tote bag"'}</strong>
+                          <div className="incode-preview-surface__products"><span>Canvas tote<br />$39.00</span><span>Travel tote<br />$49.00</span></div>
+                          <span>Delivery checker beside the product listing</span>
+                        </>
+                      ) : previewSurface === "cart" ? (
+                        <><strong>Your cart</strong><span>Everyday tote bag × 2</span><span>Subtotal: $78.00</span><span>Check delivery before checkout</span></>
+                      ) : previewSurface === "index" ? (
+                        <><strong>Made for your everyday</strong><span>Explore our latest collection</span><span>Delivery checker on your home page</span></>
+                      ) : previewSurface === "page" ? (
+                        <><strong>Shipping and delivery</strong><span>Find out when your order will arrive</span><span>Delivery checker within your content page</span></>
+                      ) : (
+                        <><strong>Delivery help on every page</strong><span>App embed available across your storefront</span></>
+                      )}
+                    </div>
+                  </div>
                   <div
+                    key={previewSurface}
                     className={`incode-custom-preview incode-custom-preview--${form.storefrontAnimation}`}
+                    data-surface={previewSurface}
                     data-template={form.storefrontTemplate}
                     style={{
                       fontFamily: fontFamily(form.storefrontFontFamily),
@@ -400,45 +499,47 @@ export default function StorefrontCustomizationPage() {
                       borderRadius: `${form.storefrontBorderRadius}px`,
                     }}
                   >
-                    <span className="incode-custom-preview__eyebrow" style={{ color: form.storefrontAccentColor }}>DELIVERY CHECKER</span>
-                    <strong style={{ fontSize: `${form.storefrontHeadingSize}px` }}>Receive your order by Oct 05</strong>
-                    <span style={{ color: form.storefrontMutedColor }}>Pune, Maharashtra · 411001</span>
+                    <strong style={{ fontSize: `${form.storefrontHeadingSize}px` }}>ZIP code based ETA message</strong>
+                    <span style={{ color: form.storefrontMutedColor }}>Enter your ZIP code to check the delivery time.</span>
+                    <div className="incode-custom-preview__country" style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>🇺🇸 United States <span>⌄</span></div>
+                    <div className="incode-custom-preview__checker">
+                      <span style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>Enter ZIP code · 10001</span>
+                      <button type="button" style={{ background: form.storefrontButtonColor, color: form.storefrontButtonTextColor }}>Check</button>
+                    </div>
+                    <div className="incode-custom-preview__result" style={{ background: form.storefrontResultBackground, color: form.storefrontResultTextColor }}>📦 Delivery between Oct 6th and Oct 8th</div>
                     {form.storefrontShowJourney ? (
-                      <div
-                        className="incode-custom-preview__journey"
-                        data-line-style={form.storefrontJourneyLineStyle}
-                        style={{
-                          background: form.storefrontJourneyBackground,
-                          "--incode-line-color": form.storefrontJourneyLineColor,
-                        } as React.CSSProperties}
-                      >
-                        {[
-                          ["1", "Order now"],
-                          ["2", "Ready to ship"],
-                          ["3", "At your doorstep"],
-                        ].map(([, label], index) => (
-                          <div
-                            key={label}
-                            className={index === 0 ? "is-active" : ""}
-                            style={index === 0 && form.storefrontJourneyLineStyle === "none" ? { background: form.storefrontJourneyActiveColor } : undefined}
-                          >
-                            <span><JourneyIcon step={index} style={form.storefrontIconStyle} /></span>
-                            <small>{label}</small>
-                          </div>
+                      <div className="incode-custom-preview__journey-shell" style={{ background: form.storefrontJourneyBackground, borderColor: form.storefrontFieldBorderColor }}>
+                        <strong>🇺🇸 Estimated Delivery Date&nbsp; Oct 9th to Oct 10th</strong>
+                        <div
+                          className="incode-custom-preview__journey"
+                          data-line-style={form.storefrontJourneyLineStyle}
+                          style={{ "--incode-line-color": form.storefrontJourneyLineColor } as React.CSSProperties}
+                        >
+                          {[
+                            ["Order confirmed", "Oct 5th"],
+                            ["Shipped", "Oct 7th"],
+                            ["At your doorstep", "Oct 10th"],
+                          ].map(([label, date], index) => (
+                            <div key={label} className={index === 0 ? "is-active" : ""}>
+                              <span style={{ background: index === 0 ? form.storefrontJourneyActiveColor : form.storefrontCardBackground }}><JourneyIcon step={index} style={form.storefrontIconStyle} /></span>
+                              <small>{label}</small>
+                              <small>{date}</small>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
+                      <strong>🔥 {form.storefrontCountdownTitle} 🔥</strong>
+                      <div>
+                        {[["07", "Hours"], ["27", "Minutes"], ["46", "Seconds"]].map(([value, label]) => (
+                          <span key={label}><b style={{ background: form.storefrontCountdownDigitColor }}>{value}</b><small>{label}</small></span>
                         ))}
                       </div>
-                    ) : null}
-                    {form.storefrontTemplate === "countdown-focus" ? (
-                      <div className="incode-custom-preview__countdown">
-                        <strong>03</strong><small>Days</small>
-                        <strong>18</strong><small>Hours</small>
-                        <strong>05</strong><small>Minutes</small>
-                        <strong>29</strong><small>Seconds</small>
-                      </div>
-                    ) : null}
-                    <button type="button" style={{ background: form.storefrontButtonColor, color: form.storefrontButtonTextColor, borderRadius: `${Math.max(8, form.storefrontBorderRadius - 2)}px` }}>Check delivery</button>
+                      <strong>Get it by Oct 6th - Oct 8th</strong>
+                    </div>
                   </div>
-                  <Text as="p" tone="subdued" variant="bodySm">Save changes, then refresh your product page to see the live storefront style.</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Sample {previewLabel.toLowerCase()} preview. Placement buttons also open Theme Editor. Save changes here, then save the placement in your theme to publish it.</Text>
                 </BlockStack>
               </Card>
             </Layout.Section>

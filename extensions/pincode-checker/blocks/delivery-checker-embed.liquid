@@ -233,8 +233,7 @@
   #incode-delivery-embed-{{ embed_id }} button:focus-visible,
   #incode-delivery-embed-{{ embed_id }} select:focus-visible,
   #incode-delivery-embed-{{ embed_id }} input:focus-visible { outline: 2px solid var(--incode-embed-accent); outline-offset: 2px; }
-  [data-incode-card-eta] { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: 100%; margin: 7px 0 0; color: var(--incode-card-eta-text, #667085); font-family: var(--incode-card-eta-font, inherit); font-size: var(--incode-card-eta-size, 12px); font-weight: 600; line-height: 1.35; }
-  [data-incode-card-eta]::before { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--incode-card-eta-accent, #f47d32); content: ''; }
+  [data-incode-card-eta] { box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 100%; margin: 14px 0 0; padding: 12px 10px; border-radius: var(--incode-card-eta-radius, 10px); background: var(--incode-card-eta-background, #edf8fc); color: var(--incode-card-eta-text, #34454f); font-family: var(--incode-card-eta-font, inherit); font-size: var(--incode-card-eta-size, 12px); font-weight: 700; line-height: 1.35; text-align: center; }
   @media (max-width: 520px) { #incode-delivery-embed-{{ embed_id }} { right: 12px; bottom: 12px; } }
   @media (prefers-reduced-motion: reduce) {
     #incode-delivery-embed-{{ embed_id }} *,
@@ -266,6 +265,11 @@
     let estimateInvalidated = false;
     let requestVersion = 0;
     let activeController = null;
+    let cardScanRunning = false;
+    let cardScanPending = false;
+    let cardScanTimer = null;
+    const requestedCardHandles = new Set();
+    const cardEstimates = new Map();
     const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } };
 
     const fonts = {
@@ -309,8 +313,11 @@
       if (typeof style.muted_color === 'string' && /^#[0-9a-f]{6}$/i.test(style.muted_color)) {
         element.style.setProperty('--incode-card-eta-text', style.muted_color);
       }
-      if (typeof style.accent_color === 'string' && /^#[0-9a-f]{6}$/i.test(style.accent_color)) {
-        element.style.setProperty('--incode-card-eta-accent', style.accent_color);
+      if (typeof style.journey_background === 'string' && /^#[0-9a-f]{6}$/i.test(style.journey_background)) {
+        element.style.setProperty('--incode-card-eta-background', style.journey_background);
+      }
+      if (Number.isFinite(Number(style.border_radius))) {
+        element.style.setProperty('--incode-card-eta-radius', `${Math.min(12, Number(style.border_radius))}px`);
       }
     };
 
@@ -323,20 +330,34 @@
       }
     };
 
+    const productCardForLink = (link) => link.closest([
+      'product-card',
+      '.card-wrapper',
+      '.product-card',
+      '.product-item',
+      '.product-grid-item',
+      '.grid-product',
+      '.product-block',
+      '[data-product-card]',
+      '.grid__item',
+      'li[class*="product"]',
+      'li[class*="grid"]'
+    ].join(','));
+
     const renderCardEstimates = (data) => {
       if (!data || !Array.isArray(data.results)) return;
-      const estimates = new Map(data.results.flatMap((entry) => {
+      data.results.forEach((entry) => {
         const estimate = entry?.estimate;
         const range = estimate?.delivery_date_range || estimate?.estimated_date_max_label || estimate?.estimated_date_label;
-        return estimate?.enabled === true && range ? [[String(entry.key), String(range)]] : [];
-      }));
-      if (!estimates.size) return;
+        if (estimate?.enabled === true && range) cardEstimates.set(String(entry.key), String(range));
+      });
+      if (!cardEstimates.size) return;
 
       document.querySelectorAll('a[href*="/products/"]').forEach((link) => {
         const handle = productHandleFromLink(link);
-        const range = estimates.get(handle);
+        const range = cardEstimates.get(handle);
         if (!range) return;
-        const card = link.closest('product-card, .card-wrapper, .product-card, .product-item, [data-product-card], .grid__item, li') || link.parentElement;
+        const card = productCardForLink(link);
         if (!card || card.querySelector(`[data-incode-card-eta="${handle}"]`)) return;
         const host = card.querySelector('.card__information, .card-information, .product-card__info, .product-item__info, .card-content, .product-card__details') || card;
         const label = document.createElement('p');
@@ -349,14 +370,7 @@
       });
     };
 
-    const loadCardEstimates = async () => {
-      if (root.dataset.showProductCardEta !== 'true' || !cardProductsElement) return;
-      let items;
-      try {
-        items = JSON.parse(cardProductsElement.textContent || '[]');
-      } catch {
-        return;
-      }
+    const requestCardEstimates = async (items) => {
       if (!Array.isArray(items) || !items.length || items.length > 24) return;
       try {
         const response = await fetch('/apps/delivery-checker?batch=1', {
@@ -371,6 +385,80 @@
       } catch {
         // Product cards remain unchanged when estimates are unavailable.
       }
+    };
+
+    const productJsonForLink = async (link, handle) => {
+      try {
+        const url = new URL(link.href, window.location.href);
+        if (url.origin !== window.location.origin) return null;
+        url.pathname = `${url.pathname.replace(/\/$/, '')}.js`;
+        url.search = '';
+        const response = await fetch(url.toString(), { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+        if (!response.ok) return null;
+        const product = await response.json();
+        return product?.id ? { key: handle, productId: String(product.id) } : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const scanCardEstimates = async () => {
+      if (root.dataset.showProductCardEta !== 'true') return;
+      if (cardScanRunning) {
+        cardScanPending = true;
+        return;
+      }
+      cardScanRunning = true;
+      try {
+        renderCardEstimates({ results: [] });
+        const linksByHandle = new Map();
+        document.querySelectorAll('a[href*="/products/"]').forEach((link) => {
+          const handle = productHandleFromLink(link);
+          if (handle && productCardForLink(link) && !requestedCardHandles.has(handle) && !linksByHandle.has(handle)) {
+            linksByHandle.set(handle, link);
+          }
+        });
+        const entries = [...linksByHandle.entries()];
+        for (let index = 0; index < entries.length; index += 24) {
+          const chunk = entries.slice(index, index + 24);
+          chunk.forEach(([handle]) => requestedCardHandles.add(handle));
+          const items = (await Promise.all(chunk.map(([handle, link]) => productJsonForLink(link, handle)))).filter(Boolean);
+          for (let itemIndex = 0; itemIndex < items.length; itemIndex += 24) {
+            await requestCardEstimates(items.slice(itemIndex, itemIndex + 24));
+          }
+        }
+      } finally {
+        cardScanRunning = false;
+        if (cardScanPending) {
+          cardScanPending = false;
+          void scanCardEstimates();
+        }
+      }
+    };
+
+    const scheduleCardScan = () => {
+      if (root.dataset.showProductCardEta !== 'true' || cardScanTimer) return;
+      cardScanTimer = window.setTimeout(() => {
+        cardScanTimer = null;
+        void scanCardEstimates();
+      }, 150);
+    };
+
+    const loadCardEstimates = async () => {
+      if (root.dataset.showProductCardEta !== 'true') return;
+      let items = [];
+      try {
+        items = JSON.parse(cardProductsElement?.textContent || '[]');
+      } catch {
+        items = [];
+      }
+      if (Array.isArray(items) && items.length && items.length <= 24) {
+        items.forEach((item) => requestedCardHandles.add(String(item.key || '')));
+        await requestCardEstimates(items);
+      }
+      await scanCardEstimates();
+      const cardObserver = new MutationObserver(scheduleCardScan);
+      cardObserver.observe(document.body, { childList: true, subtree: true });
     };
 
     const syncVisibility = () => {

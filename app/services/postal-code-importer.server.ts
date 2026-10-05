@@ -240,7 +240,7 @@ export async function importPostalCodesFromCsv(
         importJobId: job.id,
         rowNumber: index + 2,
         rawRow: JSON.stringify(row),
-        reason: "ZIP ranges and wildcards require the Advanced plan.",
+        reason: "ZIP ranges and wildcards require an active Standard subscription.",
       });
       continue;
     }
@@ -250,7 +250,7 @@ export async function importPostalCodesFromCsv(
         importJobId: job.id,
         rowNumber: index + 2,
         rawRow: JSON.stringify(row),
-        reason: "Zones require the Advanced plan.",
+        reason: "Zones require an active Standard subscription.",
       });
       continue;
     }
@@ -266,7 +266,7 @@ export async function importPostalCodesFromCsv(
         importJobId: job.id,
         rowNumber: index + 2,
         rawRow: JSON.stringify(row),
-        reason: "Delivery charges and speed options require the Advanced plan.",
+        reason: "Delivery charges and speed options require an active Standard subscription.",
       });
       continue;
     }

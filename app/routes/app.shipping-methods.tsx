@@ -16,8 +16,8 @@ import {
   TextField,
 } from "@shopify/polaris";
 import prisma from "../db.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
-import { authenticate } from "../shopify.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
+import { requireActiveBilling } from "../services/billing.server";
 import {
   inferShippingMethodKind,
   shippingMethodHandle,
@@ -246,7 +246,7 @@ async function syncShopifyMethods(shop: string, admin: AdminClient) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const [access, methods, setting] = await Promise.all([
     resolvePlanAccess({ shop: session.shop, admin }),
     prisma.shippingMethodRule.findMany({
@@ -265,12 +265,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   const data = await request.formData();
   const intent = String(data.get("intent") ?? "");
   if (!access.features.deliveryOptions) {
-    return { ok: false, message: "Shipping method ETA rules require the Advanced plan." } satisfies ActionData;
+    return { ok: false, message: "Shipping method ETA rules require an active Standard subscription." } satisfies ActionData;
   }
 
   if (intent === "sync") {
@@ -343,7 +343,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function ShippingMethodsPage() {
   const { access, methods, displayStyle, hasReadShipping, reauthorizeUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
-  const isAdvanced = access.plan === "advanced";
+  const isAdvanced = access.active;
   const [form, setForm] = useState(EMPTY_FORM);
   const [methodDisplayStyle, setMethodDisplayStyle] = useState(displayStyle);
   const isSaving = fetcher.state !== "idle";
@@ -380,7 +380,7 @@ export default function ShippingMethodsPage() {
   ]);
 
   return (
-    <Page title="Shipping method ETAs" subtitle="Show informational delivery estimates for eligible methods without changing Shopify checkout rates." titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Advanced" : "Advanced feature"}</Badge>}>
+    <Page title="Shipping method ETAs" subtitle="Show informational delivery estimates for eligible methods without changing Shopify checkout rates." titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Standard" : "Subscription required"}</Badge>}>
       <BlockStack gap="400">
         {fetcher.data ? (
           <Banner
@@ -391,8 +391,8 @@ export default function ShippingMethodsPage() {
           </Banner>
         ) : null}
         {!isAdvanced ? (
-          <Banner tone="info" title="Advanced plan required" action={{ content: "View plans", url: "/app/plans" }}>
-            Upgrade to configure method-specific processing and transit times.
+          <Banner tone="info" title="Standard subscription required" action={{ content: "View plan", url: "/app/plans" }}>
+            Activate Standard to configure method-specific processing and transit times.
           </Banner>
         ) : null}
         {!hasReadShipping ? (

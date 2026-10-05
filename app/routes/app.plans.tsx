@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
 import {
   Badge,
   Banner,
@@ -12,83 +12,125 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
-import { authenticate } from "../shopify.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
-import { PLAN_DETAILS, storefrontPlanUrl } from "../services/plans.server";
+import {
+  authenticate,
+  STANDARD_PLAN,
+  STANDARD_PLAN_CURRENCY,
+  STANDARD_PLAN_PRICE,
+  STANDARD_PLAN_TRIAL_DAYS,
+} from "../shopify.server";
+import {
+  getActiveAppSubscriptions,
+  hasActiveBilling,
+  isBillingRequired,
+  isBillingTestMode,
+} from "../services/billing.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
-  const url = new URL(request.url);
-  const access = await resolvePlanAccess({
-    shop: session.shop,
-    admin,
-    forceRefresh: Boolean(url.searchParams.get("plan_handle")),
-  });
+  const { billing } = await authenticate.admin(request);
+  const subscriptions = await getActiveAppSubscriptions(billing);
+  const subscription = subscriptions[0] ?? null;
+
   return {
-    access,
-    pricingUrl: storefrontPlanUrl(session.shop),
-    selectedPlan: url.searchParams.get("plan_handle"),
-    plans: PLAN_DETAILS,
+    planName: STANDARD_PLAN,
+    price: STANDARD_PLAN_PRICE,
+    currency: STANDARD_PLAN_CURRENCY,
+    interval: "EVERY_30_DAYS" as const,
+    trialDays: STANDARD_PLAN_TRIAL_DAYS,
+    subscriptionStatus: subscription?.status ?? "NONE",
+    hasActiveSubscription: Boolean(subscription),
+    testMode: isBillingTestMode(),
+    billingRequired: isBillingRequired(),
   };
 }
 
+export async function action({ request }: ActionFunctionArgs) {
+  const { billing } = await authenticate.admin(request);
+  if (await hasActiveBilling(billing)) {
+    return { ok: true, alreadyActive: true };
+  }
+
+  return billing.request({
+    plan: STANDARD_PLAN,
+    isTest: isBillingTestMode(),
+    returnUrl: new URL("/app/plans?billing=approved", request.url).toString(),
+  });
+}
+
 export default function PlansPage() {
-  const { access, pricingUrl, selectedPlan, plans } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === "submitting";
+
   return (
-    <Page title="Plans and billing" subtitle="Choose the delivery tools that fit your store.">
+    <Page title="Plans and billing" subtitle="Simple Shopify billing with one complete plan.">
       <BlockStack gap="500">
-        {selectedPlan && access.active ? (
-          <Banner title={`Your ${access.planName} plan is active`} tone="success">
-            Shopify confirmed your selection. Your plan features are ready to use.
+        {data.hasActiveSubscription ? (
+          <Banner title="Your Standard plan is active" tone="success">
+            All delivery tools are available. Charges are managed through your Shopify invoice.
+          </Banner>
+        ) : (
+          <Banner title="Activate Incode Track" tone="info">
+            Start your 7-day trial, then pay $9 USD every 30 days through Shopify.
+          </Banner>
+        )}
+        {actionData?.alreadyActive ? (
+          <Banner title="No new charge was created" tone="success">
+            This store already has an active Standard subscription.
           </Banner>
         ) : null}
-        {!access.active ? (
-          <Banner title="Select a plan to activate Incode Track" tone="info">
-            Both plans include a 7-day free trial. Shopify handles approval, billing, upgrades, downgrades, and cancellation.
+        {data.testMode ? (
+          <Banner title="Test billing is enabled" tone="warning">
+            Shopify will create a test subscription and will not charge the store.
           </Banner>
         ) : null}
-        {access.cancelAtEndOfCycle ? (
-          <Banner title="Cancellation scheduled" tone="warning">
-            Your current features remain available through the end of the billing cycle.
+        {!data.billingRequired ? (
+          <Banner title="Billing enforcement is disabled" tone="warning">
+            Paid routes are currently available without an active subscription.
           </Banner>
         ) : null}
 
         <Layout>
-          {(Object.keys(plans) as Array<keyof typeof plans>).map((key) => {
-            const plan = plans[key];
-            const current = access.plan === plan.key;
-            return (
-              <Layout.Section variant="oneHalf" key={plan.key}>
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="h2" variant="headingLg">{plan.name}</Text>
-                      {current ? <Badge tone="success">Current plan</Badge> : plan.key === "advanced" ? <Badge tone="info">Full feature set</Badge> : null}
-                    </InlineStack>
-                    <BlockStack gap="100">
-                      <InlineStack gap="100" blockAlign="baseline">
-                        <Text as="p" variant="heading2xl" fontWeight="bold">{plan.price}</Text>
-                        <Text as="p" tone="subdued">USD / month</Text>
-                      </InlineStack>
-                      <Text as="p" tone="subdued">7-day free trial, then recurring monthly billing.</Text>
-                    </BlockStack>
-                    <Text as="p">{plan.description}</Text>
-                    <List>{plan.features.map((feature) => <List.Item key={feature}>{feature}</List.Item>)}</List>
-                    <Button url={pricingUrl} target="_top" variant={plan.key === "advanced" ? "primary" : "secondary"} fullWidth>
-                      {current ? "Manage plan in Shopify" : access.active ? `Switch to ${plan.name}` : `Start ${plan.name} trial`}
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingLg">{data.planName}</Text>
+                  {data.hasActiveSubscription ? <Badge tone="success">Active</Badge> : <Badge>Available</Badge>}
+                </InlineStack>
+                <BlockStack gap="100">
+                  <InlineStack gap="100" blockAlign="baseline">
+                    <Text as="p" variant="heading2xl" fontWeight="bold">${data.price}</Text>
+                    <Text as="p" tone="subdued">{data.currency} every 30 days</Text>
+                  </InlineStack>
+                  <Text as="p" tone="subdued">{data.trialDays}-day free trial before the first charge.</Text>
+                </BlockStack>
+                <List>
+                  <List.Item>Unlimited postal and ZIP code coverage rules</List.Item>
+                  <List.Item>Zones, product targeting, and cart protection</List.Item>
+                  <List.Item>Inventory-aware estimates and delivery options</List.Item>
+                  <List.Item>CSV tools, Google Sheets sync, and analytics</List.Item>
+                </List>
+                {data.hasActiveSubscription ? (
+                  <Text as="p" tone="subdued">Subscription status: {data.subscriptionStatus}</Text>
+                ) : (
+                  <Form method="post">
+                    <Button submit variant="primary" loading={isSubmitting} disabled={isSubmitting} fullWidth>
+                      Start 7-day free trial
                     </Button>
-                  </BlockStack>
-                </Card>
-              </Layout.Section>
-            );
-          })}
+                  </Form>
+                )}
+              </BlockStack>
+            </Card>
+          </Layout.Section>
         </Layout>
 
         <Card>
           <BlockStack gap="200">
             <Text as="h2" variant="headingMd">Billing transparency</Text>
             <Text as="p" tone="subdued">
-              Charges appear on your Shopify invoice. You can upgrade or downgrade without reinstalling the app. Advanced configuration is retained but becomes dormant if you move to Basic.
+              Shopify securely approves the subscription and adds recurring charges to your Shopify invoice. No external payment provider is used.
             </Text>
           </BlockStack>
         </Card>

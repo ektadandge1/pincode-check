@@ -4,9 +4,8 @@ const required = [
   "SHOPIFY_API_SECRET",
   "SHOPIFY_APP_URL",
   "SHOPIFY_APP_HANDLE",
-  "SHOPIFY_PARTNER_ORG_ID",
-  "SHOPIFY_PARTNER_API_ACCESS_TOKEN",
-  "SHOPIFY_APP_GID",
+  "SHOPIFY_BILLING_TEST",
+  "SHOPIFY_BILLING_REQUIRED",
   "SCOPES",
   "SUPPORT_EMAIL",
   "LEGAL_BUSINESS_NAME",
@@ -15,6 +14,12 @@ const required = [
 const missing = required.filter((name) => !process.env[name]?.trim());
 if (missing.length > 0) {
   throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+}
+
+for (const name of ["SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_REQUIRED"]) {
+  if (!/^(true|false)$/i.test(process.env[name])) {
+    throw new Error(`${name} must be either true or false.`);
+  }
 }
 
 const appUrl = new URL(process.env.SHOPIFY_APP_URL);

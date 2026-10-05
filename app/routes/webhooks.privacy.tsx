@@ -17,6 +17,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       db.shippingMethodRule.deleteMany({ where: { shop } }),
       db.zone.deleteMany({ where: { shop } }),
       db.deliverySetting.deleteMany({ where: { shop } }),
+      db.headlessApiToken.deleteMany({ where: { shop } }),
       db.session.deleteMany({ where: { shop } }),
     ]);
   }

@@ -1,16 +1,12 @@
 .pin-checker [hidden] { display: none !important; }
 .pin-checker .pin-checker__header {
 display: flex;
-gap: 12px;
+gap: 0;
 align-items: flex-start;
-margin-bottom: 14px;
+margin-bottom: 12px;
 }
 .pin-checker .pin-checker__mark {
-flex: 0 0 auto;
-width: 10px;
-height: 34px;
-border-radius: 999px;
-background: var(--pc-btn);
+display: none;
 }
 .pin-checker .pin-checker__heading {
 margin: 0;
@@ -21,16 +17,33 @@ line-height: 1.35;
 color: var(--pc-heading);
 }
 .pin-checker .pin-checker__sub {
-margin: 3px 0 0;
+margin: 2px 0 0;
 color: var(--pc-sub);
 font-size: 13px;
 line-height: 1.45;
 }
 .pin-checker .pin-checker__row {
 display: grid;
-grid-template-columns: minmax(110px, 0.8fr) minmax(140px, 1.4fr) auto;
-gap: 10px;
+grid-template-columns: minmax(0, 1fr) auto;
+gap: 10px 0;
 align-items: end;
+}
+.pin-checker .pin-checker__country-wrap {
+position: relative;
+display: flex;
+grid-column: 1 / -1;
+align-items: center;
+}
+.pin-checker .pin-checker__country-flag {
+position: absolute;
+z-index: 1;
+left: 13px;
+display: grid;
+width: 20px;
+place-items: center;
+font-size: 16px;
+line-height: 1;
+pointer-events: none;
 }
 .pin-checker .pin-checker__label {
 position: absolute;
@@ -44,14 +57,22 @@ white-space: nowrap;
 .pin-checker .pin-checker__input {
 min-width: 0;
 border: 1px solid var(--pc-input-border);
-border-radius: 10px;
+border-radius: min(var(--pc-radius), 12px);
 min-height: 46px;
 padding: 11px 12px;
 font: inherit;
 font-size: 14px;
-background: #ffffff;
+background: var(--pc-field-bg);
 color: #1f2937;
 transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pin-checker .pin-checker__select {
+width: 100%;
+padding-left: 42px;
+}
+.pin-checker .pin-checker__input {
+width: 100%;
+border-radius: min(var(--pc-radius), 12px) 0 0 min(var(--pc-radius), 12px);
 }
 .pin-checker .pin-checker__select:focus,
 .pin-checker .pin-checker__input:focus {
@@ -61,7 +82,7 @@ box-shadow: 0 0 0 3px rgba(43, 38, 64, 0.14);
 }
 .pin-checker .pin-checker__button {
 border: 1px solid transparent;
-border-radius: 10px;
+border-radius: 0 min(var(--pc-radius), 12px) min(var(--pc-radius), 12px) 0;
 min-height: 46px;
 padding: 11px 18px;
 background: var(--pc-btn);
@@ -113,7 +134,7 @@ cursor: pointer;
 .pin-checker .pin-checker__result {
 margin: 12px 0 0;
 padding: 10px 12px;
-border-radius: 10px;
+border-radius: min(var(--pc-radius), 12px);
 border: 1px solid transparent;
 background: #f8fafc;
 font-size: 13px;
@@ -136,9 +157,23 @@ border-color: #fecaca;
 }
 .pin-checker .pin-checker__result[data-state='success'] {
 display: block;
-color: #065f46;
-background: #ecfdf3;
-border-color: #a7f3d0;
+position: relative;
+padding: 14px 16px 14px 44px;
+border-color: transparent;
+background:
+linear-gradient(125deg, transparent 0 18%, rgba(255, 255, 255, 0.035) 18% 34%, transparent 34% 63%, rgba(255, 255, 255, 0.025) 63% 78%, transparent 78%),
+var(--pc-result-bg);
+color: var(--pc-result-text);
+text-align: center;
+}
+.pin-checker .pin-checker__result[data-state='success']::before {
+position: absolute;
+left: 16px;
+top: 50%;
+font-size: 20px;
+line-height: 1;
+content: '\1F4E6';
+transform: translateY(-50%);
 }
 .pin-checker .pin-checker__details {
 margin-top: 10px;
@@ -148,28 +183,40 @@ display: grid;
 grid-template-columns: repeat(3, minmax(0, 1fr));
 overflow: hidden;
 margin: 14px 0;
-border: 1px solid var(--pc-journey-active);
-border-radius: 12px;
+border: 1px solid var(--pc-input-border);
+border-radius: min(var(--pc-radius), 16px);
 background: var(--pc-journey-bg);
 }
+.pin-checker .pin-checker__journey-title {
+display: flex;
+grid-column: 1 / -1;
+align-items: center;
+justify-content: center;
+gap: 6px;
+padding: 14px 12px 4px;
+font-size: 14px;
+line-height: 1.4;
+}
+.pin-checker .pin-checker__journey-title > span:first-child { font-size: 18px; }
+.pin-checker .pin-checker__journey-title strong { font-weight: 800; }
 .pin-checker .pin-checker__journey-step {
 position: relative;
 display: grid;
-min-height: 96px;
+min-height: 112px;
 align-content: center;
 gap: 4px;
-padding: 10px 6px;
+padding: 12px 6px 16px;
 color: var(--pc-heading);
-font-size: 11px;
+font-size: 13px;
 text-align: center;
 }
 .pin-checker .pin-checker__journey-step:not(:last-child)::after {
 position: absolute;
 z-index: 0;
-top: 31px;
-left: calc(50% + 17px);
-right: calc(-50% + 17px);
-border-top: 2px dotted var(--pc-journey-line);
+top: 34px;
+left: calc(50% + 24px);
+right: calc(-50% + 24px);
+border-top: 3px dotted var(--pc-journey-line);
 content: '';
 }
 .pin-checker[data-line-style='dashed'] .pin-checker__journey-step:not(:last-child)::after { border-top-style: dashed; }
@@ -235,19 +282,19 @@ background: var(--pc-journey-active);
 position: relative;
 z-index: 1;
 display: grid;
-width: 24px;
-height: 24px;
+width: 42px;
+height: 42px;
 margin: 0 auto;
 place-items: center;
 border-radius: 999px;
-background: rgba(255, 255, 255, 0.76);
+background: var(--pc-card);
 color: var(--pc-heading);
 font-weight: 800;
 }
 .pin-checker .pin-checker__journey-icon {
 display: none;
-width: 16px;
-height: 16px;
+width: 26px;
+height: 26px;
 overflow: visible;
 fill: none;
 stroke: currentColor;
@@ -256,11 +303,11 @@ stroke-linejoin: round;
 stroke-width: 1.8;
 }
 .pin-checker .pin-checker__journey-step strong {
-font-size: 11px;
+font-size: 13px;
 line-height: 1.25;
 }
 .pin-checker .pin-checker__journey-step small {
-font-size: 10px;
+font-size: 12px;
 opacity: 0.76;
 }
 .pin-checker[data-icon-style='delivery'] .pin-checker__journey-number,
@@ -341,44 +388,58 @@ transition: none !important;
 }
 }
 .pin-checker .pin-checker__countdown {
-margin: 0 0 8px;
-font-size: 13px;
-line-height: 1.45;
-}
-.pin-checker .pin-checker__countdown strong {
-display: inline-flex;
-gap: 4px;
-font-variant-numeric: tabular-nums;
-}
-.pin-checker .pin-checker__countdown strong > span small { display: none; }
-.pin-checker[data-template='countdown-focus'] .pin-checker__countdown {
 display: grid;
-gap: 8px;
-padding: 12px;
-border-radius: 12px;
-background: var(--pc-journey-bg);
+gap: 12px;
+margin: 14px 0 8px;
+padding: 18px 16px;
+border-radius: var(--pc-radius);
+background: var(--pc-countdown-bg);
+color: var(--pc-countdown-text);
 text-align: center;
 }
-.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong {
+.pin-checker .pin-checker__countdown-title {
+font-size: 18px;
+font-weight: 800;
+line-height: 1.3;
+}
+.pin-checker .pin-checker__countdown-label {
+position: absolute;
+width: 1px;
+height: 1px;
+overflow: hidden;
+clip: rect(0 0 0 0);
+}
+.pin-checker .pin-checker__countdown > strong {
 display: grid;
 grid-template-columns: repeat(3, 1fr);
-gap: 6px;
+gap: 10px;
+max-width: 330px;
+margin: 0 auto;
+font-variant-numeric: tabular-nums;
 }
-.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong > span {
+.pin-checker .pin-checker__countdown > strong > span {
 display: grid;
-gap: 3px;
+gap: 7px;
 }
-.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong > span b {
+.pin-checker .pin-checker__countdown > strong > span b {
+min-width: 54px;
 border-radius: 7px;
-background: var(--pc-card);
-padding: 7px 3px;
-color: var(--pc-heading);
+background: var(--pc-countdown-digit);
+padding: 8px 6px;
+color: var(--pc-countdown-text);
+font-size: 28px;
+line-height: 1;
 }
-.pin-checker[data-template='countdown-focus'] .pin-checker__countdown strong > span small {
+.pin-checker .pin-checker__countdown > strong > span small {
 display: block;
-color: var(--pc-sub);
-font-size: 9px;
-font-weight: 500;
+color: var(--pc-countdown-text);
+font-size: 12px;
+font-weight: 700;
+}
+.pin-checker .pin-checker__countdown-delivery {
+margin-top: 10px;
+font-size: 15px;
+font-weight: 800;
 }
 .pin-checker .pin-checker__options {
 display: flex;
@@ -487,14 +548,21 @@ cursor: not-allowed !important;
 opacity: 0.62;
 }
 @media (max-width: 640px) {
-.pin-checker .pin-checker__row {
-grid-template-columns: 1fr;
-}
-.pin-checker .pin-checker__button {
-width: 100%;
-}
 .pin-checker .pin-checker__journey-step {
 min-height: 86px;
 padding-inline: 4px;
 }
+.pin-checker .pin-checker__journey-title { flex-wrap: wrap; font-size: 12px; }
+.pin-checker .pin-checker__journey-marker { width: 34px; height: 34px; }
+.pin-checker .pin-checker__journey-icon { width: 21px; height: 21px; }
+.pin-checker .pin-checker__journey-step:not(:last-child)::after { top: 30px; left: calc(50% + 20px); right: calc(-50% + 20px); }
+}
+@media (max-width: 420px) {
+.pin-checker .pin-checker__row { grid-template-columns: 1fr; }
+.pin-checker .pin-checker__country-wrap { grid-column: 1; }
+.pin-checker .pin-checker__input { border-radius: min(var(--pc-radius), 12px); }
+.pin-checker .pin-checker__button { width: 100%; border-radius: min(var(--pc-radius), 12px); }
+.pin-checker .pin-checker__countdown { padding-inline: 10px; }
+.pin-checker .pin-checker__countdown > strong { gap: 6px; }
+.pin-checker .pin-checker__countdown > strong > span b { min-width: 0; font-size: 24px; }
 }

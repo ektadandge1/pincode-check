@@ -15,8 +15,8 @@ import {
   Text,
 } from "@shopify/polaris";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { requireActiveBilling } from "../services/billing.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
 
 function topCounts<T extends string>(values: T[], limit = 8) {
   const counts = new Map<string, number>();
@@ -40,7 +40,7 @@ function formatDate(value: Date | string) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   if (!access.features.analytics) throw redirect("/app/plans?upgrade=analytics");
   const where = { shop: session.shop };

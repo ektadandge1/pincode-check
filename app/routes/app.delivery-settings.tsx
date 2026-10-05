@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { Link, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import {
   Autocomplete,
   Badge,
@@ -20,7 +20,7 @@ import {
   TextField,
 } from "@shopify/polaris";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { requireActiveBilling } from "../services/billing.server";
 import {
   fetchGoogleSheetCsv,
   importPostalCodesFromCsv,
@@ -35,7 +35,7 @@ import {
   normalizeTargetKind,
   normalizeTargetValue,
 } from "../utils/targeting.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
 import { requireFeature } from "../services/plans.server";
 import {
   DELIVERY_MESSAGE_SHORTCODES,
@@ -148,6 +148,15 @@ const WEEKEND_OPTIONS = [
   { label: "Saturday and Sunday", value: "0,6" },
   { label: "Saturday only", value: "6" },
 ];
+
+const SETTINGS_TABS = [
+  { id: "coverage", label: "Coverage", description: "Start here: create zones, add postal rules, and review where you deliver." },
+  { id: "timing", label: "Delivery Timing", description: "Set preparation and transit defaults, then configure your business calendar and date display." },
+  { id: "products", label: "Product Rules", description: "Add exceptions for products, collections, vendors, or tags after setting your coverage and timing defaults." },
+  { id: "cart", label: "Cart Protection", description: "Choose how the storefront widget controls Add to Cart. These controls are not server-side checkout validation." },
+  { id: "messages", label: "Messages", description: "Choose shopper-facing wording and review a sample before saving. Product rules can override the success message." },
+  { id: "imports", label: "Imports & Sync", description: "Add coverage in bulk with a CSV, a published Google Sheet, or pasted rows. Review import results here." },
+] as const;
 
 function withCurrentOption(options: Array<{ label: string; value: string }>, value: string) {
   return options.some((option) => option.value === value)
@@ -327,7 +336,7 @@ function hasCourierIntegrationConfig() {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const shop = session.shop;
   const access = await resolvePlanAccess({ shop, admin });
 
@@ -436,7 +445,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const shop = session.shop;
   const access = await resolvePlanAccess({ shop, admin });
   const formData = await request.formData();
@@ -1219,9 +1228,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function DeliverySettingsPage() {
   const data = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+  const activeTab = SETTINGS_TABS.find((tab) => tab.id === searchParams.get("tab")) ?? SETTINGS_TABS[0];
+  const tabUrl = (tab: string) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", tab);
+    return `?${params.toString()}`;
+  };
   const fetcher = useFetcher<ActionData>();
   const isSaving = fetcher.state !== "idle";
-  const isAdvanced = data.access.plan === "advanced";
+  const isAdvanced = data.access.active;
   const activeIntent = String(fetcher.formData?.get("intent") ?? "");
   const activeZoneId = Number(fetcher.formData?.get("zoneId") ?? 0);
   const activePostalRuleId = Number(fetcher.formData?.get("postalRuleId") ?? 0);
@@ -1364,7 +1380,6 @@ export default function DeliverySettingsPage() {
   const [manualRows, setManualRows] = useState("");
   const [selectedEtaTemplate, setSelectedEtaTemplate] = useState("");
   const [selectedShortcode, setSelectedShortcode] = useState("");
-  const [etaPanel, setEtaPanel] = useState<"cutoff" | "weekoff" | "dates" | "countdown" | "translation" | null>(null);
   const holidays = data.setting.holidaysCsv
     .split(",")
     .map((value) => value.trim())
@@ -1374,6 +1389,17 @@ export default function DeliverySettingsPage() {
   const sampleMinLeadDays = sampleProcessingDays + 3;
   const sampleMaxLeadDays = sampleMinLeadDays + Math.max(0, Number(settings.deliveryWindowDays) || 0);
   const selectedDateFormat = settings.dateFormat === "custom" ? `custom:${settings.customDateFormat}` : settings.dateFormat;
+  const visibleSettingFields: string[] = activeTab.id === "timing"
+    ? ["processingDays", "fallbackDays", "deliveryWindowDays", "timeZone", "locale", "cutoffHour24", "weekendDaysCsv"]
+    : activeTab.id === "coverage"
+      ? ["courierTimeoutMs", "retryCount", "courierEnabled", "dbFallbackEnabled"]
+      : activeTab.id === "products"
+        ? ["inventoryAwareEnabled"]
+        : activeTab.id === "cart"
+          ? ["disableAddToCart", "requireValidPin"]
+          : activeTab.id === "messages"
+            ? ["successMessage", "unavailableMessage", "codAvailableMessage", "codUnavailableMessage", "deliveryChargeMessage"]
+            : [];
   const sampleOrderDate = previewDate(settings.locale, 0, selectedDateFormat);
   const sampleDispatchDate = previewDate(settings.locale, sampleProcessingDays, selectedDateFormat);
   const sampleMinDeliveryDate = previewDate(settings.locale, sampleMinLeadDays, selectedDateFormat);
@@ -1424,13 +1450,6 @@ export default function DeliverySettingsPage() {
   const targetRegionValues = regionsForCountry(targetForm.countryCode);
   const themeEditorUrl = `https://${data.shop}/admin/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
   const previewDeliveryDate = sampleMaxDeliveryDate;
-  const etaPanelTitle = {
-    cutoff: "Cut-off time",
-    weekoff: "Weekoff / holidays",
-    dates: "Date visibility",
-    countdown: "Countdown timer",
-    translation: "Translation and ETA message",
-  }[etaPanel ?? "cutoff"];
   const weekdayOptions = [
     ["1", "Mon"],
     ["2", "Tue"],
@@ -1467,6 +1486,7 @@ export default function DeliverySettingsPage() {
       nextDayAvailable: row.nextDayAvailable,
       expressAvailable: row.expressAvailable,
     });
+    document.getElementById("postal-rule-form")?.scrollIntoView({ behavior: "smooth" });
   };
   const editTarget = (target: (typeof data.targets)[number]) => {
     const product = target.targetKind === "product"
@@ -1649,7 +1669,7 @@ export default function DeliverySettingsPage() {
   return (
     <Page
       title="Delivery settings"
-      subtitle="Manage zones, ZIP ranges, wildcards, targeting rules, and delivery behavior."
+      subtitle="Set coverage first, then refine delivery promises and the shopper experience."
       titleMetadata={
         <InlineStack gap="200">
           <Badge tone="info">{`${data.totalPatterns} rules`}</Badge>
@@ -1660,6 +1680,19 @@ export default function DeliverySettingsPage() {
         </InlineStack>
       }
     >
+      <div className="incode-delivery-settings">
+      <BlockStack gap="400">
+        <nav className="incode-delivery-settings__tabs" aria-label="Delivery settings sections">
+          {SETTINGS_TABS.map((tab) => (
+            <Link key={tab.id} to={tabUrl(tab.id)} preventScrollReset aria-current={activeTab.id === tab.id ? "page" : undefined}>
+              {tab.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="incode-delivery-settings__intro">
+          <Text as="h2" variant="headingLg">{activeTab.label}</Text>
+          <Text as="p" tone="subdued">{activeTab.description}</Text>
+        </div>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
@@ -1669,67 +1702,13 @@ export default function DeliverySettingsPage() {
               </Banner>
             ) : null}
             {!isAdvanced ? (
-              <Banner title="Basic plan is active" tone="info" action={{ content: "Compare plans", url: "/app/plans" }}>
-                Exact postal rules, CSV imports, delivery dates, COD, and schedules are available. Upgrade for ranges, zones, targeting, cart protection, integrations, export, and analytics.
+              <Banner title="Standard subscription required" tone="info" action={{ content: "View plan", url: "/app/plans" }}>
+                Activate Standard to use delivery controls and storefront features.
               </Banner>
             ) : null}
 
+            {activeTab.id === "coverage" ? <>
             <div id="zones" className="incode-section-anchor" />
-            {editingPostalRule ? (
-              <div className="incode-modal-backdrop" role="presentation">
-                <div className="incode-modal" role="dialog" aria-modal="true" aria-labelledby="edit-postal-rule-title">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingMd" id="edit-postal-rule-title">Edit postal rule</Text>
-                      <Text as="p" tone="subdued">Update every field for {editingPostalRule.postalCode}, then save.</Text>
-                    </BlockStack>
-                    <Button size="slim" onClick={() => setEditingPostalRule(null)} accessibilityLabel="Close edit postal rule">Close</Button>
-                  </InlineStack>
-                  <div className="incode-modal__body">
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="upsert_single_postal_code" />
-                      <input type="hidden" name="postalRuleId" value={editingPostalRule.id} />
-                      <FormLayout>
-                        <FormLayout.Group condensed>
-                          <Select label="Country" name="country" options={COUNTRY_OPTIONS} value={postalCodeForm.country} onChange={(value) => setPostalCodeForm((current) => ({ ...current, country: value }))} />
-                          <TextField label="Postal code / pattern" name="postalCode" value={postalCodeForm.postalCode} onChange={(value) => setPostalCodeForm((current) => ({ ...current, postalCode: value }))} autoComplete="off" />
-                          <TextField label="Delivery days" name="deliveryDays" type="number" min={0} max={60} value={postalCodeForm.deliveryDays} onChange={(value) => setPostalCodeForm((current) => ({ ...current, deliveryDays: value }))} autoComplete="off" />
-                        </FormLayout.Group>
-                        <FormLayout.Group condensed>
-                          <Select label="Zone" name="zoneId" options={zoneOptions} value={postalCodeForm.zoneId} onChange={(value) => setPostalCodeForm((current) => ({ ...current, zoneId: value, zone: "" }))} />
-                          <TextField label="Zone name" name="zone" value={postalCodeForm.zone} onChange={(value) => setPostalCodeForm((current) => ({ ...current, zone: value }))} autoComplete="off" />
-                        </FormLayout.Group>
-                        <FormLayout.Group condensed>
-                          <TextField label="City" name="city" value={postalCodeForm.city} onChange={(value) => setPostalCodeForm((current) => ({ ...current, city: value }))} autoComplete="address-level2" />
-                          <TextField label="State" name="state" value={postalCodeForm.state} onChange={(value) => setPostalCodeForm((current) => ({ ...current, state: value }))} autoComplete="address-level1" />
-                        </FormLayout.Group>
-                        <FormLayout.Group condensed>
-                          <TextField label="Delivery charge" name="deliveryCharge" type="number" min={0} value={postalCodeForm.deliveryCharge} onChange={(value) => setPostalCodeForm((current) => ({ ...current, deliveryCharge: value }))} autoComplete="off" />
-                          <TextField label="Currency" name="currency" value={postalCodeForm.currency} onChange={(value) => setPostalCodeForm((current) => ({ ...current, currency: value.toUpperCase() }))} maxLength={3} autoComplete="off" />
-                        </FormLayout.Group>
-                        <InlineStack gap="400" wrap>
-                          {([
-                            ["serviceable", "Serviceable"],
-                            ["codAvailable", "COD available"],
-                            ["sameDayAvailable", "Same-day delivery"],
-                            ["nextDayAvailable", "Next-day delivery"],
-                            ["expressAvailable", "Express delivery"],
-                          ] as const).map(([key, label]) => (
-                            <Checkbox key={key} label={label} checked={postalCodeForm[key]} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, [key]: checked }))} />
-                          ))}
-                        </InlineStack>
-                        {(["serviceable", "codAvailable", "sameDayAvailable", "nextDayAvailable", "expressAvailable"] as const).map((key) => <input key={key} type="hidden" name={key} value={String(postalCodeForm[key])} />)}
-                        <InlineStack align="end" gap="200">
-                          <Button onClick={() => setEditingPostalRule(null)}>Cancel</Button>
-                          <Button submit variant="primary" loading={isIntentSaving("upsert_single_postal_code")}>Save changes</Button>
-                        </InlineStack>
-                      </FormLayout>
-                    </fetcher.Form>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" blockAlign="center" gap="300">
@@ -1801,6 +1780,8 @@ export default function DeliverySettingsPage() {
               </BlockStack>
             </Card>
 
+            </> : null}
+            {activeTab.id === "products" ? <>
             <div id="targeting" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="400">
@@ -1957,7 +1938,7 @@ export default function DeliverySettingsPage() {
                         onChange={(checked) =>
                           setTargetForm((current) => ({ ...current, requireValidPin: checked }))
                         }
-                        helpText="Shoppers must pass a serviceable delivery check before checkout buttons unlock."
+                        helpText="Shoppers must pass a serviceable delivery check before supported storefront purchase buttons unlock."
                       />
                     </FormLayout.Group>
                     <FormLayout.Group condensed>
@@ -2111,16 +2092,18 @@ export default function DeliverySettingsPage() {
               </BlockStack>
             </Card>
 
+            </> : null}
+            {activeTab.id !== "imports" ? <>
             <div id="behavior" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" gap="300" blockAlign="center">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingMd">
-                      Delivery behavior and storefront messages
+                      {activeTab.id === "coverage" ? "Coverage lookup sources" : activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "cart" ? "Shop-wide cart controls" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
                     </Text>
                     <Text as="p" tone="subdued">
-                      Configure how estimates are calculated and what shoppers see.
+                      Save applies all settings drafts, including changes made in other tabs. Coverage and product rules are saved separately.
                     </Text>
                   </BlockStack>
                   <Badge tone={settings.courierEnabled ? "success" : "attention"}>
@@ -2131,114 +2114,12 @@ export default function DeliverySettingsPage() {
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="save_settings" />
                   <input type="hidden" name="dateFormat" value={selectedDateFormat} />
-                  <Card>
-                    <BlockStack gap="300">
-                      <BlockStack gap="100">
-                        <Text as="h3" variant="headingMd">ETA options</Text>
-                        <Text as="p" tone="subdued">Customize cutoff time, week off days, date format, countdown timer, and translations from one simple panel.</Text>
-                      </BlockStack>
-                      <InlineStack gap="200" wrap>
-                        <Button size="slim" onClick={() => setEtaPanel("cutoff")}>Cut-off time</Button>
-                        <Button size="slim" onClick={() => setEtaPanel("weekoff")}>Weekoff / holidays</Button>
-                        <Button size="slim" onClick={() => setEtaPanel("dates")}>Date visibility</Button>
-                        <Button size="slim" onClick={() => setEtaPanel("countdown")}>Countdown timer</Button>
-                        <Button size="slim" onClick={() => setEtaPanel("translation")}>Translation</Button>
-                      </InlineStack>
-                    </BlockStack>
-                  </Card>
-
-                  {etaPanel ? (
-                    <div className="incode-modal-backdrop" role="presentation">
-                      <div className="incode-modal" role="dialog" aria-modal="true" aria-labelledby="incode-eta-panel-title">
-                        <InlineStack align="space-between" blockAlign="center">
-                          <Text as="h3" variant="headingMd" id="incode-eta-panel-title">{etaPanelTitle}</Text>
-                          <Button size="slim" onClick={() => setEtaPanel(null)} accessibilityLabel="Close ETA options">Close</Button>
-                        </InlineStack>
-                        <div className="incode-modal__body">
-                          {etaPanel === "cutoff" ? (
-                            <BlockStack gap="300">
-                              <Text as="p" tone="subdued">Orders placed before this hour start from today. After cutoff, the delivery promise moves to the next business day.</Text>
-                               <Select label="Cutoff hour" name="cutoffHour24" options={withCurrentOption(CUTOFF_OPTIONS, settings.cutoffHour24)} value={settings.cutoffHour24} onChange={(value) => setSettings((current) => ({ ...current, cutoffHour24: value }))} />
-                              <Text as="p">Current shopper message uses cutoff at <strong>{settings.cutoffHour24}:00</strong> in <strong>{settings.timeZone}</strong>.</Text>
-                            </BlockStack>
-                          ) : null}
-
-                          {etaPanel === "weekoff" ? (
-                            <BlockStack gap="400">
-                              <Text as="p" tone="subdued">Select days that should not count as business delivery days. Holidays below are also skipped.</Text>
-                              <input type="hidden" name="weekendDaysCsv" value={settings.weekendDaysCsv} />
-                              <BlockStack gap="200">
-                                <Text as="p" fontWeight="semibold">Delivery week off days</Text>
-                                <InlineStack gap="200" wrap>
-                                  {weekdayOptions.map(([value, label]) => (
-                                    <button key={value} type="button" className={`incode-choice-chip${selectedWeekends.has(value) ? " is-selected" : ""}`} onClick={() => toggleWeekend(value)}>{label}</button>
-                                  ))}
-                                </InlineStack>
-                                {selectedWeekends.size === 7 ? (
-                                  <Banner tone="critical">At least one delivery day is required. Clear one weekend day before saving.</Banner>
-                                ) : null}
-                              </BlockStack>
-                              <BlockStack gap="200">
-                                <Text as="p" fontWeight="semibold">Configured holidays</Text>
-                                {holidays.length > 0 ? <InlineStack gap="100" wrap>{holidays.map((holiday) => <Badge key={holiday}>{holiday}</Badge>)}</InlineStack> : <Text as="p" tone="subdued">No holidays yet. Use the Holidays section below to add blackout dates.</Text>}
-                                <Button url="#holidays" size="slim" onClick={() => setEtaPanel(null)}>Manage holidays</Button>
-                              </BlockStack>
-                            </BlockStack>
-                          ) : null}
-
-                          {etaPanel === "dates" ? (
-                            <BlockStack gap="300">
-                              <Text as="p" tone="subdued">Make delivery dates easy for shoppers. The storefront will show the earliest and latest dates.</Text>
-                              <FormLayout.Group condensed>
-                                 <Select label="Date locale" name="locale" options={withCurrentOption(LOCALE_OPTIONS, settings.locale)} value={settings.locale} onChange={(value) => setSettings((current) => ({ ...current, locale: value }))} />
-                                 <Select label="Delivery date window" name="deliveryWindowDays" options={withCurrentOption(DELIVERY_WINDOW_OPTIONS, settings.deliveryWindowDays)} value={settings.deliveryWindowDays} onChange={(value) => setSettings((current) => ({ ...current, deliveryWindowDays: value }))} />
-                              </FormLayout.Group>
-                               <Select label="Date format" options={DATE_FORMAT_OPTIONS} value={settings.dateFormat} onChange={(value) => setSettings((current) => ({ ...current, dateFormat: value }))} />
-                               {settings.dateFormat === "custom" ? (
-                                 <TextField
-                                   label="Custom date pattern"
-                                   value={settings.customDateFormat}
-                                   onChange={(value) => setSettings((current) => ({ ...current, customDateFormat: value }))}
-                                   autoComplete="off"
-                                   helpText="Use YYYY, YY, MMMM, MMM, MM, M, DD, D, dddd, or ddd. Example: ddd, DD MMM YYYY."
-                                 />
-                               ) : null}
-                              <Card><Text as="p">Preview: <strong>{sampleMinDeliveryDate}</strong> to <strong>{sampleMaxDeliveryDate}</strong></Text></Card>
-                            </BlockStack>
-                          ) : null}
-
-                          {etaPanel === "countdown" ? (
-                            <BlockStack gap="300">
-                              <Text as="p" tone="subdued">Countdown uses the cutoff hour. Add <code>{"{COUNTDOWN_TIMER}"}</code> in messages later if you want inline timer text; the storefront widget already supports the cutoff countdown block setting.</Text>
-                              <div className="incode-countdown-preview" aria-label="Countdown preview">
-                                <span><strong>01</strong><small>Hours</small></span>
-                                <span><strong>35</strong><small>Minutes</small></span>
-                                <span><strong>40</strong><small>Seconds</small></span>
-                              </div>
-                            </BlockStack>
-                          ) : null}
-
-                          {etaPanel === "translation" ? (
-                            <BlockStack gap="300">
-                              <Text as="p" tone="subdued">Choose simple shopper wording. Dates are dynamic and calculated from the postal rule.</Text>
-                              <FormLayout.Group condensed>
-                                <Select label="Ready template" options={ETA_MESSAGE_TEMPLATES} value={selectedEtaTemplate} disabled={!isAdvanced} onChange={(value) => { setSelectedEtaTemplate(value); if (value) setSettings((current) => ({ ...current, successMessage: value })); }} />
-                                <Select label="Insert dynamic value" options={SHORTCODE_OPTIONS} value={selectedShortcode} disabled={!isAdvanced} onChange={(value) => { setSelectedShortcode(""); if (!value) return; setSettings((current) => ({ ...current, successMessage: `${current.successMessage.trim()} {${value}}`.trim() })); }} />
-                              </FormLayout.Group>
-                              <TextField label="ETA message" name="successMessage" value={settings.successMessage} multiline={3} disabled={!isAdvanced} onChange={(value) => setSettings((current) => ({ ...current, successMessage: value }))} autoComplete="off" />
-                              <Card><Text as="p">{previewMessage || "Your delivery estimate will appear here."}</Text></Card>
-                            </BlockStack>
-                          ) : null}
-                        </div>
-                        <InlineStack align="end" gap="200">
-                          <Button onClick={() => setEtaPanel(null)}>Close</Button>
-                          <Button submit variant="primary" loading={isIntentSaving("save_settings")}>Apply and save</Button>
-                        </InlineStack>
-                      </div>
-                    </div>
-                  ) : null}
-
+                  {/* The action reads every setting, even when its editor is in another tab. */}
+                  {Object.entries(settings).filter(([key, value]) => key !== "dateFormat" && key !== "customDateFormat" && (typeof value === "boolean" || !visibleSettingFields.includes(key) || (!isAdvanced && activeTab.id === "messages"))).map(([key, value]) => (
+                    <input key={key} type="hidden" name={key} value={String(value)} />
+                  ))}
                   <FormLayout>
+                    {activeTab.id === "timing" ? <>
                     <FormLayout.Group condensed>
                       <Select
                         label="Processing days"
@@ -2286,6 +2167,17 @@ export default function DeliverySettingsPage() {
                       />
                     </FormLayout.Group>
 
+                    <Select label="Date format" options={DATE_FORMAT_OPTIONS} value={settings.dateFormat} onChange={(value) => setSettings((current) => ({ ...current, dateFormat: value }))} />
+                    {settings.dateFormat === "custom" ? (
+                      <TextField
+                        label="Custom date pattern"
+                        value={settings.customDateFormat}
+                        onChange={(value) => setSettings((current) => ({ ...current, customDateFormat: value }))}
+                        autoComplete="off"
+                        helpText="Use YYYY, YY, MMMM, MMM, MM, M, DD, D, dddd, or ddd. Example: ddd, DD MMM YYYY."
+                      />
+                    ) : null}
+
                     <FormLayout.Group condensed>
                       <Select
                         label="Cutoff hour"
@@ -2305,6 +2197,20 @@ export default function DeliverySettingsPage() {
                       />
                     </FormLayout.Group>
 
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">Custom week off days</Text>
+                      <Text as="p" tone="subdued">Selected days and configured holidays are skipped when calculating business delivery days.</Text>
+                      <InlineStack gap="200" wrap>
+                        {weekdayOptions.map(([value, label]) => (
+                          <button key={value} type="button" aria-pressed={selectedWeekends.has(value)} className={`incode-choice-chip${selectedWeekends.has(value) ? " is-selected" : ""}`} onClick={() => toggleWeekend(value)}>{label}</button>
+                        ))}
+                      </InlineStack>
+                      {selectedWeekends.size === 7 ? <Banner tone="critical">At least one delivery day is required. Clear one weekend day before saving.</Banner> : null}
+                      <Button url="#holidays">Manage holiday dates</Button>
+                    </BlockStack>
+
+                    </> : null}
+                    {activeTab.id === "coverage" ? <>
                     <FormLayout.Group condensed>
                       <Select
                         label="Courier timeout"
@@ -2324,7 +2230,6 @@ export default function DeliverySettingsPage() {
 
                     <Checkbox
                       label="Enable courier API as primary source"
-                      name="courierEnabled"
                       checked={settings.courierEnabled}
                       disabled={!data.courierIntegrationAvailable || !isAdvanced}
                       helpText={
@@ -2338,15 +2243,15 @@ export default function DeliverySettingsPage() {
                     />
                     <Checkbox
                       label="Use uploaded coverage rules when the courier API has no result"
-                      name="dbFallbackEnabled"
                       checked={settings.dbFallbackEnabled}
                       onChange={(checked) =>
                         setSettings((current) => ({ ...current, dbFallbackEnabled: checked }))
                       }
                     />
+                    </> : null}
+                    {activeTab.id === "products" ?
                     <Checkbox
                       label="Enable inventory-aware delivery estimates"
-                      name="inventoryAwareEnabled"
                       checked={settings.inventoryAwareEnabled}
                       disabled={!isAdvanced}
                       helpText="The storefront estimate uses the selected variant only when it is in stock."
@@ -2357,9 +2262,10 @@ export default function DeliverySettingsPage() {
                         }))
                       }
                     />
+                    : null}
+                    {activeTab.id === "cart" ? <>
                     <Checkbox
                       label="Disable Add to Cart when delivery is unavailable"
-                      name="disableAddToCart"
                       checked={settings.disableAddToCart}
                       disabled={!isAdvanced}
                       helpText="The storefront widget disables common product form buttons after an unavailable lookup."
@@ -2369,7 +2275,6 @@ export default function DeliverySettingsPage() {
                     />
                     <Checkbox
                       label="Require valid PIN before Add to Cart (shop-wide)"
-                      name="requireValidPin"
                       checked={settings.requireValidPin}
                       disabled={!isAdvanced}
                       helpText="Add to Cart stays locked until a serviceable postal code check succeeds. Targeting rules can override this per product, collection, or tag."
@@ -2378,6 +2283,9 @@ export default function DeliverySettingsPage() {
                       }
                     />
 
+                    <Button url={tabUrl("products")}>Review product-specific cart rules</Button>
+                    </> : null}
+                    {activeTab.id === "messages" ? <>
                     <Card>
                       <BlockStack gap="300">
                         <BlockStack gap="100">
@@ -2483,7 +2391,7 @@ export default function DeliverySettingsPage() {
 
                     <Card>
                       <BlockStack gap="200">
-                        <Text as="h3" variant="headingSm">Live message preview</Text>
+                        <Text as="h3" variant="headingSm">Sample message preview</Text>
                         <Text as="p">{previewMessage || "Your delivery estimate will appear here."}</Text>
                         <div className="incode-store-preview__journey">
                           {[
@@ -2499,11 +2407,12 @@ export default function DeliverySettingsPage() {
                           ))}
                         </div>
                         <Text as="p" tone="subdued">
-                          Preview data uses a sample US postal code. The storefront uses the shopper&apos;s real rule, locale, and dates.
+                          Sample US 10001 uses 3 transit days and does not apply cutoff, timezone, weekends, or holidays. The storefront calculates dates from the shopper&apos;s actual delivery rule and business calendar.
                         </Text>
                       </BlockStack>
                     </Card>
 
+                    </> : null}
                     <Button submit variant="primary" loading={isIntentSaving("save_settings")}>
                       Save settings
                     </Button>
@@ -2512,6 +2421,8 @@ export default function DeliverySettingsPage() {
               </BlockStack>
             </Card>
 
+            </> : null}
+            {activeTab.id === "imports" ? <>
             <div id="imports" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="400">
@@ -2601,7 +2512,6 @@ export default function DeliverySettingsPage() {
               </BlockStack>
             </Card>
 
-            <div id="coverage" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
@@ -2620,6 +2530,9 @@ export default function DeliverySettingsPage() {
               </BlockStack>
             </Card>
 
+            </> : null}
+            {activeTab.id === "coverage" ? <>
+            <div id="coverage" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="400">
                 <div id="postal-rule-form" className="incode-section-anchor" />
@@ -2879,6 +2792,8 @@ export default function DeliverySettingsPage() {
               </BlockStack>
             </Card>
 
+            </> : null}
+            {activeTab.id === "imports" ?
             <Card>
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">
@@ -2908,7 +2823,9 @@ export default function DeliverySettingsPage() {
                 </fetcher.Form>
               </BlockStack>
             </Card>
+            : null}
 
+            {activeTab.id === "coverage" ?
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center" gap="300">
@@ -2952,19 +2869,21 @@ export default function DeliverySettingsPage() {
                 )}
               </BlockStack>
             </Card>
+            : null}
           </BlockStack>
         </Layout.Section>
 
         <Layout.Section variant="oneThird">
           <BlockStack gap="400">
+            {activeTab.id === "timing" || activeTab.id === "messages" ?
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h2" variant="headingMd">Storefront preview</Text>
-                  <Badge tone="success">Live</Badge>
+                  <Text as="h2" variant="headingMd">Sample delivery journey</Text>
+                  <Badge tone="info">Sample</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">
-                  This is how the delivery journey appears inside your product page block.
+                  Illustrative dates use US 10001 and 3 transit days. This is not a live delivery check and does not apply your business calendar.
                 </Text>
                 <div className="incode-store-preview">
                   <div className="incode-store-preview__product">
@@ -2988,7 +2907,7 @@ export default function DeliverySettingsPage() {
                     <div className="incode-store-preview__step">
                       <span>3</span>
                       <strong>At your door</strong>
-                      <small>{settings.processingDays || "0"} + 5 days</small>
+                      <small>{sampleMinDeliveryDate} - {sampleMaxDeliveryDate}</small>
                     </div>
                   </div>
                 </div>
@@ -2997,6 +2916,8 @@ export default function DeliverySettingsPage() {
                 </Button>
               </BlockStack>
             </Card>
+            : null}
+            {activeTab.id === "timing" ? <>
             <div id="holidays" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="300">
@@ -3016,7 +2937,7 @@ export default function DeliverySettingsPage() {
                       requiredIndicator
                     />
                     <Button submit variant="primary" loading={isIntentSaving("add_holiday")}>
-                      Add holiday
+                  Add holiday
                     </Button>
                   </FormLayout>
                 </fetcher.Form>
@@ -3040,22 +2961,38 @@ export default function DeliverySettingsPage() {
                 )}
               </BlockStack>
             </Card>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">Cutoff countdown display</Text>
+                <Text as="p" tone="subdued">Configure the storefront cutoff countdown block in the Theme Editor. The numbers below are a static sample, not a running timer.</Text>
+                <div className="incode-countdown-preview" aria-label="Static countdown sample">
+                  <span><strong>01</strong><small>Hours</small></span>
+                  <span><strong>35</strong><small>Minutes</small></span>
+                  <span><strong>40</strong><small>Seconds</small></span>
+                </div>
+                <Button url={themeEditorUrl} external>Configure countdown in Theme Editor</Button>
+              </BlockStack>
+            </Card>
+            </> : null}
 
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  Review checklist
+                  Next steps
                 </Text>
                 <Text as="p" tone="subdued">
-                  Keep delivery messages accurate, avoid test data in production,
-                  and verify the storefront extension before Shopify App Store
-                  submission.
+                  {activeTab.id === "coverage" ? "Create zones if needed, then add a rule below. For larger lists, use Imports & Sync." : "Save your settings drafts, then test a real postal code on your storefront. Sample previews do not confirm serviceability."}
                 </Text>
+                <Button url={tabUrl(activeTab.id === "coverage" ? "imports" : "coverage")}>{activeTab.id === "coverage" ? "Import coverage in bulk" : "Review coverage"}</Button>
+                <Button url="/app/shipping-methods">Manage shipping methods</Button>
+                <Button url="/app/storefront-customization">Customize storefront appearance</Button>
               </BlockStack>
             </Card>
           </BlockStack>
         </Layout.Section>
       </Layout>
+      </BlockStack>
+      </div>
     </Page>
   );
 }

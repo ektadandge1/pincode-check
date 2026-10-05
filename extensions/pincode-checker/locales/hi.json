@@ -3,8 +3,8 @@
     "name": "डिलीवरी जांच"
   },
   "delivery_checker": {
-    "heading": "डिलीवरी की उपलब्धता जांचें",
-    "supporting_text": "उपलब्धता, डिलीवरी की तारीख और भुगतान विकल्प देखने के लिए अपना स्थान दर्ज करें।",
+    "heading": "पिन कोड आधारित डिलीवरी अनुमान",
+    "supporting_text": "डिलीवरी का समय देखने के लिए अपना पिन या ज़िप कोड दर्ज करें।",
     "check_button": "जांचें",
     "country_label": "देश",
     "country_aria_label": "देश चुनें",
@@ -34,8 +34,8 @@
     "method_delivery_label": "डिलीवरी",
     "method_disclaimer": "यह चयन केवल अनुमान दिखाता है। Shopify चेकआउट की शिपिंग दर अलग से चुनी जाती है।",
     "journey_aria_label": "डिलीवरी यात्रा",
-    "journey_order_now": "अभी ऑर्डर करें",
-    "journey_ready_to_ship": "भेजने के लिए तैयार",
+    "journey_order_now": "ऑर्डर की पुष्टि हुई",
+    "journey_ready_to_ship": "भेज दिया गया",
     "journey_at_doorstep": "आपके दरवाज़े पर",
     "journey_today": "आज",
     "journey_preparing": "तैयार किया जा रहा है",
@@ -43,6 +43,9 @@
     "countdown_hours": "घंटे",
     "countdown_minutes": "मिनट",
     "countdown_seconds": "सेकंड",
+    "countdown_title": "ऑर्डर समय-सीमा उलटी गिनती",
+    "estimated_delivery_date": "अनुमानित डिलीवरी तारीख",
+    "get_it_by": "डिलीवरी मिलेगी",
     "saved_address_notice": "आपका सहेजा हुआ ग्राहक पता उपयोग किया जा रहा है, सटीक IP स्थान नहीं।",
     "change_location": "बदलें",
     "use_saved_address": "सहेजा हुआ पता उपयोग करें"
@@ -66,8 +69,8 @@
     "saved_address_notice": "आपका सहेजा हुआ ग्राहक पता उपयोग किया जा रहा है, सटीक IP स्थान नहीं।",
     "change_location": "बदलें",
     "use_saved_address": "सहेजा हुआ पता उपयोग करें",
-    "card_eta_label": "अनुमानित डिलीवरी:",
-    "card_eta_aria": "अनुमानित डिलीवरी अवधि:"
+    "card_eta_label": "डिलीवरी मिलेगी",
+    "card_eta_aria": "डिलीवरी मिलेगी"
   },
   "automatic_eta": {
     "calculating": "डिलीवरी की तारीख की गणना की जा रही है...",

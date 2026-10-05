@@ -1,10 +1,10 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
-import { authenticate } from "../shopify.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
+import { requireActiveBilling } from "../services/billing.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session, cors } = await authenticate.admin(request);
+  const { admin, session, cors } = await requireActiveBilling(request, { api: true });
   const shop = session.shop;
   const access = await resolvePlanAccess({ shop, admin });
   const [settings, postalRules, zones, targets, locations, shippingMethods, recentChecks, availableChecks] = await Promise.all([
@@ -22,7 +22,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     shop,
     plan: {
       name: access.planName,
-      advanced: access.plan === "advanced",
+      active: access.active,
     },
     configuration: {
       postalRules,

@@ -11,10 +11,10 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
-import { authenticate } from "../shopify.server";
+import { requireActiveBilling } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await requireActiveBilling(request);
   return {
     shop: session.shop,
     apiKey: process.env.SHOPIFY_API_KEY || "",

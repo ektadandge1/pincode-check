@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { requireActiveBilling } from "../services/billing.server";
 
 function csvValue(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
@@ -11,7 +11,7 @@ function csvValue(value: unknown): string {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session } = await requireActiveBilling(request);
   const jobId = Number(params.jobId);
   if (!Number.isInteger(jobId)) {
     return new Response("Invalid import job.", { status: 400 });

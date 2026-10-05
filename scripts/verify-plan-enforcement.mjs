@@ -7,7 +7,7 @@ const { checkDelivery, checkDeliveryPolicy } = await import(
 const { importPostalCodesFromCsv } = await import(
   "../app/services/postal-code-importer.server.ts"
 );
-const { BASIC_FEATURES, ADVANCED_FEATURES } = await import(
+const { STANDARD_FEATURES } = await import(
   "../app/services/plans.server.ts"
 );
 
@@ -40,51 +40,51 @@ try {
     },
   });
 
-  const basicPolicy = await checkDeliveryPolicy({ shop, productId: "42", features: BASIC_FEATURES });
-  if (basicPolicy.require_valid_pin || basicPolicy.disable_add_to_cart) {
-    throw new Error("Basic must not execute Advanced cart controls.");
+  const standardPolicy = await checkDeliveryPolicy({ shop, productId: "42", features: STANDARD_FEATURES });
+  if (!standardPolicy.require_valid_pin) {
+    throw new Error("Standard must execute configured cart controls.");
   }
 
   const exact = await checkDelivery({
     shop,
     country: "US",
     postalCode: "10001",
-    features: BASIC_FEATURES,
+    features: STANDARD_FEATURES,
   });
   if (!exact.available) throw new Error("Basic exact rules should remain available.");
 
-  const basicWildcard = await checkDelivery({
+  const standardWildcard = await checkDelivery({
     shop,
     country: "US",
     postalCode: "12345",
-    features: BASIC_FEATURES,
+    features: STANDARD_FEATURES,
   });
-  if (basicWildcard.available) throw new Error("Basic must not execute wildcard rules.");
+  if (!standardWildcard.available) throw new Error("Standard wildcard rules should be available.");
 
-  const advancedWildcard = await checkDelivery({
+  const targetedWildcard = await checkDelivery({
     shop,
     country: "US",
     postalCode: "12345",
     productId: "42",
-    features: ADVANCED_FEATURES,
+    features: STANDARD_FEATURES,
   });
-  if (!advancedWildcard.available || !advancedWildcard.require_valid_pin) {
-    throw new Error("Advanced wildcard and targeting features should execute.");
+  if (!targetedWildcard.available || !targetedWildcard.require_valid_pin) {
+    throw new Error("Standard wildcard and targeting features should execute.");
   }
 
-  const basicAnalytics = await prisma.postalCodeSearchEvent.count({ where: { shop } });
-  if (basicAnalytics !== 1) {
-    throw new Error("Only the Advanced lookup should write analytics.");
+  const standardAnalytics = await prisma.postalCodeSearchEvent.count({ where: { shop } });
+  if (standardAnalytics !== 3) {
+    throw new Error("Standard lookups should write analytics.");
   }
 
-  const basicImport = await importPostalCodesFromCsv(
+  const standardImport = await importPostalCodesFromCsv(
     shop,
     "country,postal_code,delivery_days\nUS,999*,2",
     "csv",
-    BASIC_FEATURES,
+    STANDARD_FEATURES,
   );
-  if (basicImport.status !== "failed" || basicImport.failedRows !== 1) {
-    throw new Error("Basic CSV imports must reject wildcard rules.");
+  if (standardImport.status !== "completed" || standardImport.successRows !== 1) {
+    throw new Error("Standard CSV imports should accept wildcard rules.");
   }
 } finally {
   await prisma.deliveryTarget.deleteMany({ where: { shop } });

@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Link, Outlet, redirect, useLoaderData, useRouteError } from "react-router";
+import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
 import { NavMenu } from "@shopify/app-bridge-react";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { AppProvider as PolarisProvider } from "@shopify/polaris";
@@ -8,7 +8,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { requireActiveBilling } from "../services/billing.server";
+import { accessForPlan, NO_PLAN_ACCESS } from "../services/plans.server";
 import { requiresDocumentNavigation } from "../utils/navigation";
 
 type PolarisLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
@@ -25,15 +26,16 @@ function PolarisLink({ url, external, children, ...props }: PolarisLinkProps) {
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const access = await resolvePlanAccess({ shop: session.shop, admin });
   const pathname = new URL(request.url).pathname;
-  if (!access.active && pathname !== "/app/plans") {
-    throw redirect("/app/plans");
-  }
+  const isPlansRoute = pathname.replace(/\/+$/, "") === "/app/plans";
+  const billingExempt = isPlansRoute || pathname.replace(/\/+$/, "") === "/app/headless-api";
+  const context = billingExempt
+    ? await authenticate.admin(request)
+    : await requireActiveBilling(request);
+  const access = billingExempt ? NO_PLAN_ACCESS : accessForPlan("standard");
 
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", access };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", access, shop: context.session.shop };
 };
 
 export default function App() {
@@ -51,6 +53,7 @@ export default function App() {
           <a href="/app/locations">Locations</a>
           <a href="/app/shipping-methods">Shipping methods</a>
           <a href="/app/analytics">Analytics</a>
+          <a href="/app/headless-api">Headless API</a>
           <a href="/app/plans">Plans</a>
           <a href="/app/additional">Help</a>
         </NavMenu>

@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { requireActiveBilling } from "../services/billing.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
 import { requireFeature } from "../services/plans.server";
 
 function csvValue(value: unknown): string {
@@ -14,7 +14,7 @@ function csvValue(value: unknown): string {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   requireFeature(access, "export");
   const rows = await prisma.postalCode.findMany({

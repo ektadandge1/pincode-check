@@ -3,8 +3,8 @@
     "name": "Delivery Checker"
   },
   "delivery_checker": {
-    "heading": "Check delivery availability",
-    "supporting_text": "Enter your location to see availability, delivery date, and payment options.",
+    "heading": "ZIP code based ETA message",
+    "supporting_text": "Enter your ZIP or postal code to check the delivery time.",
     "check_button": "Check",
     "country_label": "Country",
     "country_aria_label": "Select country",
@@ -34,8 +34,8 @@
     "method_delivery_label": "Delivery",
     "method_disclaimer": "This selection shows an estimate only. Your Shopify checkout shipping rate is selected separately.",
     "journey_aria_label": "Delivery journey",
-    "journey_order_now": "Order now",
-    "journey_ready_to_ship": "Ready to ship",
+    "journey_order_now": "Order confirmed",
+    "journey_ready_to_ship": "Shipped",
     "journey_at_doorstep": "At your doorstep",
     "journey_today": "Today",
     "journey_preparing": "Preparing",
@@ -43,6 +43,9 @@
     "countdown_hours": "Hours",
     "countdown_minutes": "Minutes",
     "countdown_seconds": "Seconds",
+    "countdown_title": "Order cutoff countdown",
+    "estimated_delivery_date": "Estimated Delivery Date",
+    "get_it_by": "Get it by",
     "saved_address_notice": "Using your saved customer address, not precise IP location.",
     "change_location": "Change",
     "use_saved_address": "Use saved address"
@@ -66,8 +69,8 @@
     "saved_address_notice": "Using your saved customer address, not precise IP location.",
     "change_location": "Change",
     "use_saved_address": "Use saved address",
-    "card_eta_label": "Estimated delivery:",
-    "card_eta_aria": "Estimated delivery range:"
+    "card_eta_label": "Get it by",
+    "card_eta_aria": "Get it by"
   },
   "automatic_eta": {
     "calculating": "Calculating delivery date...",

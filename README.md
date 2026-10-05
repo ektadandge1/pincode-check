@@ -22,30 +22,23 @@ Incode Track is a Shopify public app that adds a country-aware postal and ZIP co
 
 ## Plans
 
-Incode Track uses Shopify App Pricing. Shopify hosts plan selection, processes all
-charges, and manages upgrades, downgrades, proration, cancellation, and trial
-reuse. Both plans include a 7-day trial.
+Incode Track uses the Shopify Billing API. Shopify approves the subscription and
+adds all charges to the merchant's Shopify invoice. No external billing provider
+is used.
 
-### Basic - $9.99 USD/month
+### Standard - $9 USD every 30 days
 
+- 7-day free trial
 - Product-page delivery checker
-- Unlimited exact postal and ZIP code rules
+- Unlimited postal and ZIP code rules, ranges, wildcards, and zones
 - CSV and manual imports
 - Delivery estimates and COD availability
 - Cutoff, weekend, and holiday schedules
-
-### Advanced - $29.99 USD/month
-
-- Everything in Basic
-- ZIP ranges, wildcards, and priority zones
 - Product, collection, and tag targeting
 - Valid-PIN and unavailable-location Add-to-Cart controls
 - Inventory and optional courier-aware checks
 - Delivery charges and speed options
 - Google Sheet sync, CSV export, and privacy-safe analytics
-
-Advanced records are retained but become dormant after a downgrade to Basic.
-They are restored if the merchant upgrades again.
 
 ## Shopify Requirements Covered Locally
 
@@ -64,8 +57,8 @@ They are restored if the merchant upgrades again.
 ## Production Setup
 
 1. Set production environment variables from `.env.example` and run `npm run env:check`.
-2. Configure Shopify App Pricing in the Partner Dashboard using the exact plan
-   and item handles `basic` and `advanced`, with a 7-day trial on each plan.
+2. Set `SHOPIFY_BILLING_TEST=false` only for the production public or unlisted
+   app. Keep it `true` for development stores and test installations.
 3. Replace the `https://example.com` application and redirect URLs in `shopify.app.toml` with the production HTTPS domain.
 4. Provision durable database storage. Local SQLite is not suitable for an ephemeral or multi-instance deployment without a persistent storage strategy.
 5. Run `npm run setup` in production to generate Prisma Client and apply migrations.

@@ -31,7 +31,7 @@ import {
   serializeShippingMethod,
   shippingMethodEligible,
 } from "../utils/shipping-method";
-import { ADVANCED_FEATURES, type PlanFeatures } from "./plans.server";
+import { STANDARD_FEATURES, type PlanFeatures } from "./plans.server";
 
 export type CheckDeliveryInput = {
   country?: string;
@@ -587,7 +587,7 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
 }> {
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? ADVANCED_FEATURES;
+  const features = input.features ?? STANDARD_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
   const quantity = Math.max(1, Math.floor(input.quantity ?? 1));
   const { status } = await inventoryForTargeting(input, targets, quantity);
@@ -614,7 +614,7 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
 export async function getGeneralDeliveryEstimate(input: CheckDeliveryInput) {
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? ADVANCED_FEATURES;
+  const features = input.features ?? STANDARD_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
   return generalDeliveryEstimate(input, settings, targets);
 }
@@ -679,19 +679,23 @@ export async function getProductCardDeliveryEstimates(
 ) {
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? ADVANCED_FEATURES;
+  const features = input.features ?? STANDARD_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
 
-  return Promise.all(items.map(async (item) => ({
-    key: item.key,
-    estimate: await generalDeliveryEstimate({
+  return Promise.all(items.map(async (item) => {
+    const estimate = await generalDeliveryEstimate({
       ...input,
       productId: item.productId,
       productVendor: item.productVendor,
       productTags: item.productTags,
       collectionHandles: item.collectionHandles,
-    }, settings, targets),
-  })));
+    }, settings, targets);
+
+    return {
+      key: item.key,
+      estimate: estimate.matched_target ? estimate : { enabled: false },
+    };
+  }));
 }
 
 async function callShiprocketServiceability(
@@ -803,7 +807,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   }
 
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? ADVANCED_FEATURES;
+  const features = input.features ?? STANDARD_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
   const inventoryAware = features.inventory && settings.inventoryAwareEnabled;
   const inventoryTargeting = targets.some((target) => target.inventoryMode && target.inventoryMode !== "any");

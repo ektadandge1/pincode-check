@@ -16,9 +16,9 @@ import {
   TextField,
 } from "@shopify/polaris";
 import prisma from "../db.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
 import { NO_PLAN_ACCESS } from "../services/plans.server";
-import { authenticate } from "../shopify.server";
+import { requireActiveBilling } from "../services/billing.server";
 
 type ShopifyLocation = {
   id: string;
@@ -49,7 +49,7 @@ function optionalDays(value: FormDataEntryValue | null): number | null {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const [rules, setting] = await Promise.all([
     prisma.fulfillmentLocationRule.findMany({
       where: { shop: session.shop },
@@ -116,7 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await requireActiveBilling(request);
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   const formData = await request.formData();
   const intent = String(formData.get("intent"));
@@ -124,7 +124,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: false, message: "Unsupported action." } satisfies ActionData;
   }
   if (!access.features.inventory) {
-    return { ok: false, message: "Fulfillment location rules require the Advanced plan." } satisfies ActionData;
+    return { ok: false, message: "Fulfillment location rules require an active Standard subscription." } satisfies ActionData;
   }
   if (intent === "save_priority_mode") {
     const mode = String(formData.get("priorityMode") ?? "manual");
@@ -199,7 +199,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function LocationsPage() {
   const { access, locations, priorityMode, locationError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
-  const isAdvanced = access.plan === "advanced";
+  const isAdvanced = access.active;
   const [forms, setForms] = useState(() => Object.fromEntries(locations.map((location) => [location.id, {
     enabled: location.rule?.enabled ?? location.isActive,
     priority: String(location.rule?.priority ?? 100),
@@ -222,7 +222,7 @@ export default function LocationsPage() {
     <Page
       title="Fulfillment locations"
       subtitle="Route estimates to stocked Shopify locations and configure pickup or local delivery."
-      titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Advanced" : "Advanced feature"}</Badge>}
+      titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Standard" : "Subscription required"}</Badge>}
     >
       <BlockStack gap="400">
         {locationError ? (
@@ -236,8 +236,8 @@ export default function LocationsPage() {
           </Banner>
         ) : null}
         {!isAdvanced ? (
-          <Banner tone="info" title="Advanced plan required" action={{ content: "View plans", url: "/app/plans" }}>
-            Upgrade to configure fulfillment routing, location-specific transit times, pickup, and local delivery.
+          <Banner tone="info" title="Standard subscription required" action={{ content: "View plan", url: "/app/plans" }}>
+            Activate Standard to configure fulfillment routing, location-specific transit times, pickup, and local delivery.
           </Banner>
         ) : null}
         <Card>

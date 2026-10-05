@@ -9,128 +9,19 @@ import {
 } from "../services/delivery-checker.server";
 import { authenticate } from "../shopify.server";
 import { parseListParam, parseProductEstimateBatch } from "../utils/targeting.server";
-import type { ProductEstimateBatchItem } from "../utils/targeting.server";
+import {
+  resolveShopifyProductContexts,
+  canonicalProductFor,
+  canonicalBatchItems,
+} from "../services/product-context.server";
 import { parseCartDeliveryItems } from "../utils/delivery.server";
-import { resolvePlanAccess } from "../services/partner-api.server";
+import { resolvePlanAccess } from "../services/plan-access.server";
+import { billingRequiredResponse } from "../services/billing.server";
 import prisma from "../db.server";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_REQUESTS = 120;
 const lookupWindows = new Map<string, { count: number; resetsAt: number }>();
-
-type ProxyAdmin = {
-  graphql: (query: string, options?: { variables?: Record<string, unknown> }) => Promise<Response>;
-};
-
-type CanonicalProduct = {
-  id: string;
-  vendor: string;
-  tags: string[];
-  collectionHandles: string[];
-};
-
-function shopifyGid(kind: "Product" | "ProductVariant", value: string | null | undefined) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return null;
-  if (raw.startsWith(`gid://shopify/${kind}/`)) return raw;
-  const numeric = raw.replace(/\D/g, "");
-  return numeric ? `gid://shopify/${kind}/${numeric}` : null;
-}
-
-async function resolveShopifyProductContexts(
-  admin: ProxyAdmin | undefined,
-  inputs: Array<{ productId?: string | null; variantId?: string | null }>,
-) {
-  if (!admin) throw new Error("Shopify product context is unavailable.");
-  const ids = [...new Set(inputs.flatMap((input) => [
-    shopifyGid("Product", input.productId),
-    shopifyGid("ProductVariant", input.variantId),
-  ]).filter((value): value is string => Boolean(value)))];
-  if (!ids.length) return { products: new Map<string, CanonicalProduct>(), variants: new Map<string, CanonicalProduct>() };
-  if (ids.length > 50) throw new RangeError("Too many Shopify product contexts.");
-
-  const response = await admin.graphql(`#graphql
-    query DeliveryCheckerProductContexts($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on Product {
-          id vendor tags
-          collections(first: 100) { nodes { handle } }
-        }
-        ... on ProductVariant {
-          id
-          product {
-            id vendor tags
-            collections(first: 100) { nodes { handle } }
-          }
-        }
-      }
-    }
-  `, { variables: { ids } });
-  if (!response.ok) throw new Error(`Shopify returned HTTP ${response.status} while resolving product context.`);
-  const json = await response.json() as {
-    data?: { nodes?: Array<null | {
-      id: string;
-      vendor?: string;
-      tags?: string[];
-      collections?: { nodes?: Array<{ handle?: string }> };
-      product?: {
-        id: string;
-        vendor?: string;
-        tags?: string[];
-        collections?: { nodes?: Array<{ handle?: string }> };
-      };
-    }> };
-    errors?: Array<{ message?: string }>;
-  };
-  if (json.errors?.length) throw new Error(json.errors.map((error) => error.message).filter(Boolean).join(" "));
-
-  const products = new Map<string, CanonicalProduct>();
-  const variants = new Map<string, CanonicalProduct>();
-  const normalize = (product: NonNullable<NonNullable<NonNullable<typeof json.data>["nodes"]>[number]>) => ({
-    id: product.id,
-    vendor: String(product.vendor ?? "").slice(0, 100),
-    tags: (product.tags ?? []).slice(0, 100).map(String),
-    collectionHandles: (product.collections?.nodes ?? []).flatMap((collection) => collection.handle ? [collection.handle] : []),
-  });
-  for (const node of json.data?.nodes ?? []) {
-    if (!node) continue;
-    if (node.product) {
-      const product = normalize(node.product);
-      variants.set(node.id, product);
-      products.set(product.id, product);
-    } else {
-      products.set(node.id, normalize(node));
-    }
-  }
-  return { products, variants };
-}
-
-function canonicalProductFor(
-  resolved: Awaited<ReturnType<typeof resolveShopifyProductContexts>>,
-  productId?: string | null,
-  variantId?: string | null,
-) {
-  const productGid = shopifyGid("Product", productId);
-  const variantGid = shopifyGid("ProductVariant", variantId);
-  const fromProduct = productGid ? resolved.products.get(productGid) : undefined;
-  const fromVariant = variantGid ? resolved.variants.get(variantGid) : undefined;
-  if (productGid && !fromProduct) return null;
-  if (variantGid && (!fromVariant || (fromProduct && fromVariant.id !== fromProduct.id))) return null;
-  return fromProduct ?? fromVariant ?? null;
-}
-
-function canonicalBatchItems(items: ProductEstimateBatchItem[], resolved: Awaited<ReturnType<typeof resolveShopifyProductContexts>>) {
-  return items.flatMap((item) => {
-    const product = canonicalProductFor(resolved, item.productId, null);
-    return product ? [{
-      ...item,
-      productId: product.id,
-      productVendor: product.vendor,
-      productTags: product.tags,
-      collectionHandles: product.collectionHandles,
-    }] : [];
-  });
-}
 
 function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetting.findUnique>>) {
   return {
@@ -143,6 +34,10 @@ function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetti
     button_color: setting?.storefrontButtonColor ?? "#2b2640",
     button_text_color: setting?.storefrontButtonTextColor ?? "#ffffff",
     card_background: setting?.storefrontCardBackground ?? "#ffffff",
+    field_background: setting?.storefrontFieldBackground ?? "#ffffff",
+    field_border_color: setting?.storefrontFieldBorderColor ?? "#d7d9dd",
+    result_background: setting?.storefrontResultBackground ?? "#171717",
+    result_text_color: setting?.storefrontResultTextColor ?? "#ffffff",
     journey_background: setting?.storefrontJourneyBackground ?? "#e6edff",
     journey_active_color: setting?.storefrontJourneyActiveColor ?? "#9bb8f2",
     journey_line_color: setting?.storefrontJourneyLineColor ?? "#f28c52",
@@ -152,6 +47,10 @@ function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetti
     icon_style: setting?.storefrontIconStyle ?? "number",
     animation: setting?.storefrontAnimation ?? "soft",
     show_journey: setting?.storefrontShowJourney ?? true,
+    countdown_background: setting?.storefrontCountdownBackground ?? "#06451f",
+    countdown_digit_color: setting?.storefrontCountdownDigitColor ?? "#ff6500",
+    countdown_text_color: setting?.storefrontCountdownTextColor ?? "#ffffff",
+    countdown_title: setting?.storefrontCountdownTitle ?? "Order cutoff countdown",
     custom_css: setting?.storefrontCustomCss ?? "",
     shipping_method_display_style: setting?.shippingMethodDisplayStyle === "dropdown" ? "dropdown" : "visual",
   };
@@ -222,13 +121,10 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
   if (!access?.active) {
-    return Response.json(
-      { enabled: false, results: [] },
-      { headers: { "Cache-Control": "private, max-age=0, s-maxage=30" } },
-    );
+    return billingRequiredResponse();
   }
 
-  let canonicalItems: ProductEstimateBatchItem[];
+  let canonicalItems: ReturnType<typeof canonicalBatchItems>;
   try {
     const resolved = await resolveShopifyProductContexts(proxyContext.admin, parsed.items);
     canonicalItems = canonicalBatchItems(parsed.items, resolved);
@@ -333,17 +229,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
   }
   if (!access?.active) {
-    return Response.json(
-      {
-        enabled: false,
-        available: false,
-        source: "none",
-        message: "",
-        disable_add_to_cart: false,
-        require_valid_pin: false,
-      },
-      { headers: { "Cache-Control": "private, max-age=0, s-maxage=30" } },
-    );
+    return billingRequiredResponse();
   }
 
   let canonicalCartItems = cart.items;

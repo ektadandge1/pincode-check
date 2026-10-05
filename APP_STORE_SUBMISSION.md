@@ -12,10 +12,10 @@ Do not submit the app while any item below is incomplete:
 - Run `npm run env:check`, `npm run setup`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `shopify app build` successfully.
 - Verify install, reinstall, and uninstall flows in Chrome incognito mode.
 - Verify all three mandatory privacy webhook topics against the production endpoint.
-- Configure Shopify App Pricing and test Basic approval, Advanced approval,
-  upgrade, downgrade, cancellation, trial, reinstall, and welcome-link redirects.
-- Create a Partner API client with **Manage apps** permission and set the billing
-  environment variables documented in `.env.example`.
+- Test Standard plan approval, duplicate-submit protection, cancellation, trial,
+  reinstall, and billing return redirects through the Shopify Billing API.
+- Set `SHOPIFY_BILLING_TEST=false` only in the production public or unlisted app
+  environment. Development and review test installations should use test billing.
 - Add the theme app block to a test product template and test desktop and mobile storefront behavior.
 - Measure storefront Lighthouse performance before and after enabling the app block. The reduction must remain within Shopify's current App Store requirement.
 
@@ -50,26 +50,15 @@ Geographic requirement: Built for global postal and ZIP code coverage. India-onl
 
 Languages supported: English.
 
-Pricing method: Shopify App Pricing (not manual Billing API and never off-platform billing).
+Pricing method: Shopify Billing API (never off-platform billing).
 
-### Basic
+### Standard
 
-- Price: $9.99 USD every 30 days
+- Price: $9 USD every 30 days
 - Free trial: 7 days
-- Plan handle: `basic`
-- Recurring item handle: `basic`
-- Welcome link: `/app/plans`
-- Exact postal/ZIP rules, CSV/manual import, delivery dates, COD, cutoff,
-  weekends, holidays, and the storefront checker.
-
-### Advanced
-
-- Price: $29.99 USD every 30 days
-- Free trial: 7 days
-- Plan handle: `advanced`
-- Recurring item handle: `advanced`
-- Welcome link: `/app/plans`
-- Everything in Basic plus ranges, wildcards, zones, product targeting,
+- Billing API plan name: `Standard`
+- Approval return route: `/app/plans`
+- Includes exact rules, ranges, wildcards, zones, product targeting,
   Add-to-Cart/PIN controls, inventory/courier checks, delivery options,
   Google Sheets, export, and analytics.
 
@@ -96,9 +85,8 @@ Demo store URL: Link directly to a product page where the Delivery availability 
 
 1. Install the app on the development store from Shopify.
 2. Open the app in Shopify admin.
-3. On Shopify's hosted plan page, select Advanced. Development stores owned by
-   the same Partner organization can test paid plans at no charge.
-4. Confirm Shopify redirects to `/app/plans` and shows Advanced as active.
+3. On the Plans page, start the Standard trial and approve the Shopify test charge.
+4. Confirm Shopify redirects to `/app/plans` and shows Standard as active.
 5. Go to Delivery control.
 6. Add a postal code manually, for example `US, 10001, 2 delivery days, serviceable`.
 7. Open Help and click Add block in Theme Editor.
@@ -108,9 +96,9 @@ Demo store URL: Link directly to a product page where the Delivery availability 
 11. Enter an unavailable postal code and confirm the app shows the unavailable message.
 12. Enable Add-to-Cart blocking and confirm the add button disables after an unavailable lookup.
 13. Open Analytics and confirm the lookup was recorded without customer personal data.
-14. Open Plans, switch to Basic through Shopify's hosted page, and confirm
-    Advanced controls become unavailable without deleting saved configuration.
-15. Switch back to Advanced and confirm the saved configuration becomes active.
+14. Submit the plan form again and confirm no duplicate charge is created.
+15. Cancel the subscription in Shopify and confirm paid admin routes redirect to
+    Plans while proxy/API routes return HTTP 402.
 
 Analytics displays shortened postal regions and retains lookup events for up to 90 days. It does not retain the complete shopper-entered postal code or product variant ID.
 
@@ -123,16 +111,14 @@ Analytics displays shortened postal regions and retains lookup events for up to 
 - App icon uploaded as 1200 x 1200 PNG or JPEG.
 - Three to six screenshots uploaded at 1600 x 900.
 - Demo screencast in English or with English subtitles.
-- Pricing configured with Shopify App Pricing or marked free.
-- Basic and Advanced each have exactly a 7-day trial and accurate feature text.
-- Merchants can upgrade and downgrade without contacting support or reinstalling.
-- Production Partner API client has **Manage apps** permission and its token is
-  stored only in server-side environment variables.
+- Standard is configured in the app as $9 USD every 30 days with a 7-day trial.
+- Production uses `SHOPIFY_BILLING_TEST=false`; development uses test billing.
+- Billing is required in production with `SHOPIFY_BILLING_REQUIRED=true`.
 - No screenshot, icon, app details, or feature-list text includes pricing.
 
 ## Current Shopify Review Rules
 
-- Use Shopify App Pricing for every app charge; never send merchants to an
+- Use Shopify Billing API for every app charge; never send merchants to an
   external payment system.
 - Authenticate immediately with OAuth/session tokens and work in Chrome
   incognito without third-party cookies.

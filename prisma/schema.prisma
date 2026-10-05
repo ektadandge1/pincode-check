@@ -78,55 +78,63 @@ model PostalCode {
 }
 
 model DeliverySetting {
-  id                           Int       @id @default(autoincrement())
-  shop                         String    @unique @default("default")
-  cutoffHour24                 Int       @default(14)
-  processingDays               Int       @default(0)
-  deliveryWindowDays           Int       @default(2)
-  dateFormat                   String    @default("weekday_day_month")
-  timeZone                     String    @default("UTC")
-  locale                       String    @default("en")
-  holidaysCsv                  String    @default("")
-  fallbackDays                 Int       @default(5)
-  weekendDaysCsv               String    @default("0")
-  courierTimeoutMs             Int       @default(2000)
-  retryCount                   Int       @default(1)
-  courierEnabled               Boolean   @default(false)
-  dbFallbackEnabled            Boolean   @default(true)
-  inventoryAwareEnabled        Boolean   @default(false)
-  disableAddToCart             Boolean   @default(false)
-  requireValidPin              Boolean   @default(false)
-  successMessage               String    @default("Delivery by {date}. {cod_message}{delivery_charge_message}")
-  unavailableMessage           String    @default("Sorry, delivery is not available for this postal code.")
-  codAvailableMessage          String    @default("COD available.")
-  codUnavailableMessage        String    @default("Prepaid only.")
-  deliveryChargeMessage        String    @default(" Delivery charge: {currency}{delivery_charge}.")
-  storefrontFontFamily         String    @default("system")
-  storefrontFontSize           Int       @default(14)
-  storefrontHeadingSize        Int       @default(18)
-  storefrontTextColor          String    @default("#16151a")
-  storefrontMutedColor         String    @default("#667085")
-  storefrontAccentColor        String    @default("#2b2640")
-  storefrontButtonColor        String    @default("#2b2640")
-  storefrontButtonTextColor    String    @default("#ffffff")
-  storefrontCardBackground     String    @default("#ffffff")
-  storefrontJourneyBackground  String    @default("#e6edff")
-  storefrontJourneyActiveColor String    @default("#9bb8f2")
-  storefrontJourneyLineColor   String    @default("#f28c52")
-  storefrontJourneyLineStyle   String    @default("dotted")
-  storefrontTemplate           String    @default("modern-card")
-  storefrontBorderRadius       Int       @default(14)
-  storefrontIconStyle          String    @default("number")
-  storefrontAnimation          String    @default("soft")
-  storefrontShowJourney        Boolean   @default(true)
-  storefrontCustomCss          String    @default("")
-  locationPriorityMode         String    @default("manual")
-  shippingMethodDisplayStyle   String    @default("visual")
-  googleSheetCsvUrl            String?
-  lastGoogleSheetSyncAt        DateTime?
-  lastGoogleSheetSyncStatus    String?
-  createdAt                    DateTime  @default(now())
-  updatedAt                    DateTime  @updatedAt
+  id                            Int       @id @default(autoincrement())
+  shop                          String    @unique @default("default")
+  cutoffHour24                  Int       @default(14)
+  processingDays                Int       @default(0)
+  deliveryWindowDays            Int       @default(2)
+  dateFormat                    String    @default("weekday_day_month")
+  timeZone                      String    @default("UTC")
+  locale                        String    @default("en")
+  holidaysCsv                   String    @default("")
+  fallbackDays                  Int       @default(5)
+  weekendDaysCsv                String    @default("0")
+  courierTimeoutMs              Int       @default(2000)
+  retryCount                    Int       @default(1)
+  courierEnabled                Boolean   @default(false)
+  dbFallbackEnabled             Boolean   @default(true)
+  inventoryAwareEnabled         Boolean   @default(false)
+  disableAddToCart              Boolean   @default(false)
+  requireValidPin               Boolean   @default(false)
+  successMessage                String    @default("Delivery by {date}. {cod_message}{delivery_charge_message}")
+  unavailableMessage            String    @default("Sorry, delivery is not available for this postal code.")
+  codAvailableMessage           String    @default("COD available.")
+  codUnavailableMessage         String    @default("Prepaid only.")
+  deliveryChargeMessage         String    @default(" Delivery charge: {currency}{delivery_charge}.")
+  storefrontFontFamily          String    @default("system")
+  storefrontFontSize            Int       @default(14)
+  storefrontHeadingSize         Int       @default(18)
+  storefrontTextColor           String    @default("#16151a")
+  storefrontMutedColor          String    @default("#667085")
+  storefrontAccentColor         String    @default("#2b2640")
+  storefrontButtonColor         String    @default("#2b2640")
+  storefrontButtonTextColor     String    @default("#ffffff")
+  storefrontCardBackground      String    @default("#ffffff")
+  storefrontFieldBackground     String    @default("#ffffff")
+  storefrontFieldBorderColor    String    @default("#d7d9dd")
+  storefrontResultBackground    String    @default("#171717")
+  storefrontResultTextColor     String    @default("#ffffff")
+  storefrontJourneyBackground   String    @default("#e6edff")
+  storefrontJourneyActiveColor  String    @default("#9bb8f2")
+  storefrontJourneyLineColor    String    @default("#f28c52")
+  storefrontJourneyLineStyle    String    @default("dotted")
+  storefrontTemplate            String    @default("modern-card")
+  storefrontBorderRadius        Int       @default(14)
+  storefrontIconStyle           String    @default("number")
+  storefrontAnimation           String    @default("soft")
+  storefrontShowJourney         Boolean   @default(true)
+  storefrontCountdownBackground String    @default("#06451f")
+  storefrontCountdownDigitColor String    @default("#ff6500")
+  storefrontCountdownTextColor  String    @default("#ffffff")
+  storefrontCountdownTitle      String    @default("Order cutoff countdown")
+  storefrontCustomCss           String    @default("")
+  locationPriorityMode          String    @default("manual")
+  shippingMethodDisplayStyle    String    @default("visual")
+  googleSheetCsvUrl             String?
+  lastGoogleSheetSyncAt         DateTime?
+  lastGoogleSheetSyncStatus     String?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
 }
 
 model DeliveryTarget {
@@ -240,4 +248,30 @@ model PostalCodeSearchEvent {
 
   @@index([shop, createdAt])
   @@index([shop, country, postalCode])
+}
+
+model HeadlessApiToken {
+  id                 String    @id @default(cuid())
+  shop               String
+  name               String
+  tokenType          String
+  tokenHash          String    @unique
+  tokenPrefix        String
+  scopesCsv          String
+  allowedOriginsJson String
+  enabled            Boolean   @default(true)
+  expiresAt          DateTime?
+  lastUsedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  revokedAt          DateTime?
+
+  @@index([shop, revokedAt, enabled])
+}
+
+model HeadlessRateLimit {
+  key      String   @id
+  count    Int
+  resetsAt DateTime
+
+  @@index([resetsAt])
 }
