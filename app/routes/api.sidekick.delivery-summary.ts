@@ -44,7 +44,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     results: [
       { url: "app://delivery-settings" },
       { url: "app://locations" },
-      { url: "app://shipping-methods" },
       { url: "app://analytics" },
     ],
   }));

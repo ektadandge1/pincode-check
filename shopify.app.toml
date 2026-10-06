@@ -5,9 +5,6 @@ name = "Incode Track"
 application_url = "https://example.com"
 embedded = true
 
-[sidekick]
-extensions_summary = "Inspect delivery coverage, ETA settings, fulfillment locations, shipping methods, and delivery lookup performance"
-
 [build]
 automatically_update_urls_on_dev = true
 
@@ -15,16 +12,16 @@ automatically_update_urls_on_dev = true
 api_version = "2026-04"
 
   [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
-  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
   uri = "/webhooks/privacy"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -34,6 +31,9 @@ scopes = "read_inventory,read_locations,read_orders,read_products,read_shipping,
 redirect_urls = [ "https://example.com/auth/callback" ]
 
 [app_proxy]
-url = "/apps/delivery-checker"
+url = "https://example.com/apps/delivery-checker"
 subpath = "delivery-checker"
 prefix = "apps"
+
+[sidekick]
+extensions_summary = "Inspect delivery coverage, ETA settings, fulfillment locations, shipping methods, and delivery lookup performance"

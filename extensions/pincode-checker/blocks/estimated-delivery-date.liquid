@@ -221,7 +221,7 @@
         if (!response.ok) estimateInvalidated = false;
       }).catch(() => { estimateInvalidated = false; });
     };
-    const params = new URLSearchParams({ estimate: '1' });
+    const params = new URLSearchParams({ estimate: '1', targeted: '1' });
     if (root.dataset.country) params.set('country', root.dataset.country);
     if (root.dataset.productId) params.set('productId', root.dataset.productId);
     if (root.dataset.productVendor) params.set('productVendor', root.dataset.productVendor);

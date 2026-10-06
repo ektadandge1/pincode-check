@@ -56,6 +56,27 @@ function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetti
   };
 }
 
+function countdownVisible(
+  setting: Awaited<ReturnType<typeof prisma.deliverySetting.findUnique>>,
+  context: { productId?: string; collectionHandles?: string[]; zoneId?: number | null },
+  surface: string,
+): boolean {
+  if (!setting?.countdownEnabled) return false;
+  const surfaces = setting.countdownDisplaySurfacesCsv.split(",").filter(Boolean);
+  if (!surfaces.includes(surface)) return false;
+  if (setting.countdownTargetMode === "products") {
+    return Boolean(context.productId && setting.countdownProductIdsCsv.split(",").includes(context.productId));
+  }
+  if (setting.countdownTargetMode === "collections") {
+    const selected = new Set(setting.countdownCollectionHandlesCsv.split(",").filter(Boolean));
+    return (context.collectionHandles ?? []).some((handle) => selected.has(handle));
+  }
+  if (setting.countdownTargetMode === "zones") {
+    return Boolean(context.zoneId && setting.countdownZoneIdsCsv.split(",").includes(String(context.zoneId)));
+  }
+  return true;
+}
+
 function isRateLimited(key: string): boolean {
   const now = Date.now();
   for (const [entryKey, entry] of lookupWindows) {
@@ -185,8 +206,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const productTags = parseListParam(url.searchParams.get("productTags"));
   const productVendor = url.searchParams.get("productVendor")?.slice(0, 100) ?? undefined;
   const collectionHandles = parseListParam(url.searchParams.get("collections"));
+  const surface = url.searchParams.get("surface") ?? "product";
   const isInit = url.searchParams.get("init") === "1";
   const isEstimate = url.searchParams.get("estimate") === "1";
+  const requireTarget = url.searchParams.get("targeted") === "1";
   const cart = parseCartDeliveryItems(url.searchParams.get("cartItems"));
   const shop = proxyContext.session?.shop ?? (url.searchParams.get("shop") ?? undefined);
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -289,8 +312,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (isEstimate) {
     try {
-      const estimate = await getGeneralDeliveryEstimate({ ...context, features: access.features });
-      return Response.json({ ...estimate, storefront_style: style }, {
+      const estimate = await getGeneralDeliveryEstimate({ ...context, features: access.features, requireTarget });
+      return Response.json({ ...estimate, storefront_style: style, countdown_visible: countdownVisible(setting, context, surface) }, {
         headers: { "Cache-Control": "no-store" },
       });
     } catch (error) {
@@ -302,6 +325,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         reason: "configuration_error",
         message: "Delivery dates are temporarily unavailable due to an invalid schedule.",
         storefront_style: style,
+        countdown_visible: countdownVisible(setting, context, surface),
       }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
   }
@@ -344,7 +368,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const result = canonicalCartItems.length > 0
       ? await checkCartDelivery(deliveryInput, canonicalCartItems, { complete: cart.complete })
       : await checkDelivery(deliveryInput);
-    return Response.json({ ...result, storefront_style: style }, {
+    return Response.json({
+      ...result,
+      storefront_style: style,
+      countdown_visible: countdownVisible(setting, { ...context, zoneId: result.zone_id ?? null }, surface),
+    }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

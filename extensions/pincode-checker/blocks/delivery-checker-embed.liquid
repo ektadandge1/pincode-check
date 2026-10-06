@@ -1,751 +1,136 @@
 {% liquid
-  assign embed_id = block.id | replace: '-', ''
-  assign embed_localization_country = localization.country.iso_code | default: 'US'
-  assign embed_saved_country = customer.default_address.country_code | default: embed_localization_country
-  assign embed_saved_postal = customer.default_address.zip | default: ''
-  assign embed_product = product
-  assign embed_product_id = ''
-  assign embed_vendor = ''
-  assign embed_tags = '[]'
-  assign embed_collections = '[]'
-  if embed_product
-    assign embed_product_id = embed_product.id
-    assign embed_vendor = embed_product.vendor
-    assign embed_tags = embed_product.tags | json
-    assign embed_collection_values = ''
-    for embed_collection in embed_product.collections limit: 20
-      if embed_collection_values != ''
-        assign embed_collection_values = embed_collection_values | append: ','
-      endif
-      assign embed_collection_values = embed_collection_values | append: embed_collection.handle | json
-    endfor
-    assign embed_collections = embed_collection_values | prepend: '[' | append: ']'
-  elsif collection
-    assign embed_collections = collection.handle | json | prepend: '[' | append: ']'
-  endif
-  assign embed_button_label = block.settings.button_label
-  if embed_button_label == blank
-    assign embed_button_label = 'delivery_embed.button_label' | t
-  endif
-  assign embed_heading = block.settings.heading
-  if embed_heading == blank
-    assign embed_heading = 'delivery_embed.heading' | t
-  endif
-  assign embed_country_name = localization.country.name
-  if embed_country_name == blank
-    assign embed_country_name = 'delivery_embed.country' | t
-  endif
-  assign card_eta_items = '[]'
-  assign card_eta_count = 0
-  if block.settings.show_product_card_eta and template.name == 'collection'
-    capture card_eta_values
-      for card_product in collection.products limit: 24
-        unless forloop.first
-          echo ','
-        endunless
-        assign card_tags = card_product.tags | slice: 0, 20
-        assign card_collection_values = ''
-        for card_collection in card_product.collections limit: 20
-          assign card_collection_json = card_collection.handle | json
-          if card_collection_values != ''
-            assign card_collection_values = card_collection_values | append: ','
-          endif
-          assign card_collection_values = card_collection_values | append: card_collection_json
-        endfor
+  assign inline_items = ''
+  if template.name == 'collection'
+    for inline_product in collection.products limit: 50
+      unless forloop.first
+        assign inline_items = inline_items | append: ','
+      endunless
+      capture inline_item
         echo '{"key":'
-        echo card_product.handle | json
+        echo inline_product.handle | json
         echo ',"productId":'
-        echo card_product.id | json
-        echo ',"productVendor":'
-        echo card_product.vendor | json
-        echo ',"productTags":'
-        echo card_tags | json
-        echo ',"collectionHandles":['
-        echo card_collection_values
-        echo ']}'
-      endfor
-    endcapture
-    assign card_eta_items = card_eta_values | prepend: '[' | append: ']'
-  elsif block.settings.show_product_card_eta and template.name == 'search'
-    capture card_eta_values
-      for search_item in search.results
-        if search_item.object_type == 'product'
-          if card_eta_count > 0
-            echo ','
-          endif
-          assign card_tags = search_item.tags | slice: 0, 20
-          assign card_collection_values = ''
-          for card_collection in search_item.collections limit: 20
-            assign card_collection_json = card_collection.handle | json
-            if card_collection_values != ''
-              assign card_collection_values = card_collection_values | append: ','
-            endif
-            assign card_collection_values = card_collection_values | append: card_collection_json
-          endfor
+        echo inline_product.id | json
+        echo '}'
+      endcapture
+      assign inline_items = inline_items | append: inline_item
+    endfor
+  elsif template.name == 'search'
+    for inline_result in search.results limit: 50
+      if inline_result.object_type == 'product'
+        unless forloop.first
+          assign inline_items = inline_items | append: ','
+        endunless
+        capture inline_item
           echo '{"key":'
-          echo search_item.handle | json
+          echo inline_result.handle | json
           echo ',"productId":'
-          echo search_item.id | json
-          echo ',"productVendor":'
-          echo search_item.vendor | json
-          echo ',"productTags":'
-          echo card_tags | json
-          echo ',"collectionHandles":['
-          echo card_collection_values
-          echo ']}'
-          assign card_eta_count = card_eta_count | plus: 1
-          if card_eta_count == 24
-            break
-          endif
-        endif
-      endfor
-    endcapture
-    assign card_eta_items = card_eta_values | prepend: '[' | append: ']'
+          echo inline_result.id | json
+          echo '}'
+        endcapture
+        assign inline_items = inline_items | append: inline_item
+      endif
+    endfor
+  elsif template.name == 'cart'
+    for inline_item in cart.items limit: 50
+      unless forloop.first
+        assign inline_items = inline_items | append: ','
+      endunless
+      capture cart_item_json
+        echo '{"key":'
+        echo inline_item.key | json
+        echo ',"productId":'
+        echo inline_item.product_id | json
+        echo '}'
+      endcapture
+      assign inline_items = inline_items | append: cart_item_json
+    endfor
   endif
+  assign inline_items = inline_items | prepend: '[' | append: ']'
 %}
 
-<div
-  id="incode-delivery-embed-{{ embed_id }}"
-  class="incode-delivery-embed"
-  data-product-id="{{ embed_product_id | escape }}"
-  data-product-vendor="{{ embed_vendor | escape }}"
-  data-product-tags="{{ embed_tags | escape }}"
-  data-collections="{{ embed_collections | escape }}"
-  data-country="{{ embed_saved_country | escape }}"
-  data-localization-country="{{ embed_localization_country | escape }}"
-  data-saved-postal="{{ embed_saved_postal | escape }}"
-  data-auto-check-saved-address="{{ block.settings.auto_check_saved_address }}"
-  data-show-product-card-eta="{{ block.settings.show_product_card_eta }}"
-  data-invalid-postal="{{ 'delivery_embed.invalid_postal' | t | escape }}"
-  data-checking="{{ 'delivery_embed.checking' | t | escape }}"
-  data-request-error="{{ 'delivery_embed.request_error' | t | escape }}"
-  data-unavailable="{{ 'delivery_embed.unavailable' | t | escape }}"
-  data-variant-required="{{ 'delivery_embed.variant_required' | t | escape }}"
-  data-out-of-stock="{{ 'delivery_embed.out_of_stock' | t | escape }}"
-  data-inventory-unavailable="{{ 'delivery_embed.inventory_unavailable' | t | escape }}"
-  data-card-eta-label="{{ 'delivery_embed.card_eta_label' | t | escape }}"
-  data-card-eta-aria="{{ 'delivery_embed.card_eta_aria' | t | escape }}"
-  {{ block.shopify_attributes }}
->
-  <button class="incode-delivery-embed__toggle" type="button" aria-expanded="false" aria-controls="incode-delivery-embed-panel-{{ embed_id }}">
-    <span class="incode-delivery-embed__icon" aria-hidden="true">&#10003;</span>
-    <span>{{ embed_button_label | escape }}</span>
-  </button>
-  <div class="incode-delivery-embed__panel" id="incode-delivery-embed-panel-{{ embed_id }}" hidden>
-    <div class="incode-delivery-embed__heading">{{ embed_heading | escape }}</div>
-    <p class="incode-delivery-embed__sub">{{ 'delivery_embed.supporting_text' | t }}</p>
-    <div class="incode-delivery-embed__fields">
-      <select aria-label="{{ 'delivery_embed.country_aria_label' | t | escape }}" class="incode-delivery-embed__country">
-        {% if localization.available_countries.size > 0 %}
-          {% assign embed_saved_country_available = false %}
-          {% for embed_country in localization.available_countries %}
-            {% if embed_country.iso_code == embed_saved_country %}
-              {% assign embed_saved_country_available = true %}
-            {% endif %}
-            <option value="{{ embed_country.iso_code | escape }}" {% if embed_country.iso_code == embed_saved_country %}selected{% endif %}>{{ embed_country.name | escape }}</option>
-          {% endfor %}
-          {% unless embed_saved_country_available %}
-            <option value="{{ embed_saved_country | escape }}" selected>{{ embed_saved_country | escape }}</option>
-          {% endunless %}
-        {% else %}
-          <option value="{{ embed_saved_country | escape }}" selected>{{ embed_country_name | escape }}</option>
-        {% endif %}
-      </select>
-      <input class="incode-delivery-embed__postal" type="text" inputmode="text" autocomplete="postal-code" value="{{ embed_saved_postal | escape }}" placeholder="{{ 'delivery_embed.postal_placeholder' | t | escape }}" aria-label="{{ 'delivery_embed.postal_aria_label' | t | escape }}">
-      <button class="incode-delivery-embed__check" type="button">{{ 'delivery_embed.check_button' | t }}</button>
-    </div>
-    {% if embed_saved_postal != blank %}
-      <div class="incode-delivery-embed__saved" data-saved-location>
-        <span>{{ 'delivery_embed.saved_address_notice' | t }}</span>
-        <button type="button" data-location-action data-change-label="{{ 'delivery_embed.change_location' | t | escape }}" data-restore-label="{{ 'delivery_embed.use_saved_address' | t | escape }}">{{ 'delivery_embed.change_location' | t }}</button>
-      </div>
-    {% endif %}
-    <p class="incode-delivery-embed__result" role="status" aria-live="polite"></p>
-  </div>
-  <script type="application/json" data-card-products>{{ card_eta_items }}</script>
+<div class="incode-inline-delivery" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ localization.country.iso_code | default: 'US' }}">
+  <script type="application/json" data-inline-items>{{ inline_items }}</script>
 </div>
-
-<style>
-  #incode-delivery-embed-{{ embed_id }} {
-    --incode-embed-accent: {{ block.settings.accent_color | default: '#f47d32' }};
-    --incode-embed-text: {{ block.settings.text_color | default: '#171a1d' }};
-    --incode-embed-card: {{ block.settings.card_color | default: '#ffffff' }};
-    --incode-embed-button-text: #ffffff;
-    --incode-embed-muted: #667085;
-    --incode-embed-radius: 16px;
-    --incode-embed-font: inherit;
-    --incode-embed-font-size: 14px;
-    position: fixed;
-    right: 20px;
-    bottom: 20px;
-    z-index: 30;
-    color: var(--incode-embed-text);
-    font-family: var(--incode-embed-font);
-    font-size: var(--incode-embed-font-size);
-  }
-  #incode-delivery-embed-{{ embed_id }}[hidden],
-  #incode-delivery-embed-{{ embed_id }} [hidden] { display: none !important; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__toggle,
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__check {
-    border: 0;
-    border-radius: 999px;
-    background: var(--incode-embed-accent);
-    color: var(--incode-embed-button-text);
-    cursor: pointer;
-    font: inherit;
-    font-weight: 700;
-  }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    padding: 12px 17px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
-  }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__icon {
-    display: grid;
-    width: 22px;
-    height: 22px;
-    place-items: center;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, .22);
-  }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__panel {
-    width: min(360px, calc(100vw - 32px));
-    margin-bottom: 10px;
-    padding: 18px;
-    border: 1px solid rgba(0, 0, 0, .1);
-    border-radius: var(--incode-embed-radius);
-    background: var(--incode-embed-card);
-    box-shadow: 0 16px 44px rgba(0, 0, 0, .2);
-  }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__heading { font-size: 17px; font-weight: 750; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__sub { margin: 4px 0 14px; color: var(--incode-embed-muted); font-size: 13px; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #incode-delivery-embed-{{ embed_id }} select,
-  #incode-delivery-embed-{{ embed_id }} input { min-width: 0; box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid rgba(0, 0, 0, .2); border-radius: 8px; background: var(--incode-embed-card); color: inherit; font: inherit; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__check { grid-column: 1 / -1; padding: 10px 14px; border-radius: 8px; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__saved { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--incode-embed-muted); font-size: 11px; line-height: 1.4; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__saved button { flex: 0 0 auto; border: 0; padding: 2px; background: transparent; color: var(--incode-embed-accent); font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__result { margin: 12px 0 0; font-size: 13px; line-height: 1.45; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__result[data-state='success'] { color: #087443; }
-  #incode-delivery-embed-{{ embed_id }} .incode-delivery-embed__result[data-state='error'] { color: #b42318; }
-  #incode-delivery-embed-{{ embed_id }} button:focus-visible,
-  #incode-delivery-embed-{{ embed_id }} select:focus-visible,
-  #incode-delivery-embed-{{ embed_id }} input:focus-visible { outline: 2px solid var(--incode-embed-accent); outline-offset: 2px; }
-  [data-incode-card-eta] { box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 100%; margin: 14px 0 0; padding: 12px 10px; border-radius: var(--incode-card-eta-radius, 10px); background: var(--incode-card-eta-background, #edf8fc); color: var(--incode-card-eta-text, #34454f); font-family: var(--incode-card-eta-font, inherit); font-size: var(--incode-card-eta-size, 12px); font-weight: 700; line-height: 1.35; text-align: center; }
-  @media (max-width: 520px) { #incode-delivery-embed-{{ embed_id }} { right: 12px; bottom: 12px; } }
-  @media (prefers-reduced-motion: reduce) {
-    #incode-delivery-embed-{{ embed_id }} *,
-    [data-incode-card-eta] { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-  }
-</style>
 
 <script>
   (() => {
-    const root = document.getElementById('incode-delivery-embed-{{ embed_id }}');
-    if (!root || root.dataset.initialized === 'true') return;
+    const root = document.querySelector('[data-inline-delivery-eta]:not([data-initialized])');
+    if (!root) return;
     root.dataset.initialized = 'true';
-    const toggle = root.querySelector('.incode-delivery-embed__toggle');
-    const panel = root.querySelector('.incode-delivery-embed__panel');
-    const country = root.querySelector('.incode-delivery-embed__country');
-    const postal = root.querySelector('.incode-delivery-embed__postal');
-    const check = root.querySelector('.incode-delivery-embed__check');
-    const result = root.querySelector('.incode-delivery-embed__result');
-    const savedLocation = root.querySelector('[data-saved-location]');
-    const locationAction = root.querySelector('[data-location-action]');
-    const savedPostal = String(root.dataset.savedPostal || '').trim();
-    const savedCountry = String(root.dataset.country || '').trim();
-    const localizationCountry = String(root.dataset.localizationCountry || 'US').trim();
-    const cardProductsElement = root.querySelector('[data-card-products]');
-    const hasProduct = Boolean(String(root.dataset.productId || '').trim());
-    const productScope = document;
-    let serviceEnabled = true;
-    let cartAttributeWrite = Promise.resolve();
-    let estimateInvalidated = false;
-    let requestVersion = 0;
-    let activeController = null;
-    let cardScanRunning = false;
-    let cardScanPending = false;
-    let cardScanTimer = null;
-    const requestedCardHandles = new Set();
-    const cardEstimates = new Map();
-    const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } };
+    const itemsElement = root.querySelector('[data-inline-items]');
+    let items = [];
+    try { items = JSON.parse(itemsElement?.textContent || '[]'); } catch { items = []; }
+    if (!Array.isArray(items) || !items.length) return;
 
-    const fonts = {
-      system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      inter: "Inter, system-ui, sans-serif",
-      poppins: "Poppins, system-ui, sans-serif",
-      'dm-sans': "'DM Sans', system-ui, sans-serif",
-      jakarta: "'Plus Jakarta Sans', system-ui, sans-serif"
-    };
-    const applyStorefrontStyle = (style) => {
-      if (!style || typeof style !== 'object') return;
-      const setColor = (name, value) => {
-        if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(name, value);
-      };
-      if (fonts[style.font_family]) root.style.setProperty('--incode-embed-font', fonts[style.font_family]);
-      if (Number.isFinite(Number(style.font_size))) root.style.setProperty('--incode-embed-font-size', `${Number(style.font_size)}px`);
-      if (Number.isFinite(Number(style.border_radius))) root.style.setProperty('--incode-embed-radius', `${Number(style.border_radius)}px`);
-      setColor('--incode-embed-accent', style.button_color || style.accent_color);
-      setColor('--incode-embed-button-text', style.button_text_color);
-      setColor('--incode-embed-text', style.text_color);
-      setColor('--incode-embed-muted', style.muted_color);
-      setColor('--incode-embed-card', style.card_background);
-      if (typeof style.custom_css === 'string' && style.custom_css.length <= 5000 && !/@import|url\s*\(|expression\s*\(|javascript:|<\/?(?:script|style)/i.test(style.custom_css)) {
-        let customStyle = document.getElementById('incode-storefront-custom-css');
-        if (!customStyle) {
-          customStyle = document.createElement('style');
-          customStyle.id = 'incode-storefront-custom-css';
-          document.head.appendChild(customStyle);
-        }
-        customStyle.textContent = style.custom_css;
-      }
-    };
-
-    const cardFont = (style) => fonts[style?.font_family] || 'inherit';
-    const applyCardStyle = (element, style) => {
-      if (!style || typeof style !== 'object') return;
-      element.style.setProperty('--incode-card-eta-font', cardFont(style));
-      if (Number.isFinite(Number(style.font_size))) {
-        element.style.setProperty('--incode-card-eta-size', `${Math.max(11, Number(style.font_size) - 2)}px`);
-      }
-      if (typeof style.muted_color === 'string' && /^#[0-9a-f]{6}$/i.test(style.muted_color)) {
-        element.style.setProperty('--incode-card-eta-text', style.muted_color);
-      }
-      if (typeof style.journey_background === 'string' && /^#[0-9a-f]{6}$/i.test(style.journey_background)) {
-        element.style.setProperty('--incode-card-eta-background', style.journey_background);
-      }
-      if (Number.isFinite(Number(style.border_radius))) {
-        element.style.setProperty('--incode-card-eta-radius', `${Math.min(12, Number(style.border_radius))}px`);
-      }
-    };
-
+    const productCardFor = (link) => link.closest([
+      'product-card', '.card-wrapper', '.product-card', '.product-item',
+      '.product-grid-item', '.grid-product', '.product-block', '[data-product-card]',
+      '.grid__item', 'li[class*="product"]', 'li[class*="grid"]'
+    ].join(','));
     const productHandleFromLink = (link) => {
       try {
-        const match = new URL(link.href, window.location.href).pathname.match(/\/products\/([^/]+)/);
-        return match ? decodeURIComponent(match[1]).toLowerCase() : '';
-      } catch {
-        return '';
-      }
+        const path = new URL(link.href, window.location.href).pathname;
+        return decodeURIComponent(path.match(/\/products\/([^/]+)/)?.[1] || '').toLowerCase();
+      } catch { return ''; }
+    };
+    const addCardLabel = (handle, range) => {
+      const link = [...document.querySelectorAll('a[href*="/products/"]')]
+        .find((candidate) => productHandleFromLink(candidate) === String(handle).toLowerCase());
+      const card = link && productCardFor(link);
+      if (!card || card.querySelector(`[data-inline-eta="${handle}"]`)) return;
+      const host = card.querySelector('.card__information, .card-information, .product-card__info, .product-item__info, .card-content, .product-card__details') || card;
+      const label = document.createElement('p');
+      label.dataset.inlineEta = handle;
+      label.className = 'incode-inline-delivery__label';
+      label.textContent = `Delivery by ${range}`;
+      host.append(label);
+    };
+    const addCartLabel = (key, range) => {
+      const line = document.querySelector(`[data-key="${CSS.escape(key)}"], [data-cart-item-key="${CSS.escape(key)}"]`)
+        || [...document.querySelectorAll('tr, .cart-item, [data-cart-item]')].find((element) => element.textContent?.includes(String(key)));
+      if (!line || line.querySelector(`[data-inline-eta="${key}"]`)) return;
+      const label = document.createElement('p');
+      label.dataset.inlineEta = key;
+      label.className = 'incode-inline-delivery__label';
+      label.textContent = `Delivery by ${range}`;
+      line.querySelector('.cart-item__details, .cart-item__name, .cart-item__info')?.append(label) || line.append(label);
     };
 
-    const productCardForLink = (link) => link.closest([
-      'product-card',
-      '.card-wrapper',
-      '.product-card',
-      '.product-item',
-      '.product-grid-item',
-      '.grid-product',
-      '.product-block',
-      '[data-product-card]',
-      '.grid__item',
-      'li[class*="product"]',
-      'li[class*="grid"]'
-    ].join(','));
-
-    const renderCardEstimates = (data) => {
+    fetch('/apps/delivery-checker?batch=1', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ country: root.dataset.country || 'US', items })
+    }).then((response) => response.ok ? response.json() : null).then((data) => {
       if (!data || !Array.isArray(data.results)) return;
       data.results.forEach((entry) => {
         const estimate = entry?.estimate;
         const range = estimate?.delivery_date_range || estimate?.estimated_date_max_label || estimate?.estimated_date_label;
-        if (estimate?.enabled === true && range) cardEstimates.set(String(entry.key), String(range));
+        if (!estimate?.enabled || !range) return;
+        if (root.dataset.template === 'cart') addCartLabel(entry.key, range);
+        else addCardLabel(entry.key, range);
       });
-      if (!cardEstimates.size) return;
-
-      document.querySelectorAll('a[href*="/products/"]').forEach((link) => {
-        const handle = productHandleFromLink(link);
-        const range = cardEstimates.get(handle);
-        if (!range) return;
-        const card = productCardForLink(link);
-        if (!card || card.querySelector(`[data-incode-card-eta="${handle}"]`)) return;
-        const host = card.querySelector('.card__information, .card-information, .product-card__info, .product-item__info, .card-content, .product-card__details') || card;
-        const label = document.createElement('p');
-        label.dataset.incodeCardEta = handle;
-        label.setAttribute('role', 'note');
-        label.setAttribute('aria-label', `${root.dataset.cardEtaAria} ${range}`);
-        label.textContent = `${root.dataset.cardEtaLabel} ${range}`;
-        applyCardStyle(label, data.storefront_style);
-        host.append(label);
-      });
-    };
-
-    const requestCardEstimates = async (items) => {
-      if (!Array.isArray(items) || !items.length || items.length > 24) return;
-      try {
-        const response = await fetch('/apps/delivery-checker?batch=1', {
-          method: 'POST',
-          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ country: root.dataset.localizationCountry, items })
-        });
-        if (!response.ok) return;
-        const data = await response.json();
-        applyStorefrontStyle(data.storefront_style);
-        if (data.enabled !== false) renderCardEstimates(data);
-      } catch {
-        // Product cards remain unchanged when estimates are unavailable.
-      }
-    };
-
-    const productJsonForLink = async (link, handle) => {
-      try {
-        const url = new URL(link.href, window.location.href);
-        if (url.origin !== window.location.origin) return null;
-        url.pathname = `${url.pathname.replace(/\/$/, '')}.js`;
-        url.search = '';
-        const response = await fetch(url.toString(), { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-        if (!response.ok) return null;
-        const product = await response.json();
-        return product?.id ? { key: handle, productId: String(product.id) } : null;
-      } catch {
-        return null;
-      }
-    };
-
-    const scanCardEstimates = async () => {
-      if (root.dataset.showProductCardEta !== 'true') return;
-      if (cardScanRunning) {
-        cardScanPending = true;
-        return;
-      }
-      cardScanRunning = true;
-      try {
-        renderCardEstimates({ results: [] });
-        const linksByHandle = new Map();
-        document.querySelectorAll('a[href*="/products/"]').forEach((link) => {
-          const handle = productHandleFromLink(link);
-          if (handle && productCardForLink(link) && !requestedCardHandles.has(handle) && !linksByHandle.has(handle)) {
-            linksByHandle.set(handle, link);
-          }
-        });
-        const entries = [...linksByHandle.entries()];
-        for (let index = 0; index < entries.length; index += 24) {
-          const chunk = entries.slice(index, index + 24);
-          chunk.forEach(([handle]) => requestedCardHandles.add(handle));
-          const items = (await Promise.all(chunk.map(([handle, link]) => productJsonForLink(link, handle)))).filter(Boolean);
-          for (let itemIndex = 0; itemIndex < items.length; itemIndex += 24) {
-            await requestCardEstimates(items.slice(itemIndex, itemIndex + 24));
-          }
-        }
-      } finally {
-        cardScanRunning = false;
-        if (cardScanPending) {
-          cardScanPending = false;
-          void scanCardEstimates();
-        }
-      }
-    };
-
-    const scheduleCardScan = () => {
-      if (root.dataset.showProductCardEta !== 'true' || cardScanTimer) return;
-      cardScanTimer = window.setTimeout(() => {
-        cardScanTimer = null;
-        void scanCardEstimates();
-      }, 150);
-    };
-
-    const loadCardEstimates = async () => {
-      if (root.dataset.showProductCardEta !== 'true') return;
-      let items = [];
-      try {
-        items = JSON.parse(cardProductsElement?.textContent || '[]');
-      } catch {
-        items = [];
-      }
-      if (Array.isArray(items) && items.length && items.length <= 24) {
-        items.forEach((item) => requestedCardHandles.add(String(item.key || '')));
-        await requestCardEstimates(items);
-      }
-      await scanCardEstimates();
-      const cardObserver = new MutationObserver(scheduleCardScan);
-      cardObserver.observe(document.body, { childList: true, subtree: true });
-    };
-
-    const syncVisibility = () => {
-      root.hidden = !serviceEnabled || Boolean(document.querySelector('[data-inline-delivery-checker]'));
-    };
-
-    const toVariantGid = (value) => {
-      const raw = String(value || '').trim();
-      if (!raw) return '';
-      if (raw.startsWith('gid://shopify/ProductVariant/')) return raw;
-      const numeric = raw.replace(/\D/g, '');
-      return numeric ? `gid://shopify/ProductVariant/${numeric}` : '';
-    };
-
-    const getSelectedVariantId = () => {
-      if (!hasProduct) return '';
-      const selectors = [
-        'form[action*="/cart/add"] [name="id"]',
-        'form[action*="/cart/add"] [name="variant"]',
-        'form[data-type="add-to-cart-form"] [name="id"]',
-        'input[name="id"]',
-        'select[name="id"]',
-        '[name="id"][type="hidden"]',
-        '[data-variant-id]'
-      ];
-      for (const selector of selectors) {
-        const element = productScope.querySelector(selector);
-        if (!element) continue;
-        const gid = toVariantGid(element.value || element.dataset?.variantId);
-        if (gid) return gid;
-      }
-      return toVariantGid(new URLSearchParams(window.location.search).get('variant'));
-    };
-
-    const getQuantity = () => {
-      if (!hasProduct) return 1;
-      const input = productScope.querySelector('form[action*="/cart/add"] [name="quantity"], form[data-type="add-to-cart-form"] [name="quantity"], input[name="quantity"]');
-      const quantity = Number(input?.value || 1);
-      return Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
-    };
-
-    const requestParams = () => {
-      const params = new URLSearchParams();
-      if (root.dataset.productId) params.set('productId', root.dataset.productId);
-      if (root.dataset.productVendor) params.set('productVendor', root.dataset.productVendor);
-      const tags = parse(root.dataset.productTags);
-      const collections = parse(root.dataset.collections);
-      if (tags.length) params.set('productTags', tags.join('|'));
-      if (collections.length) params.set('collections', collections.join('|'));
-      if (hasProduct) {
-        const variantId = getSelectedVariantId();
-        if (variantId) params.set('variantId', variantId);
-        params.set('qty', String(getQuantity()));
-      }
-      return params;
-    };
-
-    const estimateAttributeKeys = [
-      '_incode_estimated_date',
-      '_incode_estimated_date_max',
-      '_incode_estimated_date_label',
-      '_incode_estimated_date_max_label',
-      '_incode_delivery_date_range',
-      '_incode_dispatch_date',
-      '_incode_postal_code',
-      '_incode_country',
-      '_incode_eta_message'
-    ];
-    const updateCartAttributes = (attributes) => {
-      const write = async () => {
-        const response = await fetch('/cart/update.js', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          credentials: 'same-origin',
-          keepalive: true,
-          body: JSON.stringify({ attributes })
-        });
-        if (!response.ok) throw new Error('Unable to update delivery estimate attributes');
-      };
-      cartAttributeWrite = cartAttributeWrite.catch(() => {}).then(write);
-      return cartAttributeWrite;
-    };
-    const clearPersistedEstimate = () => {
-      if (estimateInvalidated) return cartAttributeWrite;
-      estimateInvalidated = true;
-      return updateCartAttributes(
-        Object.fromEntries(estimateAttributeKeys.map((key) => [key, '']))
-      ).catch((error) => {
-        estimateInvalidated = false;
-        throw error;
-      });
-    };
-    const persistEstimate = (data, postalCode) => {
-      estimateInvalidated = false;
-      return updateCartAttributes({
-        '_incode_estimated_date': String(data.estimated_date),
-        '_incode_estimated_date_max': String(data.estimated_date_max || data.estimated_date),
-        '_incode_estimated_date_label': String(data.estimated_date_label || data.estimated_date),
-        '_incode_estimated_date_max_label': String(data.estimated_date_max_label || data.estimated_date_label || data.estimated_date_max || data.estimated_date),
-        '_incode_delivery_date_range': String(data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || data.estimated_date),
-        '_incode_dispatch_date': String(data.dispatch_date || ''),
-        '_incode_postal_code': String(data.postal_code || postalCode),
-        '_incode_country': String(data.country || country.value),
-        '_incode_eta_message': String(data.message || '').slice(0, 500)
-      });
-    };
-
-    const setResult = (message, state) => {
-      result.dataset.state = state;
-      result.textContent = message;
-      result.setAttribute('role', state === 'error' ? 'alert' : 'status');
-      root.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
-    };
-
-    const unavailableMessage = (data) => ({
-      variant_required: root.dataset.variantRequired,
-      out_of_stock: root.dataset.outOfStock,
-      inventory_unavailable: root.dataset.inventoryUnavailable
-    })[data?.reason] || root.dataset.unavailable;
-    const getStoredPostal = () => {
-      try { return localStorage.getItem('incode_delivery_postal') || ''; } catch { return ''; }
-    };
-    const storePostal = (value) => {
-      try { localStorage.setItem('incode_delivery_postal', value); } catch { /* Storage is optional. */ }
-    };
-
-    const run = async () => {
-      requestVersion += 1;
-      const currentVersion = requestVersion;
-      if (activeController) activeController.abort();
-      activeController = new AbortController();
-      const value = postal.value.trim();
-      if (!value) {
-        void clearPersistedEstimate().catch(() => {});
-        setResult(root.dataset.invalidPostal, 'error');
-        return;
-      }
-      check.disabled = true;
-      void clearPersistedEstimate().catch(() => {});
-      setResult(root.dataset.checking, 'loading');
-      const params = requestParams();
-      params.set('country', country.value);
-      params.set('postal_code', value);
-      try {
-        const response = await fetch(`/apps/delivery-checker?${params.toString()}`, {
-          headers: { Accept: 'application/json' },
-          signal: activeController.signal
-        });
-        const data = await response.json();
-        if (currentVersion !== requestVersion) return;
-        applyStorefrontStyle(data.storefront_style);
-        if (!response.ok) {
-          await clearPersistedEstimate().catch(() => {});
-          if (currentVersion !== requestVersion) return;
-          setResult(root.dataset.requestError, 'error');
-          return;
-        }
-        if (data.enabled === false) {
-          serviceEnabled = false;
-          syncVisibility();
-          await clearPersistedEstimate().catch(() => {});
-          return;
-        }
-        if (data.available === true && data.estimated_date) {
-          await persistEstimate(data, value).catch(() => {});
-          if (currentVersion !== requestVersion) return;
-          setResult(data.message || data.delivery_date_range || data.estimated_date, 'success');
-        } else {
-          await clearPersistedEstimate().catch(() => {});
-          if (currentVersion !== requestVersion) return;
-          setResult(data.message || unavailableMessage(data), 'error');
-        }
-        storePostal(value);
-      } catch (error) {
-        if (error?.name === 'AbortError' || currentVersion !== requestVersion) return;
-        await clearPersistedEstimate().catch(() => {});
-        if (currentVersion !== requestVersion) return;
-        setResult(root.dataset.requestError, 'error');
-      } finally {
-        if (currentVersion === requestVersion) {
-          check.disabled = false;
-          activeController = null;
-        }
-      }
-    };
-
-    const init = async () => {
-      const params = requestParams();
-      params.set('init', '1');
-      try {
-        const response = await fetch(`/apps/delivery-checker?${params.toString()}`, { headers: { Accept: 'application/json' } });
-        if (!response.ok) return;
-        const data = await response.json();
-        applyStorefrontStyle(data.storefront_style);
-        if (data.enabled === false) {
-          serviceEnabled = false;
-          await clearPersistedEstimate().catch(() => {});
-        }
-      } catch {
-        // The checker remains available with theme-editor styles if initialization fails.
-      } finally {
-        syncVisibility();
-      }
-    };
-
-    const clearStaleEstimate = () => {
-      requestVersion += 1;
-      if (activeController) {
-        activeController.abort();
-        activeController = null;
-      }
-      check.disabled = false;
-      result.textContent = '';
-      delete result.dataset.state;
-      root.setAttribute('aria-busy', 'false');
-      void clearPersistedEstimate().catch(() => {});
-    };
-    const setSavedLocationActive = (active) => {
-      root.dataset.savedLocationActive = String(active);
-      if (savedLocation) savedLocation.querySelector('span').hidden = !active;
-      if (locationAction) {
-        locationAction.textContent = active
-          ? locationAction.dataset.changeLabel
-          : locationAction.dataset.restoreLabel;
-      }
-    };
-    toggle.addEventListener('click', () => {
-      const open = panel.hidden;
-      panel.hidden = !open;
-      toggle.setAttribute('aria-expanded', String(open));
-      if (open && !postal.value && !savedPostal) postal.value = getStoredPostal();
-    });
-    check.addEventListener('click', run);
-    postal.addEventListener('keydown', (event) => { if (event.key === 'Enter') run(); });
-    postal.addEventListener('input', () => { clearStaleEstimate(); setSavedLocationActive(false); });
-    country.addEventListener('change', () => { clearStaleEstimate(); setSavedLocationActive(false); });
-    if (locationAction) {
-      locationAction.addEventListener('click', () => {
-        const restore = root.dataset.savedLocationActive !== 'true';
-        clearStaleEstimate();
-        if (restore) {
-          country.value = savedCountry;
-          postal.value = savedPostal;
-          setSavedLocationActive(true);
-        } else {
-          country.value = localizationCountry;
-          postal.value = '';
-          setSavedLocationActive(false);
-        }
-        postal.focus();
-      });
-    }
-    productScope.addEventListener('change', (event) => {
-      if (hasProduct && event.target?.matches('[name="id"], [name="variant"], [name="quantity"]')) clearStaleEstimate();
-    });
-    productScope.addEventListener('input', (event) => {
-      if (hasProduct && event.target?.matches('[name="quantity"]')) clearStaleEstimate();
-    });
-
-    const inlineObserver = new MutationObserver(syncVisibility);
-    inlineObserver.observe(document.documentElement, { childList: true, subtree: true });
-    setSavedLocationActive(Boolean(savedPostal));
-    syncVisibility();
-    init().then(() => {
-      if (
-        serviceEnabled
-        && root.dataset.autoCheckSavedAddress === 'true'
-        && root.dataset.savedLocationActive === 'true'
-        && postal.value === savedPostal
-      ) run();
-    });
-    loadCardEstimates();
+    }).catch(() => {});
   })();
 </script>
 
+<style>
+  .incode-inline-delivery { display: none !important; }
+  .incode-inline-delivery__label {
+    margin: 8px 0 0;
+    color: #087443;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+</style>
+
 {% schema %}
 {
-  "name": "t:delivery_embed.schema.name",
-  "target": "body",
-  "settings": [
-    { "type": "text", "id": "button_label", "label": "t:delivery_embed.schema.button_label" },
-    { "type": "text", "id": "heading", "label": "t:delivery_embed.schema.heading_label" },
-    { "type": "checkbox", "id": "auto_check_saved_address", "label": "t:delivery_embed.schema.auto_check_saved_address_label", "info": "t:delivery_embed.schema.auto_check_saved_address_info", "default": false },
-    { "type": "checkbox", "id": "show_product_card_eta", "label": "t:delivery_embed.schema.show_product_card_eta_label", "info": "t:delivery_embed.schema.show_product_card_eta_info", "default": false },
-    { "type": "color", "id": "accent_color", "label": "t:delivery_embed.schema.accent_color_label", "default": "#f47d32" },
-    { "type": "color", "id": "text_color", "label": "t:delivery_embed.schema.text_color_label", "default": "#171a1d" },
-    { "type": "color", "id": "card_color", "label": "t:delivery_embed.schema.card_color_label", "default": "#ffffff" }
-  ]
+  "name": "Delivery dates on cards",
+  "target": "section",
+  "enabled_on": {
+    "templates": ["collection", "search", "cart"]
+  },
+  "settings": []
 }
 {% endschema %}

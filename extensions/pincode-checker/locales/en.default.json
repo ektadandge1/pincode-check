@@ -3,9 +3,9 @@
     "name": "Delivery Checker"
   },
   "delivery_checker": {
-    "heading": "ZIP code based ETA message",
-    "supporting_text": "Enter your ZIP or postal code to check the delivery time.",
-    "check_button": "Check",
+    "heading": "Check delivery availability",
+    "supporting_text": "Enter your PIN or ZIP code to see delivery dates and available services.",
+    "check_button": "Check availability",
     "country_label": "Country",
     "country_aria_label": "Select country",
     "postal_label": "Postal or ZIP code",

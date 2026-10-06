@@ -45,6 +45,7 @@ export type CheckDeliveryInput = {
   collectionHandles?: string[] | null;
   productVendor?: string | null;
   features?: PlanFeatures;
+  requireTarget?: boolean;
   trackAnalytics?: boolean;
   admin?: {
     graphql: (query: string, options?: { variables?: Record<string, unknown> }) => Promise<Response>;
@@ -55,6 +56,8 @@ export type DeliveryResult = {
   available: boolean;
   country: string;
   postal_code: string;
+  zone_id?: number | null;
+  zone_name?: string | null;
   source: "courier_api" | "db_fallback" | "none";
   reason?: "variant_required" | "out_of_stock" | "inventory_unavailable" | "cart_incomplete";
   in_stock?: boolean;
@@ -632,6 +635,9 @@ async function generalDeliveryEstimate(
     timeZone: settings.timeZone,
   }));
 
+  if (input.requireTarget && !matchedTarget) {
+    return { enabled: false, matched_target: null };
+  }
   if (matchedTarget?.excluded) {
     return { enabled: false, matched_target: matchedTarget.name };
   }
@@ -849,6 +855,8 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       available: false,
       country,
       postal_code: normalizedPostalCode,
+      zone_id: matchedPostalRecord?.zoneId ?? null,
+      zone_name: matchedPostalRecord && "zoneName" in matchedPostalRecord ? matchedPostalRecord.zoneName : matchedPostalRecord?.zone ?? null,
       source: "none",
       disable_add_to_cart: features.cartProtection && settings.disableAddToCart,
       message: features.customMessages ? settings.unavailableMessage : DEFAULT_SETTINGS.unavailableMessage,
@@ -1116,6 +1124,8 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     available: true,
     country,
     postal_code: normalizedPostalCode,
+    zone_id: matchedPostalRecord?.zoneId ?? null,
+    zone_name: matchedPostalRecord && "zoneName" in matchedPostalRecord ? matchedPostalRecord.zoneName : matchedPostalRecord?.zone ?? null,
     source,
     ...(inventoryAware ? { in_stock: inventoryStatus === "in_stock" } : {}),
     courier_name: courierName,

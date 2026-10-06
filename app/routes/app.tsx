@@ -51,7 +51,6 @@ export default function App() {
           <a href="/app/delivery-settings">Delivery control</a>
           <a href="/app/storefront-customization">Storefront style</a>
           <a href="/app/locations">Locations</a>
-          <a href="/app/shipping-methods">Shipping methods</a>
           <a href="/app/analytics">Analytics</a>
           <a href="/app/headless-api">Headless API</a>
           <a href="/app/plans">Plans</a>

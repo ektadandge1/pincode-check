@@ -3,6 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import {
   Banner,
+  Badge,
   BlockStack,
   Button,
   Card,
@@ -90,11 +91,12 @@ const FONT_OPTIONS = [
 ];
 
 const ICON_OPTIONS = [
-  { label: "Numbered steps", value: "number" },
-  { label: "Premium outline icons", value: "delivery" },
-  { label: "Soft duotone icons", value: "duotone" },
-  { label: "Minimal dots", value: "minimal" },
-  { label: "Friendly emoji", value: "emoji" },
+  { label: "Standard checkmarks", value: "number" },
+  { label: "Premium delivery icons", value: "delivery" },
+  { label: "Advanced duotone icons", value: "duotone" },
+  { label: "Circular badges", value: "circle" },
+  { label: "Simple minimal dots", value: "minimal" },
+  { label: "Friendly emoji icons", value: "emoji" },
 ];
 
 const ANIMATION_OPTIONS = [
@@ -276,6 +278,7 @@ function JourneyIcon({ step, style }: { step: number; style: string }) {
   if (style === "emoji") return <>{["🛒", "📦", "🏠"][step]}</>;
   if (style === "number") return <>{step + 1}</>;
   if (style === "minimal") return <span className="incode-custom-preview__dot" />;
+  if (style === "circle") return <span className="incode-custom-preview__circle-icon">{step + 1}</span>;
 
   const paths = [
     <><circle cx="9" cy="19" r="1.5" /><circle cx="18" cy="19" r="1.5" /><path d="M3 4h2l2.4 10.1a2 2 0 0 0 2 1.5h7.8a2 2 0 0 0 1.9-1.4L21 8H7" /></>,
@@ -289,10 +292,10 @@ export default function StorefrontCustomizationPage() {
   const { customization, shop, apiKey } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const [form, setForm] = useState(customization);
-  const [previewSurface, setPreviewSurface] = useState<string>("everywhere");
-  const previewLabel = previewSurface === "everywhere"
-    ? "Everywhere / app embed"
-    : STOREFRONT_SURFACES.find(([, template]) => template === previewSurface)?.[0] ?? "Product page";
+  const [previewSurface, setPreviewSurface] = useState<string>("product");
+  const [experienceMode, setExperienceMode] = useState<"checker" | "automatic">("checker");
+  const [previewChecked, setPreviewChecked] = useState(false);
+  const previewLabel = STOREFRONT_SURFACES.find(([, template]) => template === previewSurface)?.[0] ?? "Product page";
   const update = <K extends keyof Customization>(key: K, value: Customization[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -303,9 +306,18 @@ export default function StorefrontCustomizationPage() {
       storefrontTemplate: value,
     }));
   };
-  const themeEditorUrl = (template: string) =>
-    `https://${shop}/admin/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/delivery-checker&target=mainSection`;
-  const appEmbedEditorUrl = `https://${shop}/admin/themes/current/editor?context=apps&template=product&activateAppId=${apiKey}/delivery-checker-embed`;
+  const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
+  const themeEditorUrl = (template: string) => {
+    const blockHandle = experienceMode === "checker"
+      ? "delivery-checker"
+      : template === "product"
+        ? "estimated-delivery-date"
+        : "delivery-checker-embed";
+    return `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
+  };
+  const placementEditorUrl = (template: "product" | "collection" | "cart") => themeEditorUrl(template);
+  const placementButtonLabel = (template: "product" | "collection" | "cart") =>
+    experienceMode === "automatic" && template !== "product" ? "Add dates to cards" : `Add ${experienceMode === "checker" ? "ZIP checker" : "ETA"}`;
 
   return (
     <Page title="Storefront style" subtitle="Create a polished delivery experience that matches your brand.">
@@ -316,18 +328,47 @@ export default function StorefrontCustomizationPage() {
             <Layout.Section>
               <BlockStack gap="400">
                 <Card>
-                  <BlockStack gap="300">
+                  <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">ETA everywhere shoppers decide</Text>
-                      <Text as="p" tone="subdued">Add the same delivery widget to product, collection, cart, home, search, and content pages. Checkout is intentionally excluded.</Text>
+                      <Text as="h2" variant="headingLg">Choose the storefront experience</Text>
+                      <Text as="p" tone="subdued">Decide whether shoppers enter a ZIP code first or see a general estimate immediately.</Text>
                     </BlockStack>
-                    <InlineStack gap="200" wrap>
-                      <Button url={appEmbedEditorUrl} target="_blank" variant={previewSurface === "everywhere" ? "primary" : "secondary"} pressed={previewSurface === "everywhere"} onClick={() => setPreviewSurface("everywhere")}>Enable everywhere</Button>
-                      {STOREFRONT_SURFACES.map(([label, template]) => (
-                        <Button key={template} url={themeEditorUrl(template)} target="_blank" variant={previewSurface === template ? "primary" : "secondary"} pressed={previewSurface === template} onClick={() => setPreviewSurface(template)}>Add to {label}</Button>
-                      ))}
-                    </InlineStack>
-                    <Text as="p" tone="subdued" variant="bodySm">Thank-you and order-status estimates are available through the Delivery estimate surfaces extension in Shopify’s checkout editor. Do not add an extension to checkout.</Text>
+                    <div className="incode-experience-options">
+                      <button type="button" className={experienceMode === "checker" ? "is-selected" : ""} onClick={() => { setExperienceMode("checker"); setPreviewChecked(false); }}>
+                        <span className="incode-experience-options__badge">Recommended</span>
+                        <strong>ZIP checker first</strong>
+                        <small>Ask for a postal code, then reveal availability, delivery dates, COD, and delivery options.</small>
+                      </button>
+                      <button type="button" className={experienceMode === "automatic" ? "is-selected" : ""} onClick={() => { setExperienceMode("automatic"); setPreviewChecked(false); }}>
+                        <strong>Automatic ETA</strong>
+                        <small>Show a general estimated date immediately without asking for a postal code.</small>
+                      </button>
+                    </div>
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingMd">Add it where shoppers decide</Text>
+                      <div className="incode-placement-grid">
+                        {([
+                          ["product", "Product page", "Below product details or near Add to Cart"],
+                          ["collection", "Collection page", "Help shoppers check before opening a product"],
+                          ["cart", "Cart page", "Confirm delivery before checkout"],
+                        ] as const).map(([template, label, description]) => (
+                          <div key={template} className={`incode-placement-card${previewSurface === template ? " is-selected" : ""}`}>
+                            <button type="button" onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}>
+                              <strong>{label}</strong>
+                              <small>{description}</small>
+                            </button>
+                            <Button url={placementEditorUrl(template)} target="_blank" variant={previewSurface === template ? "primary" : "secondary"} onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}>
+                              {placementButtonLabel(template)}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </BlockStack>
+                    <Banner tone="info">
+                      {experienceMode === "checker"
+                        ? "Delivery dates stay hidden until the shopper enters a valid ZIP or postal code. This is the recommended product-page experience."
+                        : "Automatic ETA is a general estimate. Use the ZIP checker when availability depends on the shopper's location."}
+                    </Banner>
                   </BlockStack>
                 </Card>
                 <Card>
@@ -405,7 +446,7 @@ export default function StorefrontCustomizationPage() {
                       ))}
                     </FormLayout.Group>
                     <FormLayout.Group condensed>
-                      <Select label="Step icons" name="storefrontIconStyle" options={ICON_OPTIONS} value={form.storefrontIconStyle} onChange={(value) => update("storefrontIconStyle", value)} />
+                      <Select label="Storefront service and journey icons" name="storefrontIconStyle" options={ICON_OPTIONS} value={form.storefrontIconStyle} onChange={(value) => update("storefrontIconStyle", value)} helpText="This style controls delivery journey steps and Local delivery / Store pickup icons." />
                       <Select label="Animation" name="storefrontAnimation" options={ANIMATION_OPTIONS} value={form.storefrontAnimation} onChange={(value) => update("storefrontAnimation", value)} />
                       <Select label="Icon connector" name="storefrontJourneyLineStyle" options={LINE_OPTIONS} value={form.storefrontJourneyLineStyle} onChange={(value) => update("storefrontJourneyLineStyle", value)} />
                     </FormLayout.Group>
@@ -463,30 +504,52 @@ export default function StorefrontCustomizationPage() {
                     <Text as="h2" variant="headingMd">Live preview</Text>
                     <span className="incode-preview-live">LIVE</span>
                   </InlineStack>
+                  <InlineStack gap="200" wrap>
+                    <Badge tone="info">{experienceMode === "checker" ? "ZIP check required" : "Automatic estimate"}</Badge>
+                    <Badge>{previewLabel}</Badge>
+                  </InlineStack>
+                  <div className="incode-preview-tabs" role="tablist" aria-label="Preview page type">
+                    {STOREFRONT_SURFACES.map(([label, template]) => (
+                      <button
+                        key={template}
+                        type="button"
+                        role="tab"
+                        aria-selected={previewSurface === template}
+                        className={previewSurface === template ? "is-selected" : ""}
+                        onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}
+                      >
+                        {label.replace(" page", "")}
+                      </button>
+                    ))}
+                  </div>
                   <div className="incode-preview-surface" aria-live="polite" aria-atomic="true">
-                    <Text as="p" variant="headingSm">{previewLabel}</Text>
                     <div className="incode-preview-surface__context" data-surface={previewSurface}>
                       {previewSurface === "product" ? (
-                        <><strong>Everyday tote bag</strong><span>$39.00 · In stock</span><span>Delivery checker below the product details</span></>
+                        <>
+                          <div className="incode-storefront-mock__bar"><span>Northstar Supply</span><span>⌕ &nbsp; ♡ &nbsp; 🛒</span></div>
+                          <div className="incode-product-mock">
+                            <div className="incode-product-mock__image">Canvas<br />tote</div>
+                            <div className="incode-product-mock__details"><strong>Everyday canvas tote</strong><span>$39.00 · In stock</span><small>{experienceMode === "checker" ? "Delivery check near Add to Cart" : "Automatic ETA below product details"}</small><button type="button">Add to cart</button></div>
+                          </div>
+                        </>
                       ) : previewSurface === "collection" || previewSurface === "search" ? (
                         <>
-                          <strong>{previewSurface === "collection" ? "Everyday essentials" : 'Results for "tote bag"'}</strong>
-                          <div className="incode-preview-surface__products"><span>Canvas tote<br />$39.00</span><span>Travel tote<br />$49.00</span></div>
-                          <span>Delivery checker beside the product listing</span>
+                          <div className="incode-storefront-mock__bar"><span>{previewSurface === "collection" ? "Everyday essentials" : 'Search results'}</span><span>Sort by ▾</span></div>
+                          <div className="incode-preview-surface__products"><span><b>Canvas tote</b><small>$39.00</small><em>{experienceMode === "checker" ? "Check delivery" : "Delivery by Oct 8"}</em></span><span><b>Travel tote</b><small>$49.00</small><em>{experienceMode === "checker" ? "Check delivery" : "Delivery by Oct 9"}</em></span></div>
                         </>
                       ) : previewSurface === "cart" ? (
-                        <><strong>Your cart</strong><span>Everyday tote bag × 2</span><span>Subtotal: $78.00</span><span>Check delivery before checkout</span></>
+                        <><div className="incode-storefront-mock__bar"><span>Your cart</span><span>2 items</span></div><div className="incode-cart-mock"><span className="incode-cart-mock__thumb">Tote</span><span><b>Everyday canvas tote × 2</b><small>$78.00</small><em>{experienceMode === "checker" ? "Check delivery before checkout" : "Estimated delivery: Oct 8–10"}</em></span></div><div className="incode-cart-mock__total"><span>Total</span><b>$78.00</b></div></>
                       ) : previewSurface === "index" ? (
-                        <><strong>Made for your everyday</strong><span>Explore our latest collection</span><span>Delivery checker on your home page</span></>
+                        <><div className="incode-storefront-mock__bar"><span>Northstar Supply</span><span>Shop &nbsp; About &nbsp; 🛒</span></div><div className="incode-home-mock"><b>Made for your everyday</b><span>Thoughtful essentials, delivered on your schedule.</span><button type="button">Shop new arrivals</button></div></>
                       ) : previewSurface === "page" ? (
-                        <><strong>Shipping and delivery</strong><span>Find out when your order will arrive</span><span>Delivery checker within your content page</span></>
+                        <><div className="incode-storefront-mock__bar"><span>Northstar Supply</span><span>Help center</span></div><div className="incode-page-mock"><b>Shipping and delivery</b><span>Find out when your order will arrive</span><small>{experienceMode === "checker" ? "Checker can be placed within content" : "Automatic delivery guidance"}</small></div></>
                       ) : (
                         <><strong>Delivery help on every page</strong><span>App embed available across your storefront</span></>
                       )}
                     </div>
                   </div>
                   <div
-                    key={previewSurface}
+                    key={`${previewSurface}-${experienceMode}`}
                     className={`incode-custom-preview incode-custom-preview--${form.storefrontAnimation}`}
                     data-surface={previewSurface}
                     data-template={form.storefrontTemplate}
@@ -499,15 +562,23 @@ export default function StorefrontCustomizationPage() {
                       borderRadius: `${form.storefrontBorderRadius}px`,
                     }}
                   >
-                    <strong style={{ fontSize: `${form.storefrontHeadingSize}px` }}>ZIP code based ETA message</strong>
-                    <span style={{ color: form.storefrontMutedColor }}>Enter your ZIP code to check the delivery time.</span>
-                    <div className="incode-custom-preview__country" style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>🇺🇸 United States <span>⌄</span></div>
-                    <div className="incode-custom-preview__checker">
-                      <span style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>Enter ZIP code · 10001</span>
-                      <button type="button" style={{ background: form.storefrontButtonColor, color: form.storefrontButtonTextColor }}>Check</button>
-                    </div>
-                    <div className="incode-custom-preview__result" style={{ background: form.storefrontResultBackground, color: form.storefrontResultTextColor }}>📦 Delivery between Oct 6th and Oct 8th</div>
-                    {form.storefrontShowJourney ? (
+                    <strong style={{ fontSize: `${form.storefrontHeadingSize}px` }}>{experienceMode === "checker" ? "Check delivery availability" : "Estimated delivery"}</strong>
+                    {experienceMode === "checker" ? (
+                      <>
+                        <span style={{ color: form.storefrontMutedColor }}>Enter your ZIP or postal code to see delivery dates.</span>
+                        <div className="incode-custom-preview__country" style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>🇺🇸 United States <span>⌄</span></div>
+                        <div className="incode-custom-preview__checker">
+                          <span style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>Enter ZIP code · 10001</span>
+                          <button type="button" style={{ background: form.storefrontButtonColor, color: form.storefrontButtonTextColor }} onClick={() => setPreviewChecked(true)}>Check</button>
+                        </div>
+                        {previewChecked
+                          ? <div className="incode-custom-preview__result" style={{ background: form.storefrontResultBackground, color: form.storefrontResultTextColor }}>📦 Delivery between Oct 6th and Oct 8th</div>
+                          : <div className="incode-custom-preview__locked" style={{ borderColor: form.storefrontFieldBorderColor, color: form.storefrontMutedColor }}>Delivery date appears here after a successful ZIP check</div>}
+                      </>
+                    ) : (
+                      <div className="incode-custom-preview__result" style={{ background: form.storefrontResultBackground, color: form.storefrontResultTextColor }}>📦 Delivery between Oct 6th and Oct 8th</div>
+                    )}
+                    {form.storefrontShowJourney && (experienceMode === "automatic" || previewChecked) ? (
                       <div className="incode-custom-preview__journey-shell" style={{ background: form.storefrontJourneyBackground, borderColor: form.storefrontFieldBorderColor }}>
                         <strong>🇺🇸 Estimated Delivery Date&nbsp; Oct 9th to Oct 10th</strong>
                         <div
@@ -529,7 +600,7 @@ export default function StorefrontCustomizationPage() {
                         </div>
                       </div>
                     ) : null}
-                    <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
+                    {experienceMode === "checker" && previewChecked ? <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
                       <strong>🔥 {form.storefrontCountdownTitle} 🔥</strong>
                       <div>
                         {[["07", "Hours"], ["27", "Minutes"], ["46", "Seconds"]].map(([value, label]) => (
@@ -537,7 +608,7 @@ export default function StorefrontCustomizationPage() {
                         ))}
                       </div>
                       <strong>Get it by Oct 6th - Oct 8th</strong>
-                    </div>
+                    </div> : null}
                   </div>
                   <Text as="p" tone="subdued" variant="bodySm">Sample {previewLabel.toLowerCase()} preview. Placement buttons also open Theme Editor. Save changes here, then save the placement in your theme to publish it.</Text>
                 </BlockStack>

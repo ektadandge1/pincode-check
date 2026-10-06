@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Link, useFetcher, useLoaderData, useSearchParams } from "react-router";
+import { Link, useBeforeUnload, useFetcher, useLoaderData, useSearchParams } from "react-router";
 import {
   Autocomplete,
   Badge,
@@ -14,8 +14,10 @@ import {
   FormLayout,
   InlineStack,
   Layout,
+  Modal,
   Page,
   Select,
+  Spinner,
   Text,
   TextField,
 } from "@shopify/polaris";
@@ -45,6 +47,8 @@ import {
 import { regionsForCountry, suggestedRegions } from "../utils/regions";
 import { compactCollectionName } from "../utils/target-display";
 import { buildPostalCsvTemplate } from "../utils/postal-csv-template";
+import { BULK_RULE_FIELDS, parseZoneRulePatch, validatePatchedRule } from "../utils/zone-rule-edit";
+import type { loader as zoneRulesLoader } from "./app.zone-rules";
 
 type ActionData = {
   ok: boolean;
@@ -127,21 +131,6 @@ const CUTOFF_OPTIONS = Array.from({ length: 24 }, (_, value) => ({
   label: `${value === 0 ? "12" : value > 12 ? String(value - 12) : String(value)}:00 ${value < 12 ? "AM" : "PM"}`,
   value: String(value),
 }));
-
-const COURIER_TIMEOUT_OPTIONS = [
-  { label: "1 second", value: "1000" },
-  { label: "2 seconds (recommended)", value: "2000" },
-  { label: "3 seconds", value: "3000" },
-  { label: "5 seconds", value: "5000" },
-  { label: "10 seconds", value: "10000" },
-];
-
-const RETRY_OPTIONS = [
-  { label: "No retry", value: "0" },
-  { label: "Retry once (recommended)", value: "1" },
-  { label: "Retry twice", value: "2" },
-  { label: "Retry 3 times", value: "3" },
-];
 
 const WEEKEND_OPTIONS = [
   { label: "Sunday only", value: "0" },
@@ -378,23 +367,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let collections: Array<{ id: string; title: string; handle: string }> = [];
   let products: Array<{ id: string; title: string; handle: string }> = [];
   try {
-    const response = await admin.graphql(`#graphql
-      query DeliverySettingsCatalog {
-        collections(first: 100, sortKey: TITLE) {
-          nodes { id title handle }
+    let collectionCursor: string | null = null;
+    let productCursor: string | null = null;
+    for (let page = 0; page < 20; page += 1) {
+      const response = await admin.graphql(`#graphql
+        query DeliverySettingsCatalog($collectionCursor: String, $productCursor: String) {
+          collections(first: 250, after: $collectionCursor, sortKey: TITLE) {
+            nodes { id title handle }
+            pageInfo { hasNextPage endCursor }
+          }
+          products(first: 250, after: $productCursor, sortKey: TITLE) {
+            nodes { id title handle }
+            pageInfo { hasNextPage endCursor }
+          }
         }
-        products(first: 100, sortKey: TITLE) {
-          nodes { id title handle }
-        }
-      }
-    `);
-    if (response.ok) {
+      `, { variables: { collectionCursor, productCursor } });
+      if (!response.ok) break;
       const json = await response.json() as { data?: {
-        collections?: { nodes?: Array<{ id: string; title: string; handle: string }> };
-        products?: { nodes?: Array<{ id: string; title: string; handle: string }> };
+        collections?: { nodes?: Array<{ id: string; title: string; handle: string }>; pageInfo?: { hasNextPage?: boolean; endCursor?: string } };
+        products?: { nodes?: Array<{ id: string; title: string; handle: string }>; pageInfo?: { hasNextPage?: boolean; endCursor?: string } };
       } };
-      collections = json.data?.collections?.nodes ?? [];
-      products = json.data?.products?.nodes ?? [];
+      const collectionPage = json.data?.collections;
+      const productPage = json.data?.products;
+      collections.push(...(collectionPage?.nodes ?? []));
+      products.push(...(productPage?.nodes ?? []));
+      collectionCursor = collectionPage?.pageInfo?.hasNextPage ? collectionPage.pageInfo.endCursor ?? null : null;
+      productCursor = productPage?.pageInfo?.hasNextPage ? productPage.pageInfo.endCursor ?? null : null;
+      if (!collectionCursor && !productCursor) break;
     }
   } catch {
     collections = [];
@@ -427,6 +426,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       codAvailableMessage: "COD available.",
       codUnavailableMessage: "Prepaid only.",
       deliveryChargeMessage: " Delivery charge: {currency}{delivery_charge}.",
+      countdownEnabled: true,
+      countdownTargetMode: "all",
+      countdownProductIdsCsv: "",
+      countdownCollectionHandlesCsv: "",
+      countdownZoneIdsCsv: "",
+      countdownDisplaySurfacesCsv: "product",
       googleSheetCsvUrl: "",
       lastGoogleSheetSyncAt: null,
       lastGoogleSheetSyncStatus: null,
@@ -450,6 +455,41 @@ export async function action({ request }: ActionFunctionArgs) {
   const access = await resolvePlanAccess({ shop, admin });
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
+
+  if (intent === "save_countdown") {
+    const countdownEnabled = parseBool(formData.get("countdownEnabled"));
+    const countdownTargetMode = String(formData.get("countdownTargetMode") ?? "all");
+    const countdownProductIdsCsv = String(formData.get("countdownProductIdsCsv") ?? "")
+      .split(",").map((value) => value.trim().replace(/\D/g, "")).filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index).join(",");
+    const countdownCollectionHandlesCsv = String(formData.get("countdownCollectionHandlesCsv") ?? "")
+      .toLowerCase().split(",").map((value) => value.trim().replace(/[^a-z0-9-]/g, "")).filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index).join(",");
+    const countdownZoneIdsCsv = String(formData.get("countdownZoneIdsCsv") ?? "")
+      .split(",").map((value) => value.trim().replace(/\D/g, "")).filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index).join(",");
+    const countdownDisplaySurfacesCsv = String(formData.get("countdownDisplaySurfacesCsv") ?? "product")
+      .split(",").filter((value, index, values) => ["product", "collection", "cart", "index", "search", "page"].includes(value) && values.indexOf(value) === index).join(",") || "product";
+
+    if (!["all", "products", "collections", "zones"].includes(countdownTargetMode)) {
+      return { ok: false, message: "Choose a valid countdown audience." } satisfies ActionData;
+    }
+    if (countdownTargetMode === "products" && !countdownProductIdsCsv) {
+      return { ok: false, message: "Add at least one product for this countdown audience." } satisfies ActionData;
+    }
+    if (countdownTargetMode === "collections" && !countdownCollectionHandlesCsv) {
+      return { ok: false, message: "Add at least one collection for this countdown audience." } satisfies ActionData;
+    }
+    if (countdownTargetMode === "zones" && !countdownZoneIdsCsv) {
+      return { ok: false, message: "Choose at least one delivery zone for this countdown audience." } satisfies ActionData;
+    }
+    await prisma.deliverySetting.upsert({
+      where: { shop },
+      create: { shop, countdownEnabled, countdownTargetMode, countdownProductIdsCsv, countdownCollectionHandlesCsv, countdownZoneIdsCsv, countdownDisplaySurfacesCsv },
+      update: { countdownEnabled, countdownTargetMode, countdownProductIdsCsv, countdownCollectionHandlesCsv, countdownZoneIdsCsv, countdownDisplaySurfacesCsv },
+    });
+    return { ok: true, intent, message: "Countdown settings saved." } satisfies ActionData;
+  }
 
   if (intent === "save_settings") {
     const cutoffHour24 = Number(formData.get("cutoffHour24") ?? 14);
@@ -676,11 +716,15 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true, message: "Holiday removed." } satisfies ActionData;
   }
 
-  if (intent === "create_zone") {
+  if (intent === "create_zone" || intent === "update_zone") {
     requireFeature(access, "zones");
     const name = String(formData.get("zoneName") ?? "").trim();
     const countryRaw = String(formData.get("zoneCountry") ?? "").trim();
     const priority = Number(formData.get("zonePriority") ?? 100);
+    const zoneId = Number(formData.get("zoneId"));
+    if (intent === "update_zone" && (!Number.isSafeInteger(zoneId) || zoneId <= 0)) {
+      return { ok: false, message: "Invalid zone." } satisfies ActionData;
+    }
 
     if (!name || name.length > 60) {
       return { ok: false, message: "Zone name is required and must be 60 characters or fewer." } satisfies ActionData;
@@ -695,8 +739,28 @@ export async function action({ request }: ActionFunctionArgs) {
     const existing = await prisma.zone.findUnique({
       where: { shop_name: { shop, name } },
     });
-    if (existing) {
+    if (existing && (intent === "create_zone" || existing.id !== zoneId)) {
       return { ok: false, message: "A zone with this name already exists for this shop." } satisfies ActionData;
+    }
+
+    if (intent === "update_zone") {
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const zone = await tx.zone.findFirst({ where: { id: zoneId, shop } });
+          if (!zone) return { ok: false, message: "Zone not found." } satisfies ActionData;
+          await tx.zone.updateMany({
+            where: { id: zoneId, shop },
+            data: { name, country: countryRaw.toUpperCase() || null, priority },
+          });
+          await tx.postalCode.updateMany({ where: { shop, zoneId }, data: { zone: name } });
+          return { ok: true, message: "Zone updated. Rule countries were not changed.", intent, zoneId } satisfies ActionData;
+        });
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+          return { ok: false, message: "A zone with this name already exists for this shop." } satisfies ActionData;
+        }
+        throw error;
+      }
     }
 
     await prisma.zone.create({
@@ -926,9 +990,51 @@ export async function action({ request }: ActionFunctionArgs) {
     } satisfies ActionData;
   }
 
+  if (intent === "bulk_update_zone_rules") {
+    requireFeature(access, "zones");
+    const zoneId = Number(formData.get("zoneId"));
+    const ids = [...new Set(formData.getAll("postalRuleIds").map(Number))];
+    if (!Number.isSafeInteger(zoneId) || zoneId <= 0 || ids.length === 0 || ids.length > 25
+      || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      return { ok: false, message: "Select 1 to 25 postal rules in this zone." } satisfies ActionData;
+    }
+    let patch;
+    try {
+      patch = parseZoneRulePatch(formData);
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : "Invalid changes." } satisfies ActionData;
+    }
+    if (patch.deliveryCharge !== undefined || patch.currency !== undefined
+      || patch.sameDayAvailable !== undefined || patch.nextDayAvailable !== undefined || patch.expressAvailable !== undefined) {
+      requireFeature(access, "deliveryOptions");
+    }
+    return prisma.$transaction(async (tx) => {
+      const zone = await tx.zone.findFirst({ where: { id: zoneId, shop } });
+      if (!zone) return { ok: false, message: "Zone not found." } satisfies ActionData;
+      const where = { shop, zoneId, id: { in: ids } };
+      const rules = await tx.postalCode.findMany({ where });
+      if (rules.length !== ids.length) {
+        return { ok: false, message: "Some selected rules no longer belong to this zone. Reload the list and select again." } satisfies ActionData;
+      }
+      try {
+        for (const rule of rules) validatePatchedRule(rule, patch);
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : "Invalid changes." } satisfies ActionData;
+      }
+      await tx.postalCode.updateMany({ where, data: patch });
+      return { ok: true, message: `${rules.length} postal rules updated.`, intent, zoneId } satisfies ActionData;
+    });
+  }
+
   if (intent === "upsert_single_postal_code") {
     const postalRuleIdRaw = String(formData.get("postalRuleId") ?? "").trim();
     const postalRuleId = postalRuleIdRaw ? Number(postalRuleIdRaw) : null;
+    const editingZoneIdRaw = formData.get("editingZoneId");
+    const editingZoneId = editingZoneIdRaw === null ? null : Number(editingZoneIdRaw);
+    if (editingZoneId !== null && (!Number.isSafeInteger(editingZoneId) || editingZoneId <= 0 || postalRuleId === null)) {
+      return { ok: false, message: "Invalid zone edit." } satisfies ActionData;
+    }
+    if (editingZoneId !== null) requireFeature(access, "zones");
     const country = normalizeCountryCode(formData.get("country")?.toString());
     const rawPattern = String(
       formData.get("postalCode") ?? formData.get("pincode") ?? formData.get("postalPattern") ?? "",
@@ -1010,6 +1116,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
       try {
         await prisma.$transaction(async (tx) => {
+          if (editingZoneId !== null) {
+            const zone = await tx.zone.findFirst({ where: { id: editingZoneId, shop } });
+            const member = await tx.postalCode.findFirst({ where: { id: postalRuleId, shop, zoneId: editingZoneId } });
+            if (!zone || !member) throw new Error("The selected rule no longer belongs to this zone.");
+          }
           let editZoneId: number | null = null;
           let editZoneName = zoneName;
           if (Number.isInteger(zoneIdRaw) && zoneIdRaw > 0) {
@@ -1034,7 +1145,7 @@ export async function action({ request }: ActionFunctionArgs) {
           }
 
           await tx.postalCode.update({
-            where: { id: selectedRule.id },
+            where: { id: selectedRule.id, shop, ...(editingZoneId !== null ? { zoneId: editingZoneId } : {}) },
             data: {
               country,
               postalCode: parsed.pattern,
@@ -1057,11 +1168,14 @@ export async function action({ request }: ActionFunctionArgs) {
           });
         });
       } catch (error) {
-        if (error instanceof Error && error.message === "Selected zone was not found.") {
+        if (error instanceof Error && (error.message === "Selected zone was not found." || error.message === "The selected rule no longer belongs to this zone.")) {
           return { ok: false, message: error.message } satisfies ActionData;
         }
         if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
           return { ok: false, message: `A postal rule for ${country} ${parsed.pattern} already exists.` } satisfies ActionData;
+        }
+        if (editingZoneId !== null && typeof error === "object" && error !== null && "code" in error && error.code === "P2025") {
+          return { ok: false, message: "The selected rule no longer belongs to this zone." } satisfies ActionData;
         }
         throw error;
       }
@@ -1226,8 +1340,244 @@ export async function action({ request }: ActionFunctionArgs) {
   return { ok: false, message: "Unsupported action." } satisfies ActionData;
 }
 
+const RULE_FIELD_LABELS = {
+  country: "Country", postalCode: "Postal code, range, or wildcard",
+  deliveryDays: "Transit / delivery days", serviceable: "Delivery available", codAvailable: "COD available",
+  deliveryCharge: "Delivery charge (blank to clear)", currency: "Currency (blank to clear)",
+  sameDayAvailable: "Same-day available", nextDayAvailable: "Next-day available", expressAvailable: "Express available",
+  city: "City (blank to clear)", state: "State / region (blank to clear)",
+};
+const RULE_BOOLEAN_FIELDS = new Set<string>(["serviceable", "codAvailable", "sameDayAvailable", "nextDayAvailable", "expressAvailable"]);
+const RULE_EDIT_FIELDS = ["country", "postalCode", ...BULK_RULE_FIELDS] as const;
+type RuleDraft = Record<(typeof RULE_EDIT_FIELDS)[number] | "zoneId" | "zone", string>;
+type ZoneSummary = { id: number; name: string; country: string | null; priority: number; enabled: boolean };
+
+function ZoneEditor({ zone, zones, deliveryOptions, onClose }: {
+  zone: ZoneSummary; zones: ZoneSummary[]; deliveryOptions: boolean; onClose: () => void;
+}) {
+  const list = useFetcher<typeof zoneRulesLoader>();
+  const save = useFetcher<ActionData>();
+  const { load } = list;
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [revision, setRevision] = useState(0);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [metadata, setMetadata] = useState({ name: zone.name, country: zone.country ?? "", priority: String(zone.priority) });
+  const [savedMetadata, setSavedMetadata] = useState(metadata);
+  const [rule, setRule] = useState<{ id: number; values: RuleDraft; original: RuleDraft } | null>(null);
+  const [bulkValues, setBulkValues] = useState<Record<(typeof BULK_RULE_FIELDS)[number], string>>({
+    deliveryDays: "", serviceable: "true", codAvailable: "false", deliveryCharge: "", currency: "",
+    sameDayAvailable: "false", nextDayAvailable: "false", expressAvailable: "false", city: "", state: "",
+  });
+  const [applied, setApplied] = useState<string[]>([]);
+  const [notice, setNotice] = useState<ActionData | null>(null);
+  const pending = useRef<{ intent: string; metadata: typeof metadata } | null>(null);
+  const ruleEditor = useRef<HTMLFormElement>(null);
+  const feedback = useRef<HTMLDivElement>(null);
+  const saving = save.state !== "idle";
+  const response = list.data;
+  const current = response?.ok && response.zoneId === zone.id && response.search === search ? response : null;
+  const loading = list.state !== "idle" || !response;
+  const ruleDirty = rule !== null && JSON.stringify(rule.values) !== JSON.stringify(rule.original);
+  const metadataDirty = JSON.stringify(metadata) !== JSON.stringify(savedMetadata);
+  useBeforeUnload((event) => {
+    if (metadataDirty || ruleDirty || applied.length > 0 || saving) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
+
+  useEffect(() => {
+    ruleEditor.current?.scrollIntoView({ block: "nearest" });
+  }, [rule?.id]);
+
+  useEffect(() => {
+    if (notice) feedback.current?.scrollIntoView({ block: "nearest" });
+  }, [notice]);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ zoneId: String(zone.id), page: String(page), search });
+    load(`/app/zone-rules?${params}`);
+  }, [load, zone.id, page, search, revision]);
+
+  useEffect(() => {
+    if (save.state !== "idle" || !save.data || !pending.current) return;
+    const submitted = pending.current;
+    pending.current = null;
+    setNotice(save.data);
+    if (!save.data.ok) return;
+    if (submitted.intent === "update_zone") setSavedMetadata(submitted.metadata);
+    if (submitted.intent === "upsert_single_postal_code") setRule(null);
+    if (submitted.intent === "bulk_update_zone_rules") setApplied([]);
+    setSelected([]);
+    setRevision((value) => value + 1);
+  }, [save.data, save.state]);
+
+  const close = () => {
+    if (saving) return;
+    if ((metadataDirty || ruleDirty || applied.length > 0) && !window.confirm("Discard unsaved zone and postal rule changes?")) return;
+    onClose();
+  };
+  const discardRule = () => !ruleDirty || window.confirm("Discard unsaved postal rule changes?");
+  const startSave = (intent: string) => {
+    pending.current = { intent, metadata: { ...metadata } };
+    setNotice(null);
+  };
+  const changeList = (nextPage: number, nextSearch: string) => {
+    if (!discardRule()) return;
+    setRule(null);
+    setSelected([]);
+    setPage(nextPage);
+    setSearch(nextSearch);
+    setRevision((value) => value + 1);
+  };
+  const field = (key: (typeof RULE_EDIT_FIELDS)[number], value: string, onChange: (value: string) => void, disabled = false) => (
+    RULE_BOOLEAN_FIELDS.has(key)
+      ? <Select label={RULE_FIELD_LABELS[key]} name={key} options={[{ label: "Yes", value: "true" }, { label: "No", value: "false" }]} value={value} onChange={onChange} disabled={disabled} />
+      : <TextField label={RULE_FIELD_LABELS[key]} name={key} value={value} onChange={onChange} disabled={disabled} autoComplete="off"
+          type={key === "deliveryDays" ? "number" : "text"}
+          inputMode={key === "deliveryCharge" ? "decimal" : undefined}
+          min={key === "deliveryDays" ? 0 : undefined}
+          max={key === "deliveryDays" ? 60 : undefined} />
+  );
+  const optionField = (key: string) => ["deliveryCharge", "currency", "sameDayAvailable", "nextDayAvailable", "expressAvailable"].includes(key);
+
+  return <Modal open onClose={close} title={`Edit zone: ${savedMetadata.name}`} size="large"
+    secondaryActions={[{ content: "Close", onAction: close, disabled: saving }]}>
+    <Modal.Section>
+      <BlockStack gap="400">
+        <div ref={feedback} aria-live="polite">
+          {notice ? <Banner tone={notice.ok ? "success" : "critical"}>{notice.message}</Banner> : null}
+        </div>
+        {saving ? <InlineStack gap="200"><Spinner size="small" accessibilityLabel="Saving zone changes" /><Text as="p">Saving changes...</Text></InlineStack> : null}
+        <save.Form method="post" onSubmit={() => startSave("update_zone")}>
+          <input type="hidden" name="intent" value="update_zone" />
+          <input type="hidden" name="zoneId" value={zone.id} />
+          <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
+            <FormLayout>
+              <Text as="h2" variant="headingMd">Zone details</Text>
+              <FormLayout.Group condensed>
+                <TextField label="Zone name" name="zoneName" value={metadata.name} maxLength={60} autoComplete="off" onChange={(name) => setMetadata((value) => ({ ...value, name }))} />
+                <TextField label="Country (optional)" name="zoneCountry" value={metadata.country} maxLength={2} autoComplete="off" onChange={(country) => setMetadata((value) => ({ ...value, country: country.toUpperCase() }))} helpText="2-letter ISO code, or blank for any. Does not change postal rule countries." />
+                <TextField label="Priority" name="zonePriority" type="number" min={0} max={9999} value={metadata.priority} autoComplete="off" onChange={(priority) => setMetadata((value) => ({ ...value, priority }))} helpText="Lower wins." />
+              </FormLayout.Group>
+              <Button submit variant="primary" disabled={saving || !metadataDirty} loading={saving && pending.current?.intent === "update_zone"}>Save zone details</Button>
+            </FormLayout>
+          </fieldset>
+        </save.Form>
+      </BlockStack>
+    </Modal.Section>
+    <Modal.Section>
+      <BlockStack gap="400">
+        <Text as="h2" variant="headingMd">Postal rules in this zone</Text>
+        <form onSubmit={(event) => { event.preventDefault(); changeList(1, searchInput.trim().slice(0, 100)); }}>
+          <InlineStack gap="200" blockAlign="end">
+            <TextField label="Search postal code, country, city, or state" value={searchInput} onChange={setSearchInput} autoComplete="off" maxLength={100} disabled={saving || loading} />
+            <Button submit disabled={saving || loading}>Search</Button>
+            <Button onClick={() => { if (discardRule()) { setSearchInput(""); setRule(null); setSelected([]); setPage(1); setSearch(""); setRevision((value) => value + 1); } }} disabled={saving || loading}>Clear</Button>
+          </InlineStack>
+        </form>
+        {loading ? <InlineStack gap="200"><Spinner size="small" accessibilityLabel="Loading zone postal rules" /><Text as="p">Loading postal rules...</Text></InlineStack> : null}
+        {!loading && response && !response.ok ? <Banner tone="critical">{response.message}</Banner> : null}
+        {!loading && current && !rule ? <>
+          <Text as="p">{`${current.total} matching rules. Page ${current.page} of ${Math.max(1, Math.ceil(current.total / current.pageSize))}. ${selected.length} selected.`}</Text>
+          <Checkbox label="Select all rules on this page" checked={current.rules.length > 0 && selected.length === current.rules.length} disabled={saving || !!rule || current.rules.length === 0}
+            onChange={(checked) => setSelected(checked ? current.rules.map((row) => row.id) : [])} />
+          <DataTable columnContentTypes={["text", "text", "text", "numeric", "text", "text", "text", "text", "text", "text"]}
+            headings={["Select", "Country", "Postal rule", "Transit days", "Available", "COD", "Charge", "Location", "Options", "Actions"]}
+            rows={current.rules.map((row) => [
+              <Checkbox key={`${row.id}-select`} label={`Select ${row.country} ${row.postalCode}`} labelHidden checked={selected.includes(row.id)} disabled={saving || !!rule}
+                onChange={(checked) => setSelected((ids) => checked ? [...ids, row.id] : ids.filter((id) => id !== row.id))} />,
+              row.country, row.postalCode, row.deliveryDays, row.serviceable ? "Yes" : "No", row.codAvailable ? "Yes" : "No",
+              row.deliveryCharge === null ? "-" : `${row.currency ?? ""} ${row.deliveryCharge}`,
+              [row.city, row.state].filter(Boolean).join(", ") || "-",
+              [row.sameDayAvailable && "Same-day", row.nextDayAvailable && "Next-day", row.expressAvailable && "Express"].filter(Boolean).join(", ") || "-",
+              <Button key={`${row.id}-edit`} size="slim" disabled={saving} onClick={() => {
+                if (!discardRule()) return;
+                const values = Object.fromEntries(RULE_EDIT_FIELDS.map((key) => [key, row[key] === null ? "" : String(row[key])])) as RuleDraft;
+                values.zoneId = String(zone.id);
+                values.zone = current.zone.name;
+                setRule({ id: row.id, values, original: { ...values } });
+                setSelected([]);
+                setNotice(null);
+              }}>Edit</Button>,
+            ])} increasedTableDensity />
+          {current.total === 0 ? <Text as="p" tone="subdued">No postal rules match this search in this zone.</Text> : null}
+          <InlineStack gap="200">
+            <Button disabled={saving || current.page <= 1} onClick={() => changeList(current.page - 1, search)}>Previous</Button>
+            <Button disabled={saving || current.page * current.pageSize >= current.total} onClick={() => changeList(current.page + 1, search)}>Next</Button>
+          </InlineStack>
+        </> : null}
+        {rule ? <Banner tone="info">Editing postal rule <strong>{rule.values.postalCode}</strong>. Save it or cancel to return to the rules list.</Banner> : null}
+        {rule ? <save.Form ref={ruleEditor} method="post" onSubmit={() => startSave("upsert_single_postal_code")}>
+          <input type="hidden" name="intent" value="upsert_single_postal_code" />
+          <input type="hidden" name="postalRuleId" value={rule.id} />
+          <input type="hidden" name="editingZoneId" value={zone.id} />
+          <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
+              <FormLayout>
+               <Text as="h3" variant="headingMd">Edit postal rule</Text>
+              <FormLayout.Group condensed>
+                {(["country", "postalCode", "deliveryDays", "serviceable", "codAvailable"] as const).map((key) => <div key={key}>
+                  {field(key, rule.values[key], (value) => setRule((currentRule) => currentRule ? { ...currentRule, values: { ...currentRule.values, [key]: value } } : null), !deliveryOptions && optionField(key))}
+                  {!deliveryOptions && optionField(key) ? <input type="hidden" name={key} value={rule.values[key]} /> : null}
+                </div>)}
+              </FormLayout.Group>
+              <details className="incode-zone-editor__details">
+                <summary>More delivery details</summary>
+                <FormLayout.Group condensed>
+                  {RULE_EDIT_FIELDS.filter((key) => !["country", "postalCode", "deliveryDays", "serviceable", "codAvailable"].includes(key)).map((key) => <div key={key}>
+                    {field(key, rule.values[key], (value) => setRule((currentRule) => currentRule ? { ...currentRule, values: { ...currentRule.values, [key]: value } } : null), !deliveryOptions && optionField(key))}
+                    {!deliveryOptions && optionField(key) ? <input type="hidden" name={key} value={rule.values[key]} /> : null}
+                  </div>)}
+                </FormLayout.Group>
+                <FormLayout.Group condensed>
+                  <Select label="Zone assignment" name="zoneId" value={rule.values.zoneId} options={[{ label: "No zone / use zone name below", value: "" }, ...zones.map((item) => ({ label: item.name, value: String(item.id) }))]}
+                    onChange={(zoneId) => setRule((value) => value ? { ...value, values: { ...value.values, zoneId, zone: "" } } : null)} />
+                  {!rule.values.zoneId ? <TextField label="Zone name (optional)" name="zone" value={rule.values.zone} autoComplete="off" onChange={(name) => setRule((value) => value ? { ...value, values: { ...value.values, zone: name } } : null)} /> : null}
+                </FormLayout.Group>
+              </details>
+              <InlineStack gap="200">
+                <Button submit variant="primary" loading={saving && pending.current?.intent === "upsert_single_postal_code"} disabled={saving || !ruleDirty}>Save postal rule</Button>
+                <Button disabled={saving} onClick={() => { if (discardRule()) setRule(null); }}>Cancel rule edit</Button>
+              </InlineStack>
+            </FormLayout>
+          </fieldset>
+        </save.Form> : null}
+      </BlockStack>
+    </Modal.Section>
+    <Modal.Section>
+      <BlockStack gap="300">
+        <details className="incode-zone-editor__details">
+          <summary>Bulk update selected rules</summary>
+          <Text as="p" tone="subdued">Select rules above, then choose only the fields you want to change. Blank charge, currency, city, or state clears that field.</Text>
+          {BULK_RULE_FIELDS.map((key) => <BlockStack key={key} gap="200">
+            <Checkbox label={`Apply ${RULE_FIELD_LABELS[key]}`} checked={applied.includes(key)} disabled={saving || !!rule || (!deliveryOptions && optionField(key))}
+              onChange={(checked) => setApplied((keys) => checked ? [...keys, key] : keys.filter((item) => item !== key))} />
+            {applied.includes(key) ? field(key, bulkValues[key], (value) => setBulkValues((values) => ({ ...values, [key]: value })), saving || !!rule) : null}
+          </BlockStack>)}
+        </details>
+        <Button variant="primary" disabled={saving || loading || !current || !!rule || selected.length === 0 || applied.length === 0}
+          loading={saving && pending.current?.intent === "bulk_update_zone_rules"} onClick={() => {
+            const form = new FormData();
+            form.set("intent", "bulk_update_zone_rules");
+            form.set("zoneId", String(zone.id));
+            for (const id of selected) form.append("postalRuleIds", String(id));
+            for (const key of BULK_RULE_FIELDS) if (applied.includes(key)) {
+              form.set(`apply_${key}`, "true");
+              form.set(key, bulkValues[key]);
+            }
+            startSave("bulk_update_zone_rules");
+            save.submit(form, { method: "post", action: "/app/delivery-settings" });
+          }}>{`Update ${selected.length} selected rules`}</Button>
+      </BlockStack>
+    </Modal.Section>
+  </Modal>;
+}
+
 export default function DeliverySettingsPage() {
   const data = useLoaderData<typeof loader>();
+  const [editingZone, setEditingZone] = useState<(typeof data.zones)[number] | null>(null);
   const [searchParams] = useSearchParams();
   const activeTab = SETTINGS_TABS.find((tab) => tab.id === searchParams.get("tab")) ?? SETTINGS_TABS[0];
   const tabUrl = (tab: string) => {
@@ -1236,6 +1586,7 @@ export default function DeliverySettingsPage() {
     return `?${params.toString()}`;
   };
   const fetcher = useFetcher<ActionData>();
+  const countdownFetcher = useFetcher<ActionData>();
   const isSaving = fetcher.state !== "idle";
   const isAdvanced = data.access.active;
   const activeIntent = String(fetcher.formData?.get("intent") ?? "");
@@ -1269,6 +1620,14 @@ export default function DeliverySettingsPage() {
   });
   const [googleSheetCsvUrl, setGoogleSheetCsvUrl] = useState(data.setting.googleSheetCsvUrl ?? "");
   const [holidayDate, setHolidayDate] = useState("");
+  const [countdownSurfaces, setCountdownSurfaces] = useState(
+    data.setting.countdownDisplaySurfacesCsv.split(",").filter(Boolean),
+  );
+  const [countdownEnabled, setCountdownEnabled] = useState(data.setting.countdownEnabled);
+  const [countdownTargetMode, setCountdownTargetMode] = useState(data.setting.countdownTargetMode);
+  const [countdownProductIds, setCountdownProductIds] = useState(data.setting.countdownProductIdsCsv);
+  const [countdownCollectionHandles, setCountdownCollectionHandles] = useState(data.setting.countdownCollectionHandlesCsv);
+  const [countdownZoneIds, setCountdownZoneIds] = useState(data.setting.countdownZoneIdsCsv);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvRejected, setCsvRejected] = useState(false);
   const [zoneForm, setZoneForm] = useState({
@@ -1444,11 +1803,27 @@ export default function DeliverySettingsPage() {
     .slice(0, 20)
     .map((product) => ({
       label: `${product.title} · ${product.handle}`,
-      value: product.id,
+      value: product.id.replace(/\D/g, ""),
     }));
+  const selectedCountdownProductIds = countdownProductIds.split(",").filter(Boolean);
+  const selectedCountdownCollections = countdownCollectionHandles.split(",").filter(Boolean);
+  const selectedCountdownZones = countdownZoneIds.split(",").filter(Boolean);
+  const countdownZoneOptions = data.zones.map((zone) => ({
+    label: `${zone.name}${zone.country ? ` · ${zone.country}` : ""}`,
+    value: String(zone.id),
+  }));
+  const countdownCollectionOptions = data.collections.map((collection) => ({
+    label: `${collection.title} · ${collection.handle}`,
+    value: collection.handle,
+  }));
+  const countdownProductOptions = data.products.map((product) => ({
+    label: `${product.title} · ${product.handle}`,
+    value: product.id.replace(/\D/g, ""),
+  }));
   const targetRegionOptions = suggestedRegions(targetForm.countryCode, targetForm.stateRegion);
   const targetRegionValues = regionsForCountry(targetForm.countryCode);
-  const themeEditorUrl = `https://${data.shop}/admin/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
+  const shopHandle = data.shop.replace(/\.myshopify\.com$/i, "");
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
   const previewDeliveryDate = sampleMaxDeliveryDate;
   const weekdayOptions = [
     ["1", "Mon"],
@@ -1560,6 +1935,7 @@ export default function DeliverySettingsPage() {
     zone._count.postalCodes,
     zone.enabled ? <Badge key={`${zone.id}-on`} tone="success">Enabled</Badge> : <Badge key={`${zone.id}-on`}>Disabled</Badge>,
     <InlineStack key={`${zone.id}-actions`} gap="200">
+      <Button size="slim" onClick={() => setEditingZone(zone)} disabled={!data.access.features.zones || isSaving}>Edit</Button>
       <fetcher.Form method="post">
         <input type="hidden" name="intent" value="toggle_zone" />
         <input type="hidden" name="zoneId" value={zone.id} />
@@ -1582,7 +1958,7 @@ export default function DeliverySettingsPage() {
     </InlineStack>,
   ]);
   const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const targetRows = data.targets.map((target) => {
+  const targetCards = data.targets.map((target) => {
     const geography = [target.countryCode || "All countries", target.stateRegion].filter(Boolean).join(" / ");
     const schedule = target.activationMode === "date_range"
       ? `${target.activeFromLocal} to ${target.activeUntilLocal}`
@@ -1598,40 +1974,40 @@ export default function DeliverySettingsPage() {
     const matchLabel = target.targetKind === "collection"
       ? compactCollectionName(target.targetValue)
       : `${target.targetKind}: ${target.targetValue}`;
-    return [
-    `${target.name} (#${target.priority})`,
-    <span key={`${target.id}-match`} className="incode-target-match" title={`${target.targetKind}: ${target.targetValue}`}>
-      {matchLabel}
-    </span>,
-    geography,
-    target.inventoryMode.replaceAll("_", " "),
-    schedule,
-    target.customSuccessMessage || "Global message",
-    behavior,
-    target.enabled ? <Badge key={`${target.id}-on`} tone="success">Enabled</Badge> : <Badge key={`${target.id}-on`}>Disabled</Badge>,
-    <InlineStack key={`${target.id}-actions`} gap="200">
-      <Button size="slim" onClick={() => editTarget(target)} disabled={!isAdvanced}>Edit</Button>
-      <fetcher.Form method="post">
-        <input type="hidden" name="intent" value="toggle_target" />
-        <input type="hidden" name="targetId" value={target.id} />
-        <Button submit size="slim" loading={isIntentSaving("toggle_target")} disabled={!isAdvanced}>
-          {target.enabled ? "Disable" : "Enable"}
-        </Button>
-      </fetcher.Form>
-      <fetcher.Form
-        method="post"
-        onSubmit={(event) => {
-          if (!window.confirm(`Delete targeting rule "${target.name}"?`)) event.preventDefault();
-        }}
-      >
-        <input type="hidden" name="intent" value="delete_target" />
-        <input type="hidden" name="targetId" value={target.id} />
-        <Button submit size="slim" tone="critical" loading={isIntentSaving("delete_target")} disabled={!isAdvanced}>
-          Delete
-        </Button>
-      </fetcher.Form>
-    </InlineStack>,
-  ];
+    return (
+      <article key={target.id} className="incode-target-card">
+        <div className="incode-target-card__header">
+          <div>
+            <Text as="h3" variant="headingSm">{target.name}</Text>
+            <Text as="p" tone="subdued">Priority {target.priority} · {target.targetKind}</Text>
+          </div>
+          {target.enabled ? <Badge tone="success">Enabled</Badge> : <Badge>Disabled</Badge>}
+        </div>
+        <div className="incode-target-card__grid">
+          <div><span>Matches</span><strong title={`${target.targetKind}: ${target.targetValue}`}>{matchLabel}</strong></div>
+          <div><span>Geography</span><strong>{geography}</strong></div>
+          <div><span>Inventory</span><strong>{target.inventoryMode.replaceAll("_", " ")}</strong></div>
+          <div><span>Schedule</span><strong>{schedule}</strong></div>
+          <div><span>Behavior</span><strong>{behavior}</strong></div>
+          <div><span>Message</span><strong>{target.customSuccessMessage || "Global message"}</strong></div>
+        </div>
+        <div className="incode-target-card__actions">
+          <Button size="slim" onClick={() => editTarget(target)} disabled={!isAdvanced}>Edit</Button>
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="toggle_target" />
+            <input type="hidden" name="targetId" value={target.id} />
+            <Button submit size="slim" loading={isIntentSaving("toggle_target")} disabled={!isAdvanced}>
+              {target.enabled ? "Disable" : "Enable"}
+            </Button>
+          </fetcher.Form>
+          <fetcher.Form method="post" onSubmit={(event) => { if (!window.confirm(`Delete targeting rule "${target.name}"?`)) event.preventDefault(); }}>
+            <input type="hidden" name="intent" value="delete_target" />
+            <input type="hidden" name="targetId" value={target.id} />
+            <Button submit size="slim" tone="critical" loading={isIntentSaving("delete_target")} disabled={!isAdvanced}>Delete</Button>
+          </fetcher.Form>
+        </div>
+      </article>
+    );
   });
   const importRows = data.recentImports.map((job) => [
     new Date(job.createdAt).toLocaleString(),
@@ -1680,8 +2056,48 @@ export default function DeliverySettingsPage() {
         </InlineStack>
       }
     >
+      {editingZone ? <ZoneEditor key={editingZone.id} zone={editingZone} zones={data.zones} deliveryOptions={data.access.features.deliveryOptions} onClose={() => setEditingZone(null)} /> : null}
       <div className="incode-delivery-settings">
       <BlockStack gap="400">
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
+              <BlockStack gap="050">
+                <Text as="h2" variant="headingMd">Make ZIP checks live on your store</Text>
+                <Text as="p" tone="subdued">Complete these three steps to let shoppers enter a postal code and receive delivery availability.</Text>
+              </BlockStack>
+              <Badge tone={data.totalPatterns > 0 ? "success" : "attention"}>
+                {data.totalPatterns > 0 ? "Coverage added" : "Coverage needed"}
+              </Badge>
+            </InlineStack>
+            <div className="incode-launch-checklist">
+              <div className={`incode-launch-checklist__step${data.totalPatterns > 0 ? " is-complete" : ""}`}>
+                <span>1</span>
+                <div>
+                  <strong>Add ZIP coverage</strong>
+                  <small>{data.totalPatterns > 0 ? `${data.totalPatterns} rule${data.totalPatterns === 1 ? "" : "s"} ready` : "Create a rule or import a CSV"}</small>
+                </div>
+                {data.totalPatterns > 0 ? <Badge tone="success">Ready</Badge> : <Button url={tabUrl("coverage")} size="slim">Add coverage</Button>}
+              </div>
+              <div className="incode-launch-checklist__step">
+                <span>2</span>
+                <div>
+                  <strong>Add the storefront checker</strong>
+                  <small>Shopify Admin → Online Store → Themes → Customize → Add app block</small>
+                </div>
+                <Button url={themeEditorUrl} external target="_blank" size="slim">Add ZIP checker block</Button>
+              </div>
+              <div className="incode-launch-checklist__step">
+                <span>3</span>
+                <div>
+                  <strong>Test before publishing</strong>
+                  <small>Try one available and one unavailable postal code on a product page</small>
+                </div>
+                <Button url="/app/additional" size="slim">View guide</Button>
+              </div>
+            </div>
+          </BlockStack>
+        </Card>
         <nav className="incode-delivery-settings__tabs" aria-label="Delivery settings sections">
           {SETTINGS_TABS.map((tab) => (
             <Link key={tab.id} to={tabUrl(tab.id)} preventScrollReset aria-current={activeTab.id === tab.id ? "page" : undefined}>
@@ -1783,6 +2199,11 @@ export default function DeliverySettingsPage() {
             </> : null}
             {activeTab.id === "products" ? <>
             <div id="targeting" className="incode-section-anchor" />
+            {data.targetCount === 0 ? (
+              <Banner title="Start with one simple rule" tone="info">
+                Choose what the rule matches, set an ETA override only if needed, then save. Leave the advanced conditions closed until you need them.
+              </Banner>
+            ) : null}
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" blockAlign="center" gap="300">
@@ -1919,6 +2340,8 @@ export default function DeliverySettingsPage() {
                         onChange={(checked) => setTargetForm((current) => ({ ...current, excluded: checked }))}
                       />
                     </FormLayout.Group>
+                    <details className="incode-targeting__advanced">
+                      <summary>Advanced conditions and schedule</summary>
                     <FormLayout.Group condensed>
                       <TextField
                         label="Priority"
@@ -2067,6 +2490,7 @@ export default function DeliverySettingsPage() {
                       autoComplete="off"
                       helpText="Optional. Overrides the global success message only when this rule matches. Existing ETA shortcodes are supported."
                     />
+                    </details>
                     <InlineStack gap="200">
                       <Button submit variant="primary" loading={isIntentSaving(editingTargetId === null ? "create_target" : "update_target")} disabled={!isAdvanced}>
                         {editingTargetId === null ? "Create targeting rule" : "Save targeting rule"}
@@ -2076,13 +2500,8 @@ export default function DeliverySettingsPage() {
                   </FormLayout>
                 </fetcher.Form>
 
-                {targetRows.length > 0 ? (
-                  <DataTable
-                    columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text", "text"]}
-                    headings={["Rule", "Match", "Geography", "Inventory", "Schedule", "Message", "Behavior", "Status", "Actions"]}
-                    rows={targetRows}
-                    increasedTableDensity
-                  />
+                {targetCards.length > 0 ? (
+                  <div className="incode-targeting__cards">{targetCards}</div>
                 ) : (
                   <Text as="p" tone="subdued">
                     No targeting rules yet. Add product, collection, vendor, or tag rules
@@ -2093,14 +2512,14 @@ export default function DeliverySettingsPage() {
             </Card>
 
             </> : null}
-            {activeTab.id !== "imports" ? <>
+            {activeTab.id !== "imports" && activeTab.id !== "coverage" ? <>
             <div id="behavior" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" gap="300" blockAlign="center">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingMd">
-                      {activeTab.id === "coverage" ? "Coverage lookup sources" : activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "cart" ? "Shop-wide cart controls" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
+                      {activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "cart" ? "Shop-wide cart controls" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
                     </Text>
                     <Text as="p" tone="subdued">
                       Save applies all settings drafts, including changes made in other tabs. Coverage and product rules are saved separately.
@@ -2209,45 +2628,6 @@ export default function DeliverySettingsPage() {
                       <Button url="#holidays">Manage holiday dates</Button>
                     </BlockStack>
 
-                    </> : null}
-                    {activeTab.id === "coverage" ? <>
-                    <FormLayout.Group condensed>
-                      <Select
-                        label="Courier timeout"
-                        name="courierTimeoutMs"
-                        options={withCurrentOption(COURIER_TIMEOUT_OPTIONS, settings.courierTimeoutMs)}
-                        value={settings.courierTimeoutMs}
-                        onChange={(value) => setSettings((current) => ({ ...current, courierTimeoutMs: value }))}
-                      />
-                      <Select
-                        label="Retry count"
-                        name="retryCount"
-                        options={withCurrentOption(RETRY_OPTIONS, settings.retryCount)}
-                        value={settings.retryCount}
-                        onChange={(value) => setSettings((current) => ({ ...current, retryCount: value }))}
-                      />
-                    </FormLayout.Group>
-
-                    <Checkbox
-                      label="Enable courier API as primary source"
-                      checked={settings.courierEnabled}
-                      disabled={!data.courierIntegrationAvailable || !isAdvanced}
-                      helpText={
-                        data.courierIntegrationAvailable
-                          ? "Use the configured courier provider before falling back to uploaded postal code records. India-only courier checks use Shiprocket."
-                          : "Courier provider credentials are not configured. Uploaded postal code records will be used."
-                      }
-                      onChange={(checked) =>
-                        setSettings((current) => ({ ...current, courierEnabled: checked }))
-                      }
-                    />
-                    <Checkbox
-                      label="Use uploaded coverage rules when the courier API has no result"
-                      checked={settings.dbFallbackEnabled}
-                      onChange={(checked) =>
-                        setSettings((current) => ({ ...current, dbFallbackEnabled: checked }))
-                      }
-                    />
                     </> : null}
                     {activeTab.id === "products" ?
                     <Checkbox
@@ -2577,7 +2957,12 @@ export default function DeliverySettingsPage() {
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="upsert_single_postal_code" />
                   {editingPostalRule ? <input type="hidden" name="postalRuleId" value={editingPostalRule.id} /> : null}
+                  <div className="incode-postal-rule-form">
                   <FormLayout>
+                    <div className="incode-postal-rule-form__section-heading">
+                      <Text as="h3" variant="headingSm">Coverage basics</Text>
+                      <Text as="p" tone="subdued">Define where you deliver and the standard delivery promise.</Text>
+                    </div>
                     <FormLayout.Group condensed>
                       <Select
                         label="Country"
@@ -2625,10 +3010,13 @@ export default function DeliverySettingsPage() {
                         placeholder="2"
                         autoComplete="off"
                         requiredIndicator
-                      />
+                        />
                     </FormLayout.Group>
 
-                    <FormLayout.Group condensed>
+                    <Checkbox label="Serviceable" checked={postalCodeForm.serviceable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, serviceable: checked }))} />
+                    <input type="hidden" name="serviceable" value={String(postalCodeForm.serviceable)} />
+
+                      <FormLayout.Group condensed>
                       <Select
                         label="Zone"
                         name="zoneId"
@@ -2649,8 +3037,10 @@ export default function DeliverySettingsPage() {
                         placeholder="metro"
                         autoComplete="off"
                       />
-                    </FormLayout.Group>
+                      </FormLayout.Group>
 
+                    <details className="incode-postal-rule-form__details">
+                      <summary>Optional delivery details</summary>
                     <FormLayout.Group condensed>
                       <Autocomplete
                         options={cityOptions}
@@ -2731,46 +3121,21 @@ export default function DeliverySettingsPage() {
                       />
                     </FormLayout.Group>
 
-                    <Checkbox
-                      label="Serviceable"
-                      checked={postalCodeForm.serviceable}
-                      onChange={(checked) =>
-                        setPostalCodeForm((current) => ({ ...current, serviceable: checked }))
-                      }
-                    />
-                    <input type="hidden" name="serviceable" value={String(postalCodeForm.serviceable)} />
-                    <Checkbox
-                      label="COD available"
-                      checked={postalCodeForm.codAvailable}
-                      onChange={(checked) =>
-                        setPostalCodeForm((current) => ({ ...current, codAvailable: checked }))
-                      }
-                    />
+                    <div className="incode-postal-rule-form__section-heading">
+                      <Text as="h3" variant="headingSm">Delivery options</Text>
+                      <Text as="p" tone="subdued">Choose the services shoppers can see for this coverage rule.</Text>
+                    </div>
+                    <InlineStack gap="400" wrap>
+                      <Checkbox label="COD" checked={postalCodeForm.codAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, codAvailable: checked }))} />
+                      <Checkbox label="Same-day" checked={postalCodeForm.sameDayAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, sameDayAvailable: checked }))} />
+                      <Checkbox label="Next-day" checked={postalCodeForm.nextDayAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, nextDayAvailable: checked }))} />
+                      <Checkbox label="Express" checked={postalCodeForm.expressAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, expressAvailable: checked }))} />
+                    </InlineStack>
                     <input type="hidden" name="codAvailable" value={String(postalCodeForm.codAvailable)} />
-                    <Checkbox
-                      label="Same-day delivery available"
-                      checked={postalCodeForm.sameDayAvailable}
-                      onChange={(checked) =>
-                        setPostalCodeForm((current) => ({ ...current, sameDayAvailable: checked }))
-                      }
-                    />
                     <input type="hidden" name="sameDayAvailable" value={String(postalCodeForm.sameDayAvailable)} />
-                    <Checkbox
-                      label="Next-day delivery available"
-                      checked={postalCodeForm.nextDayAvailable}
-                      onChange={(checked) =>
-                        setPostalCodeForm((current) => ({ ...current, nextDayAvailable: checked }))
-                      }
-                    />
                     <input type="hidden" name="nextDayAvailable" value={String(postalCodeForm.nextDayAvailable)} />
-                    <Checkbox
-                      label="Express delivery available"
-                      checked={postalCodeForm.expressAvailable}
-                      onChange={(checked) =>
-                        setPostalCodeForm((current) => ({ ...current, expressAvailable: checked }))
-                      }
-                    />
                     <input type="hidden" name="expressAvailable" value={String(postalCodeForm.expressAvailable)} />
+                    </details>
 
                     <Button submit variant="primary" loading={isIntentSaving("upsert_single_postal_code")}>
                       {editingPostalRule ? "Update postal rule" : "Save postal code"}
@@ -2788,6 +3153,7 @@ export default function DeliverySettingsPage() {
                       </Banner>
                     ) : null}
                   </FormLayout>
+                  </div>
                 </fetcher.Form>
               </BlockStack>
             </Card>
@@ -2875,15 +3241,40 @@ export default function DeliverySettingsPage() {
 
         <Layout.Section variant="oneThird">
           <BlockStack gap="400">
+            {activeTab.id === "products" ? (
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h2" variant="headingMd">Live rule preview</Text>
+                    <Badge tone="info">Unsaved draft</Badge>
+                  </InlineStack>
+                  <Text as="p" tone="subdued">This is how the current rule will be interpreted before you save it.</Text>
+                  <div className="incode-rule-preview" aria-live="polite">
+                    <div className="incode-rule-preview__title">{targetForm.name || "Unnamed rule"}</div>
+                    <div className="incode-rule-preview__match">
+                      <span>When</span>
+                      <strong>{targetForm.kind === "product" ? "Product" : targetForm.kind === "collection" ? "Collection" : targetForm.kind === "vendor" ? "Vendor" : "Product tag"}</strong>
+                      <em>{targetForm.kind === "product" ? productSearch || "Not selected yet" : targetForm.value || "Not selected yet"}</em>
+                    </div>
+                    <div className="incode-rule-preview__facts">
+                      <span>{targetForm.excluded ? "Delivery excluded" : `${targetForm.processingDays || "Default"} prep days`}</span>
+                      <span>{targetForm.transitDays || "Postal transit"}</span>
+                      <span>{targetForm.requireValidPin ? "PIN required" : "PIN optional"}</span>
+                    </div>
+                  </div>
+                  <Text as="p" tone="subdued" variant="bodySm">Product rules override the matching postal rule only when this target matches.</Text>
+                </BlockStack>
+              </Card>
+            ) : null}
             {activeTab.id === "timing" || activeTab.id === "messages" ?
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h2" variant="headingMd">Sample delivery journey</Text>
-                  <Badge tone="info">Sample</Badge>
+                  <Text as="h2" variant="headingMd">Live delivery preview</Text>
+                  <Badge tone="success">Updates as you edit</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">
-                  Illustrative dates use US 10001 and 3 transit days. This is not a live delivery check and does not apply your business calendar.
+                  Illustrative dates use US 10001 and 3 transit days. This is not a live delivery check.
                 </Text>
                 <div className="incode-store-preview">
                   <div className="incode-store-preview__product">
@@ -2964,13 +3355,115 @@ export default function DeliverySettingsPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">Cutoff countdown display</Text>
-                <Text as="p" tone="subdued">Configure the storefront cutoff countdown block in the Theme Editor. The numbers below are a static sample, not a running timer.</Text>
+                <Text as="p" tone="subdued">Choose who sees the countdown here. Shopify still requires the app block to be added and published on each storefront surface you select.</Text>
+                <countdownFetcher.Form method="post">
+                  <input type="hidden" name="intent" value="save_countdown" />
+                  <input type="hidden" name="countdownEnabled" value={String(countdownEnabled)} />
+                  <input type="hidden" name="countdownDisplaySurfacesCsv" value={countdownSurfaces.join(",")} />
+                  <BlockStack gap="300">
+                    <Checkbox
+                      label="Enable cutoff countdown"
+                      checked={countdownEnabled}
+                      onChange={setCountdownEnabled}
+                    />
+                    <Select
+                      label="Show countdown to"
+                      name="countdownTargetMode"
+                      options={[
+                        { label: "All products", value: "all" },
+                        { label: "Selected products", value: "products" },
+                        { label: "Products in selected collections", value: "collections" },
+                        { label: "Selected delivery zones", value: "zones" },
+                      ]}
+                      value={countdownTargetMode}
+                      onChange={setCountdownTargetMode}
+                    />
+                    {countdownTargetMode === "products" ? (
+                      <Autocomplete
+                        allowMultiple
+                        options={countdownProductOptions}
+                        selected={selectedCountdownProductIds}
+                        onSelect={(selected) => setCountdownProductIds(selected.join(","))}
+                        emptyState={data.products.length > 0 ? "No matching products." : "No products found in this store."}
+                        textField={
+                          <Autocomplete.TextField
+                            label="Choose products"
+                            placeholder="Search products by name"
+                            autoComplete="off"
+                            helpText="Select one or more products that should show this countdown."
+                          />
+                        }
+                      />
+                    ) : null}
+                    {countdownTargetMode === "collections" ? (
+                      <Autocomplete
+                        allowMultiple
+                        options={countdownCollectionOptions}
+                        selected={selectedCountdownCollections}
+                        onSelect={(selected) => setCountdownCollectionHandles(selected.join(","))}
+                        emptyState={data.collections.length > 0 ? "No matching collections." : "No collections found in this store."}
+                        textField={
+                          <Autocomplete.TextField
+                            label="Choose collections"
+                            placeholder="Search collections by name"
+                            autoComplete="off"
+                            helpText="Products inside these collections will show this countdown."
+                          />
+                        }
+                      />
+                    ) : null}
+                    {countdownTargetMode === "zones" ? (
+                      <Autocomplete
+                        allowMultiple
+                        options={countdownZoneOptions}
+                        selected={selectedCountdownZones}
+                        onSelect={(selected) => setCountdownZoneIds(selected.join(","))}
+                        emptyState={data.zones.length > 0 ? "No matching zones." : "Create a delivery zone first."}
+                        textField={
+                          <Autocomplete.TextField
+                            label="Choose delivery zones"
+                            placeholder="Search zones by name"
+                            autoComplete="off"
+                            helpText="The countdown appears after a shopper matches one of these delivery zones."
+                          />
+                        }
+                      />
+                    ) : null}
+                    <input type="hidden" name="countdownProductIdsCsv" value={countdownProductIds} readOnly />
+                    <input type="hidden" name="countdownCollectionHandlesCsv" value={countdownCollectionHandles} readOnly />
+                    <input type="hidden" name="countdownZoneIdsCsv" value={countdownZoneIds} readOnly />
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">Storefront surfaces</Text>
+                      <InlineStack gap="300" wrap>
+                        {[
+                          ["product", "Product page"],
+                          ["collection", "Collection page"],
+                          ["cart", "Cart page"],
+                          ["index", "Home page"],
+                          ["search", "Search page"],
+                        ].map(([value, label]) => (
+                          <Checkbox
+                            key={value}
+                            label={label}
+                            checked={countdownSurfaces.includes(value)}
+                            onChange={(checked) => setCountdownSurfaces((current) => checked ? [...new Set([...current, value])] : current.filter((item) => item !== value))}
+                          />
+                        ))}
+                      </InlineStack>
+                    </BlockStack>
+                    <InlineStack gap="200">
+                      <Button submit variant="primary" loading={countdownFetcher.state !== "idle"}>Save countdown settings</Button>
+                      <Button url={themeEditorUrl} external target="_blank">Open Theme Editor setup</Button>
+                    </InlineStack>
+                    {countdownFetcher.data ? <Banner tone={countdownFetcher.data.ok ? "success" : "critical"}>{countdownFetcher.data.message}</Banner> : null}
+                  </BlockStack>
+                </countdownFetcher.Form>
                 <div className="incode-countdown-preview" aria-label="Static countdown sample">
                   <span><strong>01</strong><small>Hours</small></span>
                   <span><strong>35</strong><small>Minutes</small></span>
                   <span><strong>40</strong><small>Seconds</small></span>
                 </div>
-                <Button url={themeEditorUrl} external>Configure countdown in Theme Editor</Button>
+                <Text as="p" tone="subdued" variant="bodySm">Setup: save these settings, open the Theme Editor, add the Delivery Checker block to the selected templates, then publish the theme.</Text>
               </BlockStack>
             </Card>
             </> : null}
@@ -2984,7 +3477,6 @@ export default function DeliverySettingsPage() {
                   {activeTab.id === "coverage" ? "Create zones if needed, then add a rule below. For larger lists, use Imports & Sync." : "Save your settings drafts, then test a real postal code on your storefront. Sample previews do not confirm serviceability."}
                 </Text>
                 <Button url={tabUrl(activeTab.id === "coverage" ? "imports" : "coverage")}>{activeTab.id === "coverage" ? "Import coverage in bulk" : "Review coverage"}</Button>
-                <Button url="/app/shipping-methods">Manage shipping methods</Button>
                 <Button url="/app/storefront-customization">Customize storefront appearance</Button>
               </BlockStack>
             </Card>

@@ -1,5 +1,6 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation, useRouteError } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   Badge,
   Banner,
@@ -47,14 +48,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const { billing } = await authenticate.admin(request);
   if (await hasActiveBilling(billing)) {
-    return { ok: true, alreadyActive: true };
+    return { ok: true, alreadyActive: true, error: null };
   }
 
-  return billing.request({
-    plan: STANDARD_PLAN,
-    isTest: isBillingTestMode(),
-    returnUrl: new URL("/app/plans?billing=approved", request.url).toString(),
-  });
+  try {
+    return await billing.request({
+      plan: STANDARD_PLAN,
+      isTest: isBillingTestMode(),
+    });
+  } catch (error) {
+    // Shopify throws Responses for approval redirects and reauthentication.
+    if (!(error instanceof Error) || !("errorData" in error)) throw error;
+
+    console.error("Shopify subscription request rejected", error.errorData);
+    const messages = Array.isArray(error.errorData)
+      ? error.errorData.flatMap((detail: unknown) =>
+          detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string"
+            ? [detail.message]
+            : [],
+        )
+      : [];
+
+    return {
+      ok: false,
+      alreadyActive: false,
+      error: messages.join(" ") || "Shopify could not create the subscription. Please try again or contact support.",
+    };
+  }
 }
 
 export default function PlansPage() {
@@ -78,6 +98,11 @@ export default function PlansPage() {
         {actionData?.alreadyActive ? (
           <Banner title="No new charge was created" tone="success">
             This store already has an active Standard subscription.
+          </Banner>
+        ) : null}
+        {actionData?.error ? (
+          <Banner title="Shopify could not start your trial" tone="critical">
+            {actionData.error}
           </Banner>
         ) : null}
         {data.testMode ? (
@@ -138,3 +163,10 @@ export default function PlansPage() {
     </Page>
   );
 }
+
+// Keep App Bridge mounted while it handles Shopify's billing redirect response.
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

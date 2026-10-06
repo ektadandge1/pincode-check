@@ -71,7 +71,8 @@ export default function Index() {
   const data = useLoaderData<typeof loader>();
   const completedSteps = Number(data.settingsConfigured) + Number(data.rules > 0);
   const progress = Math.round((completedSteps / 3) * 100);
-  const themeEditorUrl = `https://${data.shop}/admin/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
+  const shopHandle = data.shop.replace(/\.myshopify\.com$/i, "");
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
 
   return (
     <Page title="Overview" subtitle="Control delivery promises shoppers can trust.">

@@ -24,7 +24,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function AdditionalPage() {
   const { shop, apiKey, supportEmail } = useLoaderData<typeof loader>();
-  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?template=product&addAppBlockId=${apiKey}/delivery-checker&target=mainSection`;
+  const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${apiKey}/delivery-checker&target=mainSection`;
 
   return (
     <Page title="Setup guide" subtitle="Launch, test, and troubleshoot your delivery experience.">
