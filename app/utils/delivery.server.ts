@@ -124,8 +124,10 @@ export function parseCsvToStringSet(csv: string): Set<string> {
 }
 
 export function parseWeekendDays(csv: string): Set<number> {
+  if (!csv.trim()) return new Set();
   const values = csv
     .split(",")
+    .filter((item) => item.trim() !== "")
     .map((item) => Number(item.trim()))
     .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6);
 
@@ -532,9 +534,11 @@ export function aggregateCartDeliveryItems(items: CartDeliveryItemInput[]): Aggr
 
   for (const item of items) {
     const variantId = item.variantId?.trim();
-    const existingIndex = variantId ? variantIndexes.get(variantId) : undefined;
+    const variantKey = variantId && /^(?:gid:\/\/shopify\/ProductVariant\/)?[0-9]+$/.test(variantId)
+      ? variantId.replace(/^gid:\/\/shopify\/ProductVariant\//, "") : variantId;
+    const existingIndex = variantKey ? variantIndexes.get(variantKey) : undefined;
     if (existingIndex === undefined) {
-      if (variantId) variantIndexes.set(variantId, aggregated.length);
+      if (variantKey) variantIndexes.set(variantKey, aggregated.length);
       aggregated.push({
         item: {
           ...item,

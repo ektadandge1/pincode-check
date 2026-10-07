@@ -14,8 +14,12 @@
   endif
   assign cod_enabled = block.settings.cod_enabled
   assign localization_country = localization.country.iso_code | default: 'US'
-  assign selected_country = customer.default_address.country_code | default: localization_country
-  assign saved_postal_code = customer.default_address.zip | default: ''
+   assign selected_country = localization_country
+   assign saved_postal_code = ''
+   if customer and customer.default_address
+     assign selected_country = customer.default_address.country_code | default: localization_country
+     assign saved_postal_code = customer.default_address.zip | default: ''
+   endif
   assign product_id_value = ''
   assign product_vendor_value = ''
   assign product_tags_json = '[]'
@@ -132,6 +136,8 @@
   data-line-style="dotted"
   data-template="modern-card"
   data-product-id="{{ product_id_value | escape }}"
+  data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
+  data-appearance-source="{{ block.settings.appearance_source | default: 'shop' }}"
   data-product-vendor="{{ product_vendor_value | escape }}"
   data-product-tags="{{ product_tags_json | escape }}"
   data-collection-handles="{{ collection_handles_json | escape }}"
@@ -323,10 +329,12 @@
   }
 </style>
 
+<script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
 <script>
   (() => {
+    const initialize = () => {
     const root = document.getElementById('pin-checker-{{ block_id }}');
-    if (!root || root.dataset.pincodeInitialized === 'true') return;
+    if (!root || !root.isConnected || root.dataset.pincodeInitialized === 'true') return;
     root.dataset.pincodeInitialized = 'true';
 
     const countrySelect = document.getElementById('pin-country-{{ block_id }}');
@@ -352,8 +360,8 @@
     const savedPostal = String(root.dataset.savedPostal || '').trim();
     const localizationCountry = String(root.dataset.localizationCountry || 'US').trim();
     const cartItemsElement = document.getElementById('pin-cart-items-{{ block_id }}');
-    const hasProduct = Boolean(String(root.dataset.productId || '').trim());
-    const productScope = root.closest('.shopify-section, [data-section]') || document;
+    const hasProduct = root.dataset.surface !== 'cart' && Boolean(String(root.dataset.productId || '').trim());
+    const productScope = document;
     const eventController = new AbortController();
     const eventOptions = { signal: eventController.signal };
 
@@ -364,8 +372,12 @@
     let activeController = null;
     let requestVersion = 0;
     let countdownTimer = null;
-    let cartAttributeWrite = Promise.resolve();
-    let estimateInvalidated = false;
+    let expiryTimer = null;
+    let estimateToken = null;
+    let cartSnapshot = '';
+    let policyController = null;
+    let policyRefreshTimer = null;
+    let disposed = false;
 
     const parseJsonArray = (value) => {
       try {
@@ -377,7 +389,7 @@
     };
 
     const applyStorefrontStyle = (style) => {
-      if (!style || typeof style !== 'object') return;
+      if (root.dataset.appearanceSource === 'block' || !style || typeof style !== 'object') return;
       const fonts = {
         system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         inter: "Inter, system-ui, sans-serif",
@@ -393,17 +405,17 @@
       if (Number.isFinite(Number(style.heading_size))) root.style.setProperty('--pc-heading-size', `${Number(style.heading_size)}px`);
       if (Number.isFinite(Number(style.border_radius))) root.style.setProperty('--pc-radius', `${Number(style.border_radius)}px`);
       setColor('--pc-heading', style.text_color);
-      setColor('--pc-sub', style.muted_color);
       setColor('--pc-focus', style.accent_color);
       setColor('--pc-btn', style.button_color);
       setColor('--pc-btn-text', style.button_text_color);
       setColor('--pc-card', style.card_background);
+      setColor('--pc-journey-bg', style.journey_background);
+      setColor('--pc-journey-active', style.journey_active_color);
+      setColor('--pc-sub', style.muted_color);
       setColor('--pc-field-bg', style.field_background);
       setColor('--pc-input-border', style.field_border_color);
       setColor('--pc-result-bg', style.result_background);
       setColor('--pc-result-text', style.result_text_color);
-      setColor('--pc-journey-bg', style.journey_background);
-      setColor('--pc-journey-active', style.journey_active_color);
       setColor('--pc-journey-line', style.journey_line_color);
       setColor('--pc-countdown-bg', style.countdown_background);
       setColor('--pc-countdown-digit', style.countdown_digit_color);
@@ -442,6 +454,7 @@
       if (collections.length) params.set('collections', collections.join('|'));
       const variantId = getSelectedVariantId();
       if (variantId) params.set('variantId', variantId);
+      params.set('qty', String(getQuantity()));
       try {
         const cartItems = JSON.parse(cartItemsElement ? cartItemsElement.textContent : '[]');
         if (Array.isArray(cartItems) && cartItems.length) params.set('cartItems', JSON.stringify(cartItems));
@@ -451,73 +464,25 @@
       return params;
     };
 
-    const getAddToCartButtons = () => hasProduct ? Array.from(productScope.querySelectorAll([
-      'form[action*="/cart/add"] button[type="submit"]',
-      'form[data-type="add-to-cart-form"] button[type="submit"]',
+    const getAddToCartButtons = () => hasProduct ? Array.from(window.incodeThemeContext.productForm(root)?.querySelectorAll([
+      'button[type="submit"]',
       'button[name="add"]',
       '.product-form__submit'
-    ].join(','))) : [];
+    ].join(',')) || []) : [];
 
     const setAddToCartDisabled = (disabled) => {
       addToCartDisabled = disabled;
-      getAddToCartButtons().forEach((submitButton) => {
-        if (disabled) {
-          submitButton.dataset.pincodeAtcDisabled = 'true';
-          if (!submitButton.hasAttribute('aria-disabled')) {
-            submitButton.dataset.pincodeAriaOwned = 'true';
-            submitButton.setAttribute('aria-disabled', 'true');
-          }
-          return;
-        }
-        delete submitButton.dataset.pincodeAtcDisabled;
-        if (submitButton.dataset.pincodeAriaOwned === 'true') {
-          if (submitButton.getAttribute('aria-disabled') === 'true') {
-            submitButton.removeAttribute('aria-disabled');
-          }
-          delete submitButton.dataset.pincodeAriaOwned;
-        }
-      });
-    };
-
-    const toVariantGid = (value) => {
-      const raw = String(value || '').trim();
-      if (!raw) return '';
-      if (raw.indexOf('gid://shopify/ProductVariant/') === 0) {
-        return raw;
-      }
-      const numeric = raw.replace(/\D/g, '');
-      return numeric ? `gid://shopify/ProductVariant/${numeric}` : '';
+      window.incodeThemeContext.lockButtons(root, getAddToCartButtons(), disabled);
     };
 
     const getSelectedVariantId = () => {
       if (!hasProduct) return '';
-      const search = [
-        'form[action*="/cart/add"] [name="id"]',
-        'form[action*="/cart/add"] [name="variant"]',
-        'form[data-type="add-to-cart-form"] [name="id"]',
-        'input[name="id"]',
-        'select[name="id"]',
-        '[name="id"][type="hidden"]',
-        '[data-variant-id]'
-      ];
-
-      for (const selector of search) {
-        const el = productScope.querySelector(selector);
-        if (!el) continue;
-        const value = el.value || (el.dataset && el.dataset.variantId) || '';
-        const gid = toVariantGid(value);
-        if (gid) return gid;
-      }
-
-      const fromUrl = new URLSearchParams(window.location.search).get('variant');
-      return toVariantGid(fromUrl);
+      return window.incodeThemeContext.productContext(root).variantId;
     };
 
     const getQuantity = () => {
       if (!hasProduct) return 1;
-      const quantityInput = productScope.querySelector('form[action*="/cart/add"] [name="quantity"], form[data-type="add-to-cart-form"] [name="quantity"], input[name="quantity"]');
-      const parsed = Number(quantityInput && quantityInput.value ? quantityInput.value : '1');
-      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+      return window.incodeThemeContext.productContext(root).quantity;
     };
 
     const setResult = (message, state) => {
@@ -528,6 +493,8 @@
     };
 
     const clearDetails = () => {
+      clearTimeout(expiryTimer);
+      expiryTimer = null;
       if (countdownTimer) window.clearInterval(countdownTimer);
       countdownTimer = null;
       if (journey) journey.hidden = true;
@@ -592,9 +559,10 @@
         const item = document.createElement('li');
         const mark = document.createElement('span');
         const copy = document.createElement('span');
-        const state = document.createElement('strong');
-        const available = data[field];
-        const iconStyle = ['number', 'delivery', 'duotone', 'circle', 'minimal', 'emoji'].includes(root.dataset.iconStyle)
+         const state = document.createElement('strong');
+         const available = data[field];
+         if (!available) return;
+         const iconStyle = ['number', 'delivery', 'duotone', 'circle', 'minimal', 'emoji'].includes(root.dataset.iconStyle)
           ? root.dataset.iconStyle
           : 'number';
         const serviceKind = field === 'local_delivery_available' ? 'local' : field === 'pickup_available' ? 'pickup' : 'standard';
@@ -631,12 +599,14 @@
     };
 
     const renderMethodSelection = (data) => {
+      const methodVersion = requestVersion;
       const shippingMethods = Array.isArray(data.shipping_methods)
         ? data.shipping_methods.filter((method) => method && method.handle && method.name && method.estimated_date)
         : [];
       if (!shippingMethods.length) return;
 
       const selectMethod = (method) => {
+        if (disposed || methodVersion !== requestVersion) return;
         const dispatchLabel = method.dispatch_date_label || formatJourneyDate(method.dispatch_date) || method.dispatch_date;
         const deliveryLabel = method.estimated_date_label || formatJourneyDate(method.estimated_date) || method.estimated_date;
         const estimateSummary = `${method.name}. ${root.dataset.methodDispatchLabel}: ${dispatchLabel}. ${root.dataset.methodDeliveryLabel}: ${deliveryLabel}.`;
@@ -723,21 +693,11 @@
 
     const renderCountdown = (data) => {
       if (root.dataset.showCountdown !== 'true' || root.dataset.countdownVisible === 'false') return;
-      const secondsRemaining = Number(data.seconds_until_cutoff ?? data.cutoff_seconds_remaining);
-      const rawCutoff = data.cutoff_at || data.delivery_cutoff_at || data.cutoff_timestamp || data.delivery_cutoff || data.cutoff_time || data.cutoffAt || data.deliveryCutoffAt;
-      let cutoffTime = Number.isFinite(secondsRemaining) && secondsRemaining > 0
-        ? Date.now() + (secondsRemaining * 1000)
-        : NaN;
-      if (!Number.isFinite(cutoffTime) && (typeof rawCutoff === 'string' || typeof rawCutoff === 'number')) {
-        const normalizedCutoff = typeof rawCutoff === 'number' && rawCutoff < 1000000000000
-          ? rawCutoff * 1000
-          : rawCutoff;
-        cutoffTime = new Date(normalizedCutoff).getTime();
-      }
-      if (!Number.isFinite(cutoffTime)) return;
+      const cutoffTime = window.incodeThemeContext.cutoffTime(data);
+      if (!Number.isFinite(cutoffTime) || cutoffTime <= Date.now()) return;
 
       const updateCountdown = () => {
-        const remaining = Math.max(0, Math.floor((cutoffTime - Date.now()) / 1000));
+        const remaining = Math.max(0, Math.ceil((cutoffTime - Date.now()) / 1000));
         if (remaining === 0) {
           countdownLabel.hidden = true;
           countdownValue.textContent = root.dataset.countdownExpired;
@@ -766,59 +726,50 @@
       if (cutoffTime > Date.now()) countdownTimer = window.setInterval(updateCountdown, 1000);
     };
 
-    const renderDetails = (data) => {
-      clearDetails();
-      if (!data || data.available !== true) return;
+     const renderDetails = (data) => {
+       clearDetails();
+       if (!data) return;
+       const hasExpiry = data.estimated_date || data.estimated_date_max || data.delivery_date_range
+         || data.cutoff_at || data.delivery_cutoff_at || data.cutoff_timestamp
+         || data.seconds_until_cutoff !== undefined || data.cutoff_seconds_remaining !== undefined;
+       if (hasExpiry) {
+         const expiryVersion = requestVersion;
+         expiryTimer = setTimeout(() => {
+           if (!disposed && root.isConnected && expiryVersion === requestVersion) runCheck();
+         }, window.incodeThemeContext.expiryDelay(data));
+       }
+       if (data.available !== true) return;
       root.dataset.countdownVisible = String(data.countdown_visible !== false);
       renderJourney(data);
       renderShippingOptions(data);
       renderMethodSelection(data);
       renderCountdown(data);
-      details.hidden = options.hidden && methods.hidden && countdown.hidden && journey.hidden;
+       details.hidden = options.hidden && methods.hidden && countdown.hidden && journey.hidden;
     };
 
-    const estimateAttributeKeys = [
-      '_incode_estimated_date',
-      '_incode_estimated_date_max',
-      '_incode_estimated_date_label',
-      '_incode_estimated_date_max_label',
-      '_incode_delivery_date_range',
-      '_incode_dispatch_date',
-      '_incode_postal_code',
-      '_incode_country',
-      '_incode_eta_message'
-    ];
-
-    const updateCartAttributes = (attributes) => {
-      const write = async () => {
-        const response = await fetch('/cart/update.js', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          credentials: 'same-origin',
-          keepalive: true,
-          body: JSON.stringify({ attributes })
-        });
-        if (!response.ok) throw new Error('Unable to update delivery estimate attributes');
-      };
-      cartAttributeWrite = cartAttributeWrite.catch(() => {}).then(write);
-      return cartAttributeWrite;
-    };
-
-    const clearPersistedEstimate = () => {
-      if (estimateInvalidated) return cartAttributeWrite;
-      estimateInvalidated = true;
-      return updateCartAttributes(
-        Object.fromEntries(estimateAttributeKeys.map((key) => [key, '']))
-      ).catch((error) => {
-        estimateInvalidated = false;
-        throw error;
-      });
+     const clearPersistedEstimate = () => {
+       if (root.dataset.surface !== 'cart') return Promise.resolve();
+       const intent = window.incodeThemeContext.invalidateEstimate(root);
+      estimateToken = intent.token;
+      cartSnapshot = '';
+      return intent.write;
     };
 
     const persistEstimate = (data, country, postalCode) => {
       if (!data || data.available !== true || !data.estimated_date) return clearPersistedEstimate();
-      estimateInvalidated = false;
-      const attributes = {
+      const currentVersion = requestVersion;
+      const snapshot = cartSnapshot;
+       if (root.dataset.surface !== 'cart') return Promise.resolve();
+       const snapshotItems = snapshot ? JSON.parse(snapshot) : [];
+       const completeCart = snapshotItems.length > 0
+         && data.cart_complete === true && Number(data.cart_items_checked) === snapshotItems.length;
+       if (!completeCart) return clearPersistedEstimate();
+       const attributes = {
+        ...window.incodeThemeContext.emptyEstimate(),
+        '_incode_country': String(data.country || country || ''),
+        '_incode_postal_code': String(data.postal_code || postalCode || '')
+      };
+       Object.assign(attributes, {
         '_incode_estimated_date': String(data.estimated_date),
         '_incode_estimated_date_max': String(data.estimated_date_max || data.estimated_date),
         '_incode_estimated_date_label': String(data.estimated_date_label || data.estimated_date),
@@ -827,9 +778,11 @@
         '_incode_dispatch_date': String(data.dispatch_date || ''),
         '_incode_postal_code': String(data.postal_code || postalCode || ''),
         '_incode_country': String(data.country || country || ''),
-        '_incode_eta_message': String(data.message || '').slice(0, 500)
-      };
-      return updateCartAttributes(attributes);
+        '_incode_eta_message': String(data.message || '').slice(0, 500),
+         '_incode_eta_validation': JSON.stringify({ v: 1, scope: 'cart-postal', country: attributes._incode_country, postal_code: attributes._incode_postal_code, items: snapshotItems, checked_at: new Date().toISOString(), expires_at: new Date(Date.now() + window.incodeThemeContext.expiryDelay(data)).toISOString() })
+       });
+       return window.incodeThemeContext.queueAttributes(estimateToken, attributes,
+         () => currentVersion === requestVersion && !disposed && root.isConnected, snapshot);
     };
 
     const patterns = {
@@ -902,15 +855,24 @@
     };
 
     const initPolicy = async () => {
+      const currentVersion = requestVersion;
+      policyController?.abort();
+      const controller = new AbortController();
+      policyController = controller;
       try {
         const query = productContextParams();
         query.set('init', '1');
+        if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
+        if (currentVersion !== requestVersion || disposed) return;
+
         const response = await fetch(`/apps/delivery-checker?${query.toString()}`, {
           method: 'GET',
-          headers: { Accept: 'application/json' }
+          headers: { Accept: 'application/json' },
+          signal: controller.signal
         });
         if (!response.ok) return;
         const data = await response.json();
+        if (currentVersion !== requestVersion || disposed) return;
         applyStorefrontStyle(data.storefront_style);
         applyPolicyFrom(data);
         if (data.enabled === false) {
@@ -931,10 +893,17 @@
     };
 
     const runCheck = async () => {
+      clearTimeout(policyRefreshTimer);
+      policyRefreshTimer = null;
       requestVersion += 1;
       const currentVersion = requestVersion;
       if (activeController) activeController.abort();
       activeController = new AbortController();
+      const controller = activeController;
+      policyController?.abort();
+      button.disabled = false;
+      pinUnlocked = false;
+      applyAddToCartPolicy(undefined);
       const country = normalizeCountry(countrySelect && countrySelect.value);
       const pin = normalizePostalCode(country, pinInput.value || '');
       pinInput.value = pin;
@@ -958,12 +927,14 @@
         query.set('country', country);
         query.set('postal_code', pin);
         query.set('cod', cod ? '1' : '0');
-        query.set('qty', String(getQuantity()));
+        if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
+        if (currentVersion !== requestVersion || disposed) return;
+        cartSnapshot = root.dataset.surface === 'cart' ? query.get('cartItems') : '';
 
         const response = await fetch(`/apps/delivery-checker?${query.toString()}`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
-          signal: activeController.signal
+          signal: controller.signal
         });
 
         const data = await response.json();
@@ -1016,6 +987,7 @@
 
     button.addEventListener('click', runCheck, eventOptions);
     const clearStaleResult = () => {
+      policyController?.abort();
       requestVersion += 1;
       if (activeController) {
         activeController.abort();
@@ -1072,16 +1044,6 @@
         pinInput.focus();
       }, eventOptions);
     }
-    productScope.addEventListener('change', (event) => {
-      if (hasProduct && event.target && event.target.matches('[name="id"], [name="variant"], [name="quantity"]')) {
-        clearStaleResult();
-      }
-    }, eventOptions);
-    productScope.addEventListener('input', (event) => {
-      if (hasProduct && event.target && event.target.matches('[name="quantity"]')) {
-        clearStaleResult();
-      }
-    }, eventOptions);
     pinInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
@@ -1106,10 +1068,16 @@
     });
     if (hasProduct) buttonObserver.observe(productScope, { childList: true, subtree: true });
 
-    const cleanup = () => {
+     const cleanup = () => {
+       if (disposed) return;
+       disposed = true;
+      clearTimeout(policyRefreshTimer);
+      policyController?.abort();
       requestVersion += 1;
       if (activeController) activeController.abort();
       if (countdownTimer) window.clearInterval(countdownTimer);
+      clearTimeout(expiryTimer);
+      void window.incodeThemeContext.releaseEstimate(root).catch(() => {});
       setAddToCartDisabled(false);
       buttonObserver.disconnect();
       eventController.abort();
@@ -1117,6 +1085,11 @@
     document.addEventListener('shopify:section:unload', (event) => {
       if (event.target instanceof Element && event.target.contains(root)) cleanup();
     }, eventOptions);
+    window.incodeThemeContext.watch(root, () => {
+      clearStaleResult();
+      clearTimeout(policyRefreshTimer);
+      policyRefreshTimer = setTimeout(initPolicy, 100);
+    }, cleanup);
 
     setSavedLocationActive(Boolean(savedPostal));
     updateCountryFlags();
@@ -1126,8 +1099,22 @@
         && root.dataset.savedLocationActive === 'true'
         && pinInput.value === savedPostal
         && !root.hidden
+        && !disposed
+        && requestVersion === 0
       ) runCheck();
     });
+    };
+    if (window.incodeThemeContext) initialize();
+    else {
+      const ready = () => {
+        if (!window.incodeThemeContext) return;
+        document.removeEventListener('incode:theme-context-ready', ready);
+        document.removeEventListener('DOMContentLoaded', ready);
+        initialize();
+      };
+      document.addEventListener('incode:theme-context-ready', ready);
+      document.addEventListener('DOMContentLoaded', ready, { once: true });
+    }
   })();
 </script>
 
@@ -1141,6 +1128,7 @@
     "templates": ["product", "collection", "index", "cart", "search", "blog", "article", "page", "list-collections", "404", "password"]
   },
   "settings": [
+    { "type": "select", "id": "appearance_source", "label": "Appearance source", "default": "shop", "info": "Use shared app appearance or customize this block independently in the Theme Editor.", "options": [{ "value": "shop", "label": "Shared shop settings" }, { "value": "block", "label": "This block's settings" }] },
     {
       "type": "text",
       "id": "heading",

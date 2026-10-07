@@ -30,7 +30,7 @@ export default function PrivacyPolicy() {
   return (
     <PolarisProvider i18n={enTranslations}>
       <div className="incode-public">
-      <Page title="Privacy Policy" subtitle="Last updated: September 28, 2026" narrowWidth backAction={{ content: "Incode Track", url: "/" }}>
+       <Page title="Privacy Policy" subtitle="Last updated: October 6, 2026" narrowWidth backAction={{ content: "Incode Track", url: "/" }}>
         <Layout>
           <Layout.Section>
             <Card>
@@ -45,12 +45,30 @@ export default function PrivacyPolicy() {
                     coverage, delivery-day rules, COD availability, cutoff time,
                     weekend settings, and holiday dates.
                   </Text>
-                  <Text as="p">
-                    The app does not store customer names, addresses, emails,
-                    phone numbers, orders, payments, or checkout information.
-                    Storefront shoppers enter a country and postal code to receive an
-                    immediate delivery availability response. Lookup analytics retain only
-                    a shortened postal-code region, not the complete shopper entry.
+                   <Text as="p">
+                      Shoppers provide a country and postal code for delivery checks.
+                     Lookup analytics store a shortened postal-code region, product and
+                     variant identifiers, availability results, and timestamps. They are
+                     not linked to a customer identifier. The app database does not store
+                     shopper names, full delivery addresses, emails, payments, or orders.
+                      Shopify authentication sessions can contain merchant account identity
+                      and access credentials needed to operate the app.
+                    </Text>
+                    <Text as="p">
+                      Import processing can retain failed CSV row values and error details.
+                      Merchant-created delivery messages, pickup instructions, targeting values,
+                      and other free-text settings are stored as configured. Headless API tokens
+                      are stored only as hashes with a safe prefix; token scopes, origins, status,
+                      expiry and usage metadata are stored, together with shop- and token-scoped
+                      rate-limit counters. Do not upload customer lists or put personal data in
+                      imports or custom messages.
+                    </Text>
+                   <Text as="p">
+                     When enabled, storefront blocks read a logged-in shopper&apos;s saved
+                     address from Shopify. The full delivery postal code and estimate can
+                     be written to Shopify cart attributes and carried to order attributes
+                     for post-purchase displays. These records remain in Shopify and are
+                     managed under the merchant&apos;s Shopify data policies.
                   </Text>
                 </BlockStack>
 
@@ -81,7 +99,12 @@ export default function PrivacyPolicy() {
                     webhook, shop-owned app data is deleted from the app
                     database. The app also responds to Shopify mandatory privacy
                     webhooks for customer data requests and customer redaction
-                    requests. Lookup analytics are retained for up to 90 days.
+                     requests. There is no customer-linked dataset in the app database
+                     to export or delete for an individual shopper. Customer requests
+                     concerning Shopify cart or order records should be handled by the
+                     merchant in Shopify. Analytics cleanup targets records older than
+                     90 days during lookup activity; inactive shops may retain older
+                     records until cleanup or shop deletion occurs.
                   </Text>
                 </BlockStack>
 
@@ -92,8 +115,17 @@ export default function PrivacyPolicy() {
                   <Text as="p">
                     The app uses Shopify OAuth, session-token based embedded app
                     authentication, App Bridge, HTTPS in production, and Shopify
-                    webhook verification. Production hosting uses encrypted
-                    transport, restricted database access, and encrypted backups.
+                     webhook verification. Headless API tokens are stored as hashes;
+                     private tokens should never be exposed in a shopper browser.
+                      Hosting access controls, backup retention, and restoration policies
+                      must be maintained by the app operator.
+                  </Text>
+                  <Text as="p">
+                    Hosting and database providers may retain operational error logs, backups,
+                    and request metadata under their configured policies. The app does not
+                    intentionally log request bodies, raw API tokens, or credentials. Shop
+                    deletion webhooks do not erase provider backups or third-party logs; the
+                    operator must maintain separate retention and redaction procedures.
                   </Text>
                 </BlockStack>
 

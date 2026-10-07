@@ -1,7 +1,11 @@
 {% liquid
   assign service_id = block.id | replace: '-', ''
-  assign service_country = customer.default_address.country_code | default: localization.country.iso_code | default: 'US'
-  assign service_postal = customer.default_address.zip | default: ''
+   assign service_country = localization.country.iso_code | default: 'US'
+   assign service_postal = ''
+   if customer and customer.default_address
+     assign service_country = customer.default_address.country_code | default: service_country
+     assign service_postal = customer.default_address.zip | default: ''
+   endif
   assign service_product_id = product.id | default: ''
   assign service_cart_items = '[]'
   if template.name == 'cart' and cart.item_count > 0
@@ -43,6 +47,7 @@
     id="incode-service-card-{{ service_id }}"
     class="incode-service-card"
     data-product-id="{{ service_product_id | escape }}"
+    data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
     data-country="{{ service_country | escape }}"
     data-show-local="{{ block.settings.show_local_delivery }}"
     data-show-pickup="{{ block.settings.show_store_pickup }}"
@@ -114,22 +119,24 @@
 <style>
   .incode-service-card,
   .incode-service-card * { box-sizing: border-box; }
-  .incode-service-card {
+  #incode-service-card-{{ service_id }} {
     --isc-accent: {{ block.settings.accent_color | default: '#1f4f91' }};
     --isc-surface: {{ block.settings.background_color | default: '#ffffff' }};
     --isc-option: {{ block.settings.option_background | default: '#fff8e8' }};
     --isc-text: {{ block.settings.text_color | default: '#172033' }};
+    --isc-radius: {{ block.settings.corner_radius | default: 16 }}px;
     width: min(100%, 680px);
     margin: 18px auto;
     padding: 18px;
     border: 1px solid color-mix(in srgb, var(--isc-accent) 22%, #d8dee8);
-    border-radius: {{ block.settings.corner_radius | default: 16 }}px;
+    border-radius: var(--isc-radius);
     background: radial-gradient(circle at top left, color-mix(in srgb, var(--isc-accent) 8%, transparent), transparent 38%), var(--isc-surface);
     box-shadow: 0 18px 46px rgba(17, 24, 39, .1);
     color: var(--isc-text);
     font-family: inherit;
   }
-  .incode-service-card[hidden] { display: none !important; }
+  .incode-service-card[hidden], .incode-service-card [hidden] { display: none !important; }
+  .incode-service-card { min-width: 0; max-width: 100%; container-type: inline-size; }
   .incode-service-card__intro { display: flex; gap: 12px; align-items: center; }
   .incode-service-card__intro-icon,
   .incode-service-card__option-icon,
@@ -202,7 +209,7 @@
   @keyframes incode-service-block-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
   @keyframes incode-service-block-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
   @media (max-width: 640px) {
-    .incode-service-card { margin: 14px auto; padding: 14px; border-radius: min({{ block.settings.corner_radius | default: 16 }}px, 14px); }
+    .incode-service-card { margin: 14px auto; padding: 14px; border-radius: min(var(--isc-radius), 14px); }
     .incode-service-card__form { grid-template-columns: 1fr; }
     .incode-service-card button { width: 100%; }
   }
@@ -211,16 +218,27 @@
     .incode-service-card__eta { grid-template-columns: 30px minmax(0, 1fr); }
     .incode-service-card__eta > b { grid-column: 2; }
   }
+  @container (max-width: 580px) {
+    .incode-service-card__form { grid-template-columns: minmax(0, 1fr); }
+    .incode-service-card button { width: 100%; white-space: normal; }
+  }
+  @container (max-width: 340px) {
+    .incode-service-card__options { grid-template-columns: minmax(0, 1fr); }
+    .incode-service-card__eta { grid-template-columns: 30px minmax(0, 1fr); }
+    .incode-service-card__eta > b { grid-column: 2; white-space: normal; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .incode-service-card *, .incode-service-card *::before, .incode-service-card *::after { animation: none !important; transition: none !important; }
   }
 </style>
 
 {% unless service_empty_cart %}
+<script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
 <script>
   (() => {
+    const initialize = () => {
     const root = document.getElementById('incode-service-card-{{ service_id }}');
-    if (!root || root.dataset.initialized === 'true') return;
+    if (!root || !root.isConnected || root.dataset.initialized === 'true') return;
     root.dataset.initialized = 'true';
     const country = root.querySelector('select');
     const postal = root.querySelector('input');
@@ -231,15 +249,23 @@
     const pickup = root.querySelector('[data-service-pickup]');
     const eta = root.querySelector('[data-service-eta]');
     const cartItems = root.querySelector('[data-service-cart-items]');
+    let version = 0;
+    let active = null;
+    const invalidate = () => {
+      version += 1;
+      active?.abort();
+      active = null;
+      button.disabled = false;
+      result.hidden = true;
+      setStatus('', '');
+    };
+    const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
 
     const variantGid = () => {
-      const element = document.querySelector('form[action*="/cart/add"] [name="id"], [name="id"][type="hidden"], select[name="id"]');
-      const raw = String(element?.value || new URLSearchParams(location.search).get('variant') || '');
-      return /^\d+$/.test(raw) ? `gid://shopify/ProductVariant/${raw}` : raw.startsWith('gid://shopify/ProductVariant/') ? raw : '';
+      return window.incodeThemeContext.productContext(root).variantId;
     };
     const quantity = () => {
-      const value = Number(document.querySelector('form[action*="/cart/add"] [name="quantity"], input[name="quantity"]')?.value || 1);
-      return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+      return window.incodeThemeContext.productContext(root).quantity;
     };
     const flag = () => {
       const code = String(country.value || '').toUpperCase();
@@ -293,6 +319,10 @@
       pickupCopy.textContent = data.pickup_instructions || '';
     };
     const check = async () => {
+      invalidate();
+      const current = version;
+      const controller = new AbortController();
+      active = controller;
       if (!postal.value.trim()) {
         result.hidden = true;
         setStatus('Enter a valid PIN or ZIP code.', 'error');
@@ -303,26 +333,43 @@
       result.hidden = true;
       setStatus('Checking delivery options...', 'loading');
       try {
-        const response = await fetch(`/apps/delivery-checker?${params().toString()}`, { headers: { Accept: 'application/json' } });
+        const query = params();
+        if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
+        if (current !== version) return;
+        const response = await fetch(`/apps/delivery-checker?${query.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
         const data = await response.json();
+        if (current !== version || !root.isConnected) return;
         if (!response.ok) {
           setStatus(data.message || 'Unable to check this PIN or ZIP code right now.', 'error');
           return;
         }
         setStatus('', '');
         render(data);
-      } catch {
+      } catch (error) {
+        if (current !== version || error.name === 'AbortError') return;
         setStatus('Network issue while checking delivery options. Please retry.', 'error');
       } finally {
-        button.disabled = false;
+        if (current === version) { button.disabled = false; active = null; }
       }
     };
-    button.addEventListener('click', check);
-    postal.addEventListener('keydown', (event) => { if (event.key === 'Enter') check(); });
-    postal.addEventListener('input', () => { result.hidden = true; setStatus('', ''); });
-    country.addEventListener('change', () => { result.hidden = true; setStatus('', ''); flag(); });
+    button.addEventListener('click', check, eventOptions);
+    postal.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); check(); } }, eventOptions);
+    postal.addEventListener('input', invalidate, eventOptions);
+    country.addEventListener('change', () => { invalidate(); flag(); }, eventOptions);
     flag();
     if (root.dataset.autoCheck === 'true' && postal.value.trim()) check();
+    };
+    if (window.incodeThemeContext) initialize();
+    else {
+      const ready = () => {
+        if (!window.incodeThemeContext) return;
+        document.removeEventListener('incode:theme-context-ready', ready);
+        document.removeEventListener('DOMContentLoaded', ready);
+        initialize();
+      };
+      document.addEventListener('incode:theme-context-ready', ready);
+      document.addEventListener('DOMContentLoaded', ready, { once: true });
+    }
   })();
 </script>
 {% endunless %}

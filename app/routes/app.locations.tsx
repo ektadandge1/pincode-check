@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useBeforeUnload, useBlocker, useFetcher, useLoaderData } from "react-router";
 import {
   Badge,
   Banner,
@@ -20,6 +20,8 @@ import prisma from "../db.server";
 import { resolvePlanAccess } from "../services/plan-access.server";
 import { NO_PLAN_ACCESS } from "../services/plans.server";
 import { requireActiveBilling } from "../services/billing.server";
+import { clearDeliveryCheckCaches } from "../services/delivery-checker.server";
+import { matchesPostalPatternsCsv, normalizeCountryCode, normalizePostalCode, validatePostalCode } from "../utils/delivery.server";
 
 type ShopifyLocation = {
   id: string;
@@ -34,7 +36,7 @@ type ShopifyLocation = {
   } | null;
 };
 
-type ActionData = { ok: boolean; message: string };
+type ActionData = { ok: boolean; message: string; previewKey?: string; postalCode?: string; localDelivery?: boolean };
 
 const ICON_OPTIONS = [
   { label: "Standard checkmarks", value: "number" },
@@ -80,19 +82,6 @@ function optionalDays(value: FormDataEntryValue | null): number | null {
 
 function isHex(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value);
-}
-
-function previewPostalMatches(postalCode: string, patterns: string): boolean {
-  const value = postalCode.trim();
-  return patterns.split(/[\n,]/).map((pattern) => pattern.trim()).filter(Boolean).some((pattern) => {
-    if (pattern.endsWith("*")) return value.startsWith(pattern.slice(0, -1));
-    const range = pattern.match(/^(\d+)\s*-\s*(\d+)$/);
-    if (range && /^\d+$/.test(value)) {
-      const numeric = Number(value);
-      return numeric >= Number(range[1]) && numeric <= Number(range[2]);
-    }
-    return pattern.toLowerCase() === value.toLowerCase();
-  });
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -142,7 +131,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locations = rules.map((rule) => ({
       id: rule.shopifyLocationId,
       name: rule.name,
-      isActive: rule.enabled,
+      isActive: false,
       fulfillsOnlineOrders: false,
       address: null,
       rule,
@@ -158,6 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     access,
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shop: session.shop,
+    inventoryAwareEnabled: setting?.inventoryAwareEnabled ?? false,
     priorityMode: setting?.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
     iconStyle: ICON_OPTIONS.some((option) => option.value === setting?.storefrontIconStyle)
       ? setting?.storefrontIconStyle ?? "number"
@@ -177,6 +167,17 @@ export async function action({ request }: ActionFunctionArgs) {
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   const formData = await request.formData();
   const intent = String(formData.get("intent"));
+  if (intent === "simulate_postal") {
+    const previewKey = String(formData.get("previewKey") ?? "");
+    const countryRaw = String(formData.get("country") ?? "").trim().toUpperCase();
+    const country = normalizeCountryCode(countryRaw);
+    const postalCode = normalizePostalCode(country, String(formData.get("postalCode") ?? ""));
+    if (!/^[A-Z]{2}$/.test(countryRaw) || !validatePostalCode(country, postalCode)) {
+      return { ok: false, message: "Enter a valid postal code for the selected country.", previewKey } satisfies ActionData;
+    }
+    return { ok: true, message: "Postal pattern simulation only; inventory and delivery coverage are not verified.", previewKey, postalCode,
+      localDelivery: matchesPostalPatternsCsv(country, postalCode, String(formData.get("patterns") ?? "").replace(/\r?\n/g, ",")) } satisfies ActionData;
+  }
   if (intent !== "save_location" && intent !== "save_priority_mode" && intent !== "save_icon_style") {
     return { ok: false, message: "Unsupported action." } satisfies ActionData;
   }
@@ -193,6 +194,7 @@ export async function action({ request }: ActionFunctionArgs) {
       create: { shop: session.shop, locationPriorityMode: mode },
       update: { locationPriorityMode: mode },
     });
+    clearDeliveryCheckCaches(session.shop);
     return { ok: true, message: "Inventory location priority saved." } satisfies ActionData;
   }
 
@@ -226,6 +228,7 @@ export async function action({ request }: ActionFunctionArgs) {
         storefrontAnimation: serviceEffect,
       },
     });
+    clearDeliveryCheckCaches(session.shop);
     return { ok: true, message: "Storefront service icon style saved." } satisfies ActionData;
   }
 
@@ -283,6 +286,7 @@ export async function action({ request }: ActionFunctionArgs) {
       pickupInstructions,
     },
   });
+  clearDeliveryCheckCaches(session.shop);
   return { ok: true, message: `${name} saved.` } satisfies ActionData;
 }
 
@@ -333,31 +337,31 @@ function StorefrontLocationPreview({
     `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
   const hasShopperPostalCode = previewMode === "postal" && Boolean(postalCode.trim());
   const localOptionState = !hasShopperPostalCode ? "is-pending" : localDeliveryAvailable ? "is-available" : "is-unavailable";
-  const pickupOptionState = !hasShopperPostalCode ? "is-pending" : form.pickupEnabled ? "is-available" : "is-unavailable";
+  const pickupOptionState = !hasShopperPostalCode ? "is-pending" : routingEnabled && form.pickupEnabled ? "is-available" : "is-unavailable";
   return (
     <Card>
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
           <BlockStack gap="100">
             <Text as="h2" variant="headingMd">Storefront preview</Text>
-            <Text as="p" tone="subdued">Customer-facing delivery options for the current settings.</Text>
+            <Text as="p" tone="subdued">Illustrative service options, not a live storefront check.</Text>
           </BlockStack>
-          <Badge tone={routingEnabled ? "success" : "attention"}>{routingEnabled ? "Live sample" : "Setup preview"}</Badge>
+          <Badge tone="info">Simulated / not verified</Badge>
         </InlineStack>
         {!routingEnabled ? (
-          <Banner tone="warning" title="Enable this location to publish the result">
-            The preview uses this Shopify location so you can style the customer experience. Turn on ETA routing in the location settings on the left to use it in the storefront.
+          <Banner tone="warning" title="No eligible routing location selected">
+            This is a setup illustration. Live routing also requires an active online-fulfillment location, saved rules, inventory-aware estimates, and eligible product stock.
           </Banner>
         ) : null}
         <div className="incode-storefront-preview__hint">
           {previewMode === "automatic"
-            ? "Automatic ETA is visible immediately. Local delivery requires the shopper's postal code."
+            ? "No destination has been checked. Dates, coverage, stock, and checkout availability are not verified."
             : "This simulates a shopper entering a postal code. The warehouse address is never used as the shopper destination."}
         </div>
         <div className="incode-storefront-delivery-card">
           <div className="incode-storefront-delivery-card__header">
             <span>{hasShopperPostalCode ? <>Checked for <strong>{postalCode}</strong></> : previewMode === "automatic" ? "General delivery estimate" : "Enter PIN/ZIP to check services"}</span>
-            <span className="incode-storefront-delivery-card__check">✓ Available</span>
+            <span className="incode-storefront-delivery-card__check">Not verified</span>
           </div>
           <div className="incode-storefront-delivery-card__eta">
             <span className="incode-storefront-delivery-card__eta-icon">⌁</span>
@@ -365,21 +369,21 @@ function StorefrontLocationPreview({
               <strong>Estimated delivery</strong>
               <span>{form.processingDays || "General"} processing + {form.transitDays || "general"} transit time</span>
             </div>
-            <b>Oct 8–10</b>
+            <b>Date not calculated</b>
           </div>
           <div className="incode-storefront-delivery-card__options">
             <div className={`${localOptionState} incode-service-option--${serviceEffect}`} style={{ "--service-icon-color": serviceIconColor, "--service-background": serviceBackground } as React.CSSProperties}>
               <span className="incode-storefront-delivery-card__option-icon"><ServiceIcon kind="local" style={iconStyle} /></span>
               <span>Local delivery</span>
-              <b>{hasShopperPostalCode ? (localDeliveryAvailable ? "Available" : "Not available") : "Check PIN/ZIP"}</b>
+              <b>{hasShopperPostalCode ? (localDeliveryAvailable ? "Pattern matched" : "Not matched") : "Check PIN/ZIP"}</b>
             </div>
             <div className={`${pickupOptionState} incode-service-option--${serviceEffect}`} style={{ "--service-icon-color": serviceIconColor, "--service-background": serviceBackground } as React.CSSProperties}>
               <span className="incode-storefront-delivery-card__option-icon"><ServiceIcon kind="pickup" style={iconStyle} /></span>
               <span>Store pickup</span>
-              <b>{hasShopperPostalCode ? (form.pickupEnabled ? "Available" : "Not available") : "Check PIN/ZIP"}</b>
+              <b>{hasShopperPostalCode ? (routingEnabled && form.pickupEnabled ? "Configured" : "Not enabled") : "Check PIN/ZIP"}</b>
             </div>
           </div>
-          <small className="incode-storefront-delivery-card__location">Fulfilled from {location.name}</small>
+          <small className="incode-storefront-delivery-card__location">Example location: {location.name}. Live selection requires eligible inventory; checkout is not validated here.</small>
         </div>
         <BlockStack gap="200">
           <Text as="p" tone="subdued" variant="bodySm">Add Local delivery & pickup independently where shoppers make a decision:</Text>
@@ -395,8 +399,9 @@ function StorefrontLocationPreview({
 }
 
 export default function LocationsPage() {
-  const { access, apiKey, shop, locations, priorityMode, iconStyle, serviceIconColor, serviceBackground, serviceEffect, locationError } = useLoaderData<typeof loader>();
+  const { access, apiKey, shop, locations, priorityMode, iconStyle, serviceIconColor, serviceBackground, serviceEffect, locationError, inventoryAwareEnabled } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
+  const preview = useFetcher<ActionData>();
   const isAdvanced = access.active;
   const [forms, setForms] = useState<Record<string, LocationForm>>(() => Object.fromEntries(locations.map((location) => [location.id, {
     enabled: location.rule?.enabled ?? location.isActive,
@@ -415,14 +420,18 @@ export default function LocationsPage() {
   const [selectedServiceEffect, setSelectedServiceEffect] = useState(serviceEffect);
   const [previewMode, setPreviewMode] = useState<"automatic" | "postal">("automatic");
   const [previewPostalCode, setPreviewPostalCode] = useState("10001");
-  const [checkedPreviewPostalCode, setCheckedPreviewPostalCode] = useState("");
+  const [previewCountry, setPreviewCountry] = useState("US");
+  const [appearanceSource, setAppearanceSource] = useState("shop");
+  const [themeAppearance, setThemeAppearance] = useState({ iconStyle: "delivery", color: "#1f4f91", background: "#fff8e8", effect: "soft" });
+  const [checkedPreviewKey, setCheckedPreviewKey] = useState("");
   const updateForm = (locationId: string, field: string, value: string | boolean) => {
+    setCheckedPreviewKey("");
     setForms((current) => ({
       ...current,
       [locationId]: { ...current[locationId], [field]: value },
       }));
   };
-  const configuredLocations = locations.filter((location) => forms[location.id]?.enabled && location.isActive);
+  const configuredLocations = locations.filter((location) => forms[location.id]?.enabled && location.isActive && location.fulfillsOnlineOrders);
   const previewLocations = [...configuredLocations].sort((a, b) => {
     const priorityDifference = Number(forms[a.id]?.priority ?? 100) - Number(forms[b.id]?.priority ?? 100);
     return priorityDifference;
@@ -430,8 +439,19 @@ export default function LocationsPage() {
   const previewLocation = previewLocations[0] ?? locations[0] ?? null;
   const previewForm = previewLocation ? forms[previewLocation.id] : null;
   const previewRoutingEnabled = Boolean(previewLocation && configuredLocations.some((location) => location.id === previewLocation.id));
-  const checkedPostalCode = previewMode === "postal" ? checkedPreviewPostalCode : "";
-  const previewLocalDelivery = Boolean(previewRoutingEnabled && checkedPostalCode && previewForm?.localDeliveryEnabled && previewPostalMatches(checkedPostalCode, String(previewForm.localDeliveryPostalCodesCsv ?? "")));
+  const previewResult = preview.state === "idle" && checkedPreviewKey && preview.data?.previewKey === checkedPreviewKey ? preview.data : null;
+  const checkedPostalCode = previewMode === "postal" && previewResult?.ok ? previewResult.postalCode ?? "" : "";
+  const previewLocalDelivery = Boolean(previewRoutingEnabled && checkedPostalCode && previewForm?.localDeliveryEnabled && previewResult?.localDelivery);
+  const dirty = selectedPriorityMode !== priorityMode || selectedIconStyle !== iconStyle || selectedServiceIconColor !== serviceIconColor || selectedServiceBackground !== serviceBackground || selectedServiceEffect !== serviceEffect || locations.some((location) => {
+    const form = forms[location.id];
+    const rule = location.rule;
+    return form.enabled !== (rule?.enabled ?? location.isActive) || form.priority !== String(rule?.priority ?? 100)
+      || form.processingDays !== String(rule?.processingDays ?? "") || form.transitDays !== String(rule?.transitDays ?? "")
+      || form.localDeliveryEnabled !== (rule?.localDeliveryEnabled ?? false) || form.localDeliveryPostalCodesCsv !== (rule?.localDeliveryPostalCodesCsv ?? "")
+      || form.pickupEnabled !== (rule?.pickupEnabled ?? false) || form.pickupInstructions !== (rule?.pickupInstructions ?? "");
+  });
+  useBeforeUnload((event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
+  useBlocker(() => dirty && !window.confirm("Leave with unsaved location changes?"));
   const locationsWithLocalDelivery = locations.filter((location) => forms[location.id]?.localDeliveryEnabled).length;
   const locationsWithPickup = locations.filter((location) => forms[location.id]?.pickupEnabled).length;
 
@@ -444,6 +464,7 @@ export default function LocationsPage() {
       <BlockStack gap="400">
         <Layout>
           <Layout.Section>
+        <BlockStack gap="400">
         <Card>
           <BlockStack gap="300">
             <BlockStack gap="100">
@@ -469,6 +490,7 @@ export default function LocationsPage() {
               <Badge tone={locations.length === 1 ? "success" : "info"}>{locations.length === 1 ? "Single location setup" : `${locations.length} Shopify locations`}</Badge>
               <Badge>{`${locationsWithLocalDelivery} local delivery enabled`}</Badge>
               <Badge>{`${locationsWithPickup} pickup enabled`}</Badge>
+              <Badge tone={inventoryAwareEnabled ? "success" : "attention"}>{inventoryAwareEnabled ? "Inventory-aware estimates enabled" : "Inventory-aware estimates disabled"}</Badge>
             </InlineStack>
             {locations.length === 1 ? (
               <Banner tone="info" title="One location? Keep it simple">
@@ -510,7 +532,7 @@ export default function LocationsPage() {
                 name="priorityMode"
                 value={selectedPriorityMode}
                 disabled={!isAdvanced}
-                onChange={setSelectedPriorityMode}
+                onChange={(value) => { setSelectedPriorityMode(value); setCheckedPreviewKey(""); }}
                 options={[
                   { label: "Manual priority (lowest number first)", value: "manual" },
                   { label: "Highest available stock", value: "highest_stock" },
@@ -527,7 +549,7 @@ export default function LocationsPage() {
             <FormLayout>
               <BlockStack gap="100">
                 <Text as="h2" variant="headingMd">Storefront service icons</Text>
-                <Text as="p" tone="subdued">Choose how Local delivery and Store pickup appear inside the delivery result on your storefront.</Text>
+                <Text as="p" tone="subdued">These shared shop styles also affect the main delivery widget. The independent Local delivery & pickup block uses its own Theme Editor settings; saving here does not change that block.</Text>
               </BlockStack>
               <Select
                 label="Icon style"
@@ -566,7 +588,7 @@ export default function LocationsPage() {
                 onChange={(value) => {
                   const mode = value as "automatic" | "postal";
                   setPreviewMode(mode);
-                  if (mode === "automatic") setCheckedPreviewPostalCode("");
+                  setCheckedPreviewKey("");
                 }}
                 options={[
                   { label: "Automatic estimate (no postal code)", value: "automatic" },
@@ -574,15 +596,21 @@ export default function LocationsPage() {
                 ]}
                 helpText="Use automatic mode for the product/cart first view. Use postal mode to test local delivery coverage."
               />
-              <TextField label="Shopper PIN / ZIP code" value={previewPostalCode} onChange={(value) => { setPreviewPostalCode(value); setCheckedPreviewPostalCode(""); }} disabled={previewMode !== "postal"} autoComplete="postal-code" helpText={previewMode === "postal" ? "Enter a shopper destination code, then click Check availability." : "Switch to postal-code check mode to test destination-specific services."} />
+              <TextField label="Country code" value={previewCountry} onChange={(value) => { setPreviewCountry(value); setCheckedPreviewKey(""); }} autoComplete="country" helpText="Two-letter country code; uses the same postal validation as live checks." />
+              <TextField label="Shopper PIN / ZIP code" value={previewPostalCode} onChange={(value) => { setPreviewPostalCode(value); setCheckedPreviewKey(""); }} disabled={previewMode !== "postal"} autoComplete="postal-code" />
               <TextField label="Example quantity" value="1" disabled autoComplete="off" helpText="Live routing uses the shopper's requested quantity." />
             </FormLayout.Group>
             {previewMode === "postal" ? (
               <InlineStack gap="200" blockAlign="center" wrap>
-                <Button variant="primary" disabled={!previewPostalCode.trim()} onClick={() => setCheckedPreviewPostalCode(previewPostalCode.trim())}>Check availability</Button>
+                <Button variant="primary" loading={preview.state !== "idle"} disabled={!previewPostalCode.trim()} onClick={() => {
+                  const key = String(Date.now());
+                  setCheckedPreviewKey(key);
+                  preview.submit({ intent: "simulate_postal", previewKey: key, country: previewCountry, postalCode: previewPostalCode, patterns: previewForm?.localDeliveryPostalCodesCsv ?? "" }, { method: "post" });
+                }}>Simulate postal match</Button>
                 <Text as="span" tone="subdued">{checkedPostalCode ? `Checked ${checkedPostalCode}` : "Local delivery and pickup results appear after checking."}</Text>
               </InlineStack>
             ) : null}
+            {previewResult ? <Banner tone={previewResult.ok ? "info" : "warning"}>{previewResult.message}</Banner> : null}
             {previewLocation && previewForm ? (
               <>
                 <div className="incode-location-preview">
@@ -592,13 +620,13 @@ export default function LocationsPage() {
                       <strong>{previewLocation.name}</strong>
                       <small>{selectedPriorityMode === "highest_stock" ? "Live storefront checks stock first; preview uses priority" : `Priority ${previewForm.priority || "100"} selected first`}</small>
                     </div>
-                    <Badge tone="success">Selected</Badge>
+                    <Badge tone="info">Example / not verified</Badge>
                   </div>
                   <div className="incode-location-preview__details">
                     <span><b>{previewForm.processingDays || "General"}</b> processing days</span>
                     <span><b>{previewForm.transitDays || "General"}</b> transit days</span>
-                    <span><b>{checkedPostalCode ? (previewLocalDelivery ? "Available" : "Not matched") : "Check required"}</b> local delivery</span>
-                    <span><b>{checkedPostalCode ? (previewForm.pickupEnabled ? "Available" : "Not enabled") : "Check required"}</b> store pickup</span>
+                    <span><b>{checkedPostalCode ? (previewLocalDelivery ? "Pattern matched" : "Not matched") : "Check required"}</b> local delivery</span>
+                    <span><b>{checkedPostalCode ? (previewRoutingEnabled && previewForm.pickupEnabled ? "Configured" : "Not enabled") : "Check required"}</b> store pickup</span>
                   </div>
                   {checkedPostalCode && previewForm.localDeliveryEnabled && !previewLocalDelivery ? <Text as="p" tone="subdued">This PIN / ZIP does not match the selected location local delivery patterns.</Text> : null}
                 </div>
@@ -660,9 +688,20 @@ export default function LocationsPage() {
           );
         })}
         {locations.length === 0 ? <Text as="p">No Shopify locations are available.</Text> : null}
+        </BlockStack>
           </Layout.Section>
           <Layout.Section variant="oneThird">
-            <div className="incode-locations-preview-column">
+             <div className="incode-locations-preview-column">
+              <Card><BlockStack gap="300">
+                <Select label="Preview appearance source" value={appearanceSource} onChange={setAppearanceSource} options={[{ label: "Shared shop style", value: "shop" }, { label: "Independent block: Theme Editor settings", value: "theme" }]} />
+                <Text as="p" tone="subdued">Illustrative only, not an exact theme rendering. Theme Editor values are not read by this page. Enter the block values below to approximate its appearance; these preview values are not saved.</Text>
+                {appearanceSource === "theme" ? <>
+                  <Select label="Block icons" options={ICON_OPTIONS} value={themeAppearance.iconStyle} onChange={(value) => setThemeAppearance((current) => ({ ...current, iconStyle: value }))} />
+                  <TextField label="Block accent color" value={themeAppearance.color} onChange={(value) => setThemeAppearance((current) => ({ ...current, color: value }))} autoComplete="off" />
+                  <TextField label="Block option background" value={themeAppearance.background} onChange={(value) => setThemeAppearance((current) => ({ ...current, background: value }))} autoComplete="off" />
+                  <Select label="Block effect" options={EFFECT_OPTIONS.filter((option) => option.value !== "route")} value={themeAppearance.effect} onChange={(value) => setThemeAppearance((current) => ({ ...current, effect: value }))} />
+                </> : null}
+              </BlockStack></Card>
               {previewLocation && previewForm ? (
                 <StorefrontLocationPreview
                   location={previewLocation}
@@ -671,10 +710,10 @@ export default function LocationsPage() {
                   localDeliveryAvailable={previewLocalDelivery}
                   previewMode={previewMode}
                   routingEnabled={previewRoutingEnabled}
-                  iconStyle={selectedIconStyle}
-                  serviceIconColor={selectedServiceIconColor}
-                  serviceBackground={selectedServiceBackground}
-                  serviceEffect={selectedServiceEffect}
+                  iconStyle={appearanceSource === "shop" ? selectedIconStyle : themeAppearance.iconStyle}
+                  serviceIconColor={appearanceSource === "shop" ? selectedServiceIconColor : themeAppearance.color}
+                  serviceBackground={appearanceSource === "shop" ? selectedServiceBackground : themeAppearance.background}
+                  serviceEffect={appearanceSource === "shop" ? selectedServiceEffect : themeAppearance.effect}
                   shop={shop}
                   apiKey={apiKey}
                 />

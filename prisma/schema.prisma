@@ -223,6 +223,8 @@ model ImportJob {
   errorSummary String?
   createdAt    DateTime @default(now())
 
+  errors ImportError[]
+
   @@index([shop, createdAt])
 }
 
@@ -233,6 +235,8 @@ model ImportError {
   rawRow      String
   reason      String
   createdAt   DateTime @default(now())
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
 
   @@index([importJobId])
 }

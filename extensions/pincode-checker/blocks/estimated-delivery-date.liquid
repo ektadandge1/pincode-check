@@ -35,6 +35,9 @@
   id="incode-eta-{{ eta_id }}"
   class="incode-eta"
   data-product-id="{{ eta_product_id | escape }}"
+  data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
+  data-surface="{{ template.name | escape }}"
+  data-appearance-source="{{ block.settings.appearance_source | default: 'shop' }}"
   data-product-vendor="{{ eta_vendor | escape }}"
   data-product-tags="{{ eta_tags | escape }}"
   data-collections="{{ eta_collections | escape }}"
@@ -53,7 +56,7 @@
       <span>{{ eta_heading | escape }}</span>
       <strong data-eta-range></strong>
     </h3>
-    {% if block.settings.show_journey %}
+    {% if block.settings.appearance_source != 'block' or block.settings.show_journey %}
       <div class="incode-eta__journey" aria-label="{{ 'automatic_eta.journey_aria_label' | t | escape }}">
         <div class="incode-eta__step is-active">
           <span class="incode-eta__marker" aria-hidden="true">
@@ -95,6 +98,9 @@
     --eta-heading-size: 17px;
     box-sizing: border-box;
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
     margin: 14px 0;
     padding: 18px;
     border: 1px solid color-mix(in srgb, var(--eta-accent) 22%, #d7dce2);
@@ -133,13 +139,20 @@
   }
 </style>
 
+<script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
 <script>
   (() => {
+    const initialize = () => {
     const root = document.getElementById('incode-eta-{{ eta_id }}');
-    if (!root || root.dataset.initialized === 'true') return;
+    if (!root || !root.isConnected || root.dataset.initialized === 'true') return;
     root.dataset.initialized = 'true';
     const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } };
     const hasProduct = Boolean(String(root.dataset.productId || '').trim());
+    let version = 0;
+    let active = null;
+    let refreshTimer = null;
+    let expiryTimer = null;
+    const calculating = root.querySelector('.incode-eta__status span:last-child').textContent;
     const fonts = {
       system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       inter: "Inter, system-ui, sans-serif",
@@ -148,7 +161,7 @@
       jakarta: "'Plus Jakarta Sans', system-ui, sans-serif"
     };
     const applyStorefrontStyle = (style) => {
-      if (!style || typeof style !== 'object') return;
+      if (root.dataset.appearanceSource === 'block' || !style || typeof style !== 'object') return;
       const setColor = (name, value) => {
         if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(name, value);
       };
@@ -162,7 +175,7 @@
       setColor('--eta-text', style.text_color);
       setColor('--eta-muted', style.muted_color);
       const journey = root.querySelector('.incode-eta__journey');
-      if (journey && style.show_journey === false) journey.hidden = true;
+      if (journey) journey.hidden = style.show_journey === false;
       if (typeof style.custom_css === 'string' && style.custom_css.length <= 5000 && !/@import|url\s*\(|expression\s*\(|javascript:|<\/?(?:script|style)/i.test(style.custom_css)) {
         let customStyle = document.getElementById('incode-storefront-custom-css');
         if (!customStyle) {
@@ -173,89 +186,91 @@
         customStyle.textContent = style.custom_css;
       }
     };
-    const toVariantGid = (value) => {
-      const raw = String(value || '').trim();
-      if (!raw) return '';
-      if (raw.startsWith('gid://shopify/ProductVariant/')) return raw;
-      const numeric = raw.replace(/\D/g, '');
-      return numeric ? `gid://shopify/ProductVariant/${numeric}` : '';
-    };
     const getSelectedVariantId = () => {
       if (!hasProduct) return '';
-      const selectors = ['form[action*="/cart/add"] [name="id"]', 'form[action*="/cart/add"] [name="variant"]', 'input[name="id"]', 'select[name="id"]', '[data-variant-id]'];
-      for (const selector of selectors) {
-        const element = document.querySelector(selector);
-        if (!element) continue;
-        const gid = toVariantGid(element.value || element.dataset?.variantId);
-        if (gid) return gid;
-      }
-      return toVariantGid(new URLSearchParams(window.location.search).get('variant'));
+      return window.incodeThemeContext.productContext(root).variantId;
     };
     const getQuantity = () => {
-      const input = document.querySelector('form[action*="/cart/add"] [name="quantity"], form[data-type="add-to-cart-form"] [name="quantity"], input[name="quantity"]');
-      const quantity = Number(input?.value || 1);
-      return Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+      return window.incodeThemeContext.productContext(root).quantity;
     };
-    let estimateInvalidated = false;
-    const clearPersistedEstimate = () => {
-      if (estimateInvalidated) return;
-      estimateInvalidated = true;
-      const attributes = Object.fromEntries([
-        '_incode_estimated_date',
-        '_incode_estimated_date_max',
-        '_incode_estimated_date_label',
-        '_incode_estimated_date_max_label',
-        '_incode_delivery_date_range',
-        '_incode_dispatch_date',
-        '_incode_postal_code',
-        '_incode_country',
-        '_incode_eta_message'
-      ].map((key) => [key, '']));
-      fetch('/cart/update.js', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        credentials: 'same-origin',
-        keepalive: true,
-        body: JSON.stringify({ attributes })
-      }).then((response) => {
-        if (!response.ok) estimateInvalidated = false;
-      }).catch(() => { estimateInvalidated = false; });
-    };
-    const params = new URLSearchParams({ estimate: '1', targeted: '1' });
-    if (root.dataset.country) params.set('country', root.dataset.country);
-    if (root.dataset.productId) params.set('productId', root.dataset.productId);
-    if (root.dataset.productVendor) params.set('productVendor', root.dataset.productVendor);
-    const tags = parse(root.dataset.productTags);
-    const collections = parse(root.dataset.collections);
-    if (tags.length) params.set('productTags', tags.join('|'));
-    if (collections.length) params.set('collections', collections.join('|'));
-    if (hasProduct) {
-      const variantId = getSelectedVariantId();
-      if (variantId) params.set('variantId', variantId);
-      params.set('qty', String(getQuantity()));
-    }
-    fetch(`/apps/delivery-checker?${params.toString()}`, { headers: { Accept: 'application/json' } })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('request failed')))
-      .then((data) => {
+    const refresh = async () => {
+      const current = ++version;
+      clearTimeout(expiryTimer);
+      active?.abort();
+      const controller = new AbortController();
+      active = controller;
+      root.hidden = false;
+      root.querySelector('.incode-eta__status').hidden = false;
+      root.querySelector('.incode-eta__status span:last-child').textContent = calculating;
+      root.querySelector('.incode-eta__content').hidden = true;
+      const params = new URLSearchParams({ estimate: '1' });
+      if (root.dataset.country) params.set('country', root.dataset.country);
+      if (root.dataset.productId) params.set('productId', root.dataset.productId);
+      if (root.dataset.productVendor) params.set('productVendor', root.dataset.productVendor);
+      const tags = parse(root.dataset.productTags);
+      const collections = parse(root.dataset.collections);
+      if (tags.length) params.set('productTags', tags.join('|'));
+      if (collections.length) params.set('collections', collections.join('|'));
+      if (hasProduct) {
+        const variantId = getSelectedVariantId();
+        if (variantId) params.set('variantId', variantId);
+        params.set('qty', String(getQuantity()));
+      }
+      try {
+        if (root.dataset.surface === 'cart') {
+          params.set('surface', 'cart');
+          await window.incodeThemeContext.cartParams(params, controller.signal);
+        }
+        if (current !== version) return;
+        const response = await fetch(`/apps/delivery-checker?${params.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error('request failed');
+        const data = await response.json();
+        if (current !== version || !root.isConnected) return;
         applyStorefrontStyle(data.storefront_style);
         if (data.enabled === false) { root.hidden = true; return; }
         root.querySelector('[data-eta-range]').textContent = data.delivery_date_range || data.estimated_date_max_label || '';
-        root.querySelector('[data-eta-order]')?.append(data.order_date_label || root.dataset.today);
-        root.querySelector('[data-eta-dispatch]')?.append(data.dispatch_date_label || '');
-        root.querySelector('[data-eta-delivery]')?.append(data.estimated_date_max_label || data.estimated_date_label || '');
+        for (const [selector, copy] of [
+          ['[data-eta-order]', data.order_date_label || root.dataset.today],
+          ['[data-eta-dispatch]', data.dispatch_date_label || ''],
+          ['[data-eta-delivery]', data.estimated_date_max_label || data.estimated_date_label || '']
+        ]) { const element = root.querySelector(selector); if (element) element.textContent = copy; }
         root.querySelector('.incode-eta__status').hidden = true;
         root.querySelector('.incode-eta__content').hidden = false;
-      })
-      .catch(() => {
+        expiryTimer = setTimeout(() => { if (current === version && root.isConnected) refresh(); }, window.incodeThemeContext.expiryDelay(data));
+      } catch (error) {
+        if (current !== version || error.name === 'AbortError') return;
         const status = root.querySelector('.incode-eta__status');
         status.querySelector('span:last-child').textContent = root.dataset.unavailable;
-      });
-    document.addEventListener('change', (event) => {
-      if (hasProduct && event.target?.matches('[name="id"], [name="variant"], [name="quantity"]')) clearPersistedEstimate();
+      }
+    };
+    const invalidate = () => {
+      version += 1;
+      active?.abort();
+      root.querySelector('.incode-eta__content').hidden = true;
+      clearTimeout(expiryTimer);
+      if (root.dataset.surface === 'cart') void window.incodeThemeContext.invalidateEstimate(root).write.catch(() => {});
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, 100);
+    };
+    window.incodeThemeContext.watch(root, invalidate, () => {
+      version += 1;
+      active?.abort();
+      clearTimeout(refreshTimer);
+      clearTimeout(expiryTimer);
     });
-    document.addEventListener('input', (event) => {
-      if (hasProduct && event.target?.matches('[name="quantity"]')) clearPersistedEstimate();
-    });
+    refresh();
+    };
+    if (window.incodeThemeContext) initialize();
+    else {
+      const ready = () => {
+        if (!window.incodeThemeContext) return;
+        document.removeEventListener('incode:theme-context-ready', ready);
+        document.removeEventListener('DOMContentLoaded', ready);
+        initialize();
+      };
+      document.addEventListener('incode:theme-context-ready', ready);
+      document.addEventListener('DOMContentLoaded', ready, { once: true });
+    }
   })();
 </script>
 
@@ -267,6 +282,7 @@
     "templates": ["product", "collection", "index", "cart", "search", "page"]
   },
   "settings": [
+    { "type": "select", "id": "appearance_source", "label": "Appearance source", "default": "shop", "info": "Use shared app appearance or customize this block independently in the Theme Editor.", "options": [{ "value": "shop", "label": "Shared shop settings" }, { "value": "block", "label": "This block's settings" }] },
     { "type": "text", "id": "eyebrow", "label": "t:automatic_eta.schema.eyebrow_label" },
     { "type": "text", "id": "heading", "label": "t:automatic_eta.schema.heading_label" },
     { "type": "checkbox", "id": "show_journey", "label": "t:automatic_eta.schema.show_journey_label", "default": true },

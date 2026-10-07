@@ -1,7 +1,8 @@
 import "@shopify/ui-extensions/preact";
 
 function attributeValue(key) {
-  return shopify.attributes.value.find((attribute) => attribute.key === key)?.value ?? "";
+  const attributes = Array.isArray(shopify.attributes.value) ? shopify.attributes.value : [];
+  return attributes.find((attribute) => attribute.key === key)?.value ?? "";
 }
 
 export function Estimate() {

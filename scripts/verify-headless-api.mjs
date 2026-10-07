@@ -45,9 +45,9 @@ globalThis.fetch = async (input, init) => {
       mockCalls.inventory += 1;
       return Response.json({ data: { productVariant: {
         id: variables.id, inventoryPolicy: "DENY", sellableOnlineQuantity: 10,
-        inventoryItem: { inventoryLevels: { nodes: [{
+        inventoryItem: { inventoryLevels: { pageInfo: { hasNextPage: false }, nodes: [{
           quantities: [{ name: "available", quantity: 10 }],
-          location: { id: "gid://shopify/Location/1" },
+          location: { id: "gid://shopify/Location/1", isActive: true, fulfillsOnlineOrders: true },
         }] } },
       } } });
     }

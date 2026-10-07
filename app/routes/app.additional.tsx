@@ -43,9 +43,9 @@ export default function AdditionalPage() {
                     <Badge tone="info">About 10 minutes</Badge>
                   </InlineStack>
                   {[
-                    ["1", "Set delivery behavior", "Choose weekends, cutoff time, messages, inventory checks, and Add-to-Cart protection.", "/app/delivery-settings#behavior", "Configure"],
-                    ["2", "Add coverage", "Upload a CSV or create exact codes, ranges, and wildcard rules. Group them into zones when priorities overlap.", "/app/delivery-settings#coverage", "Add coverage"],
-                    ["3", "Set product targeting", "Apply PIN enforcement globally or override it for product IDs, collection handles, and product tags.", "/app/delivery-settings#targeting", "Set targets"],
+                    ["1", "Set delivery behavior", "Choose weekends and cutoff time in Delivery Timing. Review Messages and Cart Protection separately.", "/app/delivery-settings?tab=timing", "Configure"],
+                    ["2", "Add coverage", "Upload a CSV or create exact codes, ranges, and wildcard rules. Group them into zones when priorities overlap.", "/app/delivery-settings?tab=coverage", "Add coverage"],
+                    ["3", "Set product targeting", "Apply PIN enforcement globally in Cart Protection or override it for products, collections, vendors, and tags.", "/app/delivery-settings?tab=products", "Set targets"],
                     ["4", "Publish and test", "Add the app block to the product template. Test one serviceable and one unavailable postal code before publishing.", themeEditorUrl, "Open editor"],
                   ].map(([number, title, description, url, action]) => (
                     <div className="incode-step" key={number}>
@@ -96,7 +96,7 @@ export default function AdditionalPage() {
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Every code unavailable?</Text>
                   <Text as="p" tone="subdued">Check the country, ensure DB fallback is enabled, and confirm an enabled rule or zone matches the code.</Text>
-                  <Button url="/app/delivery-settings#coverage" fullWidth>Review coverage</Button>
+                  <Button url="/app/delivery-settings?tab=coverage" fullWidth>Review coverage</Button>
                 </BlockStack>
               </Card>
               <Card>

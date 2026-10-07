@@ -1,14 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { requireActiveBilling } from "../services/billing.server";
-
-function csvValue(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
-  if (/[",\n\r]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
+import { importErrorCsvValue } from "../utils/postal-import";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { session } = await requireActiveBilling(request);
@@ -29,7 +22,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const lines = [
     "row_number,reason,raw_row",
-    ...errors.map((error) => [error.rowNumber, error.reason, error.rawRow].map(csvValue).join(",")),
+    ...errors.map((error) => [error.rowNumber, error.reason, error.rawRow].map(importErrorCsvValue).join(",")),
   ];
 
   return new Response(lines.join("\n"), {

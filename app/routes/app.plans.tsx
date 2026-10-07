@@ -26,6 +26,7 @@ import {
   isBillingRequired,
   isBillingTestMode,
 } from "../services/billing.server";
+import { billingReturnUrl } from "../utils/billing-return-url";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { billing } = await authenticate.admin(request);
@@ -55,6 +56,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return await billing.request({
       plan: STANDARD_PLAN,
       isTest: isBillingTestMode(),
+      returnUrl: billingReturnUrl(request),
     });
   } catch (error) {
     // Shopify throws Responses for approval redirects and reauthentication.

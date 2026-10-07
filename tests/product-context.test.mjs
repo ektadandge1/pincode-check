@@ -5,6 +5,8 @@ import {
   canonicalProductFor,
   canonicalBatchItems,
 } from "../app/services/product-context.server.ts";
+import { STANDARD_FEATURES } from "../app/services/plans.server.ts";
+import { injectedServer } from "./helpers/injected-server.mjs";
 
 const productId = "gid://shopify/Product/123";
 const variantId = "gid://shopify/ProductVariant/456";
@@ -70,15 +72,81 @@ test("fails on truncated collections for both direct products and variant produc
   }
 });
 
-test("retains vendor and tag limits and tolerates missing optional context", async () => {
+test("retains vendor limit, preserves all tags and tolerates missing optional context", async () => {
   const resolved = await resolveShopifyProductContexts(mockAdmin([
     { ...product, vendor: "v".repeat(101), tags: Array.from({ length: 101 }, (_, i) => i) },
     { id: "gid://shopify/Product/789" },
   ]), [{ productId }, { productId: "789" }]);
   assert.equal(resolved.products.get(productId).vendor.length, 100);
-  assert.equal(resolved.products.get(productId).tags.length, 100);
+  assert.deepEqual(resolved.products.get(productId).tags, Array.from({ length: 101 }, (_, i) => String(i)));
   assert.equal(resolved.products.get(productId).tags[0], "0");
   assert.deepEqual(canonicalProductFor(resolved, "789"), { id: "gid://shopify/Product/789", vendor: "", tags: [], collectionHandles: [] });
+});
+
+test("tags beyond the first 100 enforce exclusions and PIN policy for direct products and variants", async () => {
+  const shop = "tag-regression.myshopify.com";
+  const tags = [...Array.from({ length: 249 }, (_, i) => `tag-${i}`), "no-delivery"];
+  const authoritative = { ...product, tags };
+  const target = {
+    id: 1, shop, name: "Excluded tag", targetKind: "tag", targetValue: "no-delivery",
+    inventoryMode: "any", enabled: true, excluded: true, requireValidPin: true, priority: 1,
+  };
+  const load = injectedServer({
+    "app/db.server.ts": {
+      deliverySetting: { findUnique: async () => null },
+      deliveryTarget: { findMany: async () => [target] },
+      postalCode: {
+        findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 2, codAvailable: false }),
+        findMany: async () => [],
+      },
+    },
+  });
+  const service = load("app/services/delivery-checker.server.ts");
+  for (const input of [{ productId }, { variantId }]) {
+    const admin = mockAdmin(input.variantId ? [{ id: variantId, product: authoritative }] : [authoritative]);
+    const resolved = await resolveShopifyProductContexts(admin, [input]);
+    const canonical = canonicalProductFor(resolved, input.productId, input.variantId);
+    assert.deepEqual(canonical.tags, tags);
+    assert.deepEqual(canonicalBatchItems([{ key: "card", productId }], resolved)[0].productTags, tags);
+    const context = {
+      shop, country: "US", postalCode: "10001", productId: canonical.id,
+      variantId: input.variantId, productTags: canonical.tags, productVendor: canonical.vendor,
+      collectionHandles: canonical.collectionHandles, admin,
+      features: { ...STANDARD_FEATURES, analytics: false }, trackAnalytics: false,
+    };
+    const policy = await service.checkDeliveryPolicy(context);
+    assert.equal(policy.matched_target, target.name);
+    assert.equal(policy.require_valid_pin, true);
+    assert.equal(policy.disable_add_to_cart, false);
+    assert.equal(policy.reason, "target_excluded");
+    const delivery = await service.checkDelivery(context);
+    assert.equal(delivery.available, false);
+    assert.equal(delivery.require_valid_pin, true);
+    assert.equal(delivery.matched_target, target.name);
+  }
+});
+
+test("excluded target preserves the configured Add-to-Cart and target PIN policy", async () => {
+  const shop = "excluded-policy.myshopify.com";
+  const target = {
+    id: 1, shop, name: "Excluded product", targetKind: "product", targetValue: "123",
+    inventoryMode: "any", enabled: true, excluded: true, requireValidPin: false, priority: 1,
+  };
+  const load = injectedServer({
+    "app/db.server.ts": {
+      deliverySetting: { findUnique: async () => ({ disableAddToCart: true, requireValidPin: true }) },
+      deliveryTarget: { findMany: async () => [target] },
+      postalCode: { findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 2, codAvailable: false }), findMany: async () => [] },
+    },
+  });
+  const service = load("app/services/delivery-checker.server.ts");
+  const result = await service.checkDeliveryPolicy({
+    shop, country: "US", postalCode: "10001", productId: "123",
+    features: { ...STANDARD_FEATURES, analytics: false }, trackAnalytics: false,
+  });
+  assert.equal(result.reason, "target_excluded");
+  assert.equal(result.disable_add_to_cart, true);
+  assert.equal(result.require_valid_pin, false);
 });
 
 test("preserves unavailable admin, context limits, HTTP and GraphQL failures", async () => {

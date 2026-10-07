@@ -4,6 +4,8 @@ import {
   checkCartDelivery,
   checkDeliveryPolicy,
   getGeneralDeliveryEstimate,
+  getGeneralCartDeliveryEstimate,
+  checkCartDeliveryPolicy,
   getProductCardDeliveryEstimates,
   parseCodRequestParam,
 } from "../services/delivery-checker.server";
@@ -18,6 +20,7 @@ import { parseCartDeliveryItems } from "../utils/delivery.server";
 import { resolvePlanAccess } from "../services/plan-access.server";
 import { billingRequiredResponse } from "../services/billing.server";
 import prisma from "../db.server";
+import { countdownVisible } from "../utils/countdown-visibility";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_REQUESTS = 120;
@@ -54,27 +57,6 @@ function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetti
     custom_css: setting?.storefrontCustomCss ?? "",
     shipping_method_display_style: setting?.shippingMethodDisplayStyle === "dropdown" ? "dropdown" : "visual",
   };
-}
-
-function countdownVisible(
-  setting: Awaited<ReturnType<typeof prisma.deliverySetting.findUnique>>,
-  context: { productId?: string; collectionHandles?: string[]; zoneId?: number | null },
-  surface: string,
-): boolean {
-  if (!setting?.countdownEnabled) return false;
-  const surfaces = setting.countdownDisplaySurfacesCsv.split(",").filter(Boolean);
-  if (!surfaces.includes(surface)) return false;
-  if (setting.countdownTargetMode === "products") {
-    return Boolean(context.productId && setting.countdownProductIdsCsv.split(",").includes(context.productId));
-  }
-  if (setting.countdownTargetMode === "collections") {
-    const selected = new Set(setting.countdownCollectionHandlesCsv.split(",").filter(Boolean));
-    return (context.collectionHandles ?? []).some((handle) => selected.has(handle));
-  }
-  if (setting.countdownTargetMode === "zones") {
-    return Boolean(context.zoneId && setting.countdownZoneIdsCsv.split(",").includes(String(context.zoneId)));
-  }
-  return true;
 }
 
 function isRateLimited(key: string): boolean {
@@ -256,6 +238,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   let canonicalCartItems = cart.items;
+  const cartRequest = cart.provided || surface === "cart";
+  if (cart.error || (cartRequest && (!cart.provided || !cart.items.length || ((isEstimate || isInit) && !cart.complete)))) {
+    return Response.json({
+      enabled: false,
+      available: false,
+      source: "none",
+      reason: cart.error || !cart.provided || !cart.items.length ? "invalid_cart" : "cart_incomplete",
+      cart_complete: false,
+      cart_items_checked: 0,
+      disable_add_to_cart: true,
+      require_valid_pin: true,
+      message: "Full cart delivery context could not be verified.",
+    }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
   const contextInputs = [
     { productId, variantId },
     ...cart.items.map((item) => ({ productId: item.productId, variantId: item.variantId })),
@@ -266,7 +262,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       resolved = await resolveShopifyProductContexts(proxyContext.admin, contextInputs);
     } catch {
       return Response.json(
-        { enabled: false, available: false, source: "none", reason: "product_context_unavailable", message: "Delivery details are temporarily unavailable." },
+        { enabled: false, available: false, source: "none", reason: "product_context_unavailable", ...(cartRequest ? { cart_complete: false } : {}), disable_add_to_cart: true, require_valid_pin: true, message: "Delivery details are temporarily unavailable." },
         { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "30" } },
       );
     }
@@ -274,7 +270,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const pageProduct = productId || variantId ? canonicalProductFor(resolved, productId, variantId) : null;
     if ((productId || variantId) && !pageProduct) {
       return Response.json(
-        { enabled: false, available: false, source: "none", reason: "invalid_product_context", message: "This product could not be verified." },
+        { enabled: false, available: false, source: "none", reason: "invalid_product_context", ...(cartRequest ? { cart_complete: false } : {}), disable_add_to_cart: true, require_valid_pin: true, message: "This product could not be verified." },
         { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
@@ -301,7 +297,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
     if (canonicalCartItems.length !== cart.items.length) {
       return Response.json(
-        { enabled: false, available: false, source: "none", reason: "invalid_cart", cart_complete: false, message: "One or more cart products could not be verified." },
+        { enabled: false, available: false, source: "none", reason: "invalid_cart", cart_complete: false, disable_add_to_cart: true, require_valid_pin: true, message: "One or more cart products could not be verified." },
         { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
@@ -312,7 +308,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (isEstimate) {
     try {
-      const estimate = await getGeneralDeliveryEstimate({ ...context, features: access.features, requireTarget });
+      const estimateInput = { ...context, features: access.features, requireTarget };
+      const estimate = cartRequest
+        ? await getGeneralCartDeliveryEstimate(estimateInput, canonicalCartItems, { complete: cart.complete })
+        : await getGeneralDeliveryEstimate(estimateInput);
       return Response.json({ ...estimate, storefront_style: style, countdown_visible: countdownVisible(setting, context, surface) }, {
         headers: { "Cache-Control": "no-store" },
       });
@@ -331,18 +330,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   if (isInit) {
-    const policy = await checkDeliveryPolicy({ ...context, features: access.features });
+    const policyInput = { ...context, features: access.features };
+    const policy = cartRequest
+      ? await checkCartDeliveryPolicy(policyInput, canonicalCartItems, { complete: cart.complete })
+      : await checkDeliveryPolicy(policyInput);
     return Response.json(
       {
         available: false,
         source: "none",
-        message: policy.message,
-        disable_add_to_cart: policy.disable_add_to_cart,
-        require_valid_pin: policy.require_valid_pin,
-        matched_target: policy.matched_target,
+        ...policy,
         storefront_style: style,
       },
-      { headers: { "Cache-Control": "private, max-age=0, s-maxage=30" } },
+      { headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -352,20 +351,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     features: access.features,
     ...context,
   };
-  if (cart.provided && cart.error) {
-    return Response.json({
-      available: false,
-      source: "none",
-      reason: "invalid_cart",
-      cart_complete: false,
-      cart_items_checked: 0,
-      message: "The cart could not be verified because its item data was malformed or too large.",
-      storefront_style: style,
-    }, { status: 400, headers: { "Cache-Control": "no-store" } });
-  }
-
   try {
-    const result = canonicalCartItems.length > 0
+    const result = cartRequest
       ? await checkCartDelivery(deliveryInput, canonicalCartItems, { complete: cart.complete })
       : await checkDelivery(deliveryInput);
     return Response.json({

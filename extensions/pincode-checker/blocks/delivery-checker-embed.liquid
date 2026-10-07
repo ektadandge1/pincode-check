@@ -17,9 +17,9 @@
   elsif template.name == 'search'
     for inline_result in search.results limit: 50
       if inline_result.object_type == 'product'
-        unless forloop.first
+        if inline_items != ''
           assign inline_items = inline_items | append: ','
-        endunless
+        endif
         capture inline_item
           echo '{"key":'
           echo inline_result.handle | json
@@ -52,66 +52,8 @@
   <script type="application/json" data-inline-items>{{ inline_items }}</script>
 </div>
 
-<script>
-  (() => {
-    const root = document.querySelector('[data-inline-delivery-eta]:not([data-initialized])');
-    if (!root) return;
-    root.dataset.initialized = 'true';
-    const itemsElement = root.querySelector('[data-inline-items]');
-    let items = [];
-    try { items = JSON.parse(itemsElement?.textContent || '[]'); } catch { items = []; }
-    if (!Array.isArray(items) || !items.length) return;
-
-    const productCardFor = (link) => link.closest([
-      'product-card', '.card-wrapper', '.product-card', '.product-item',
-      '.product-grid-item', '.grid-product', '.product-block', '[data-product-card]',
-      '.grid__item', 'li[class*="product"]', 'li[class*="grid"]'
-    ].join(','));
-    const productHandleFromLink = (link) => {
-      try {
-        const path = new URL(link.href, window.location.href).pathname;
-        return decodeURIComponent(path.match(/\/products\/([^/]+)/)?.[1] || '').toLowerCase();
-      } catch { return ''; }
-    };
-    const addCardLabel = (handle, range) => {
-      const link = [...document.querySelectorAll('a[href*="/products/"]')]
-        .find((candidate) => productHandleFromLink(candidate) === String(handle).toLowerCase());
-      const card = link && productCardFor(link);
-      if (!card || card.querySelector(`[data-inline-eta="${handle}"]`)) return;
-      const host = card.querySelector('.card__information, .card-information, .product-card__info, .product-item__info, .card-content, .product-card__details') || card;
-      const label = document.createElement('p');
-      label.dataset.inlineEta = handle;
-      label.className = 'incode-inline-delivery__label';
-      label.textContent = `Delivery by ${range}`;
-      host.append(label);
-    };
-    const addCartLabel = (key, range) => {
-      const line = document.querySelector(`[data-key="${CSS.escape(key)}"], [data-cart-item-key="${CSS.escape(key)}"]`)
-        || [...document.querySelectorAll('tr, .cart-item, [data-cart-item]')].find((element) => element.textContent?.includes(String(key)));
-      if (!line || line.querySelector(`[data-inline-eta="${key}"]`)) return;
-      const label = document.createElement('p');
-      label.dataset.inlineEta = key;
-      label.className = 'incode-inline-delivery__label';
-      label.textContent = `Delivery by ${range}`;
-      line.querySelector('.cart-item__details, .cart-item__name, .cart-item__info')?.append(label) || line.append(label);
-    };
-
-    fetch('/apps/delivery-checker?batch=1', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ country: root.dataset.country || 'US', items })
-    }).then((response) => response.ok ? response.json() : null).then((data) => {
-      if (!data || !Array.isArray(data.results)) return;
-      data.results.forEach((entry) => {
-        const estimate = entry?.estimate;
-        const range = estimate?.delivery_date_range || estimate?.estimated_date_max_label || estimate?.estimated_date_label;
-        if (!estimate?.enabled || !range) return;
-        if (root.dataset.template === 'cart') addCartLabel(entry.key, range);
-        else addCardLabel(entry.key, range);
-      });
-    }).catch(() => {});
-  })();
-</script>
+<script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
+<script src="{{ 'delivery-card-eta.js' | asset_url }}" defer></script>
 
 <style>
   .incode-inline-delivery { display: none !important; }

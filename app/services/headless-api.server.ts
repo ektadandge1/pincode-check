@@ -123,7 +123,7 @@ export async function handleHeadlessRequest(request: Request, tokenType: string,
       const contexts = await resolveShopifyProductContexts(admin, parsed.items);
       const items = canonicalBatchItems(parsed.items, contexts);
       if (items.length !== parsed.items.length) throw new HeadlessRequestError("invalid_product_context", "A product could not be verified.");
-      result = await getProductCardDeliveryEstimates({ shop: token.shop, country: countryInput.country, admin, features: access.features }, items);
+      result = await getProductCardDeliveryEstimates({ shop: token.shop, country: countryInput.country, admin, features: access.features }, items, { requireMatchedTarget: false });
     } else {
       const input = parseHeadlessDeliveryInput(body, operation === "estimate");
       if (operation !== "estimate" && !validatePostalCode(input.country, input.postalCode ?? "")) throw new HeadlessRequestError("invalid_postal_code", "Invalid postal code for country.");

@@ -73,7 +73,7 @@ export async function resolveShopifyProductContexts(
     return {
       id: product.id,
       vendor: String(product.vendor ?? "").slice(0, 100),
-      tags: (product.tags ?? []).slice(0, 100).map(String),
+      tags: (product.tags ?? []).map(String),
       collectionHandles: (product.collections?.nodes ?? []).flatMap((collection) => collection.handle ? [collection.handle] : []),
     };
   };

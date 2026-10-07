@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useBeforeUnload, useBlocker, useFetcher, useLoaderData } from "react-router";
 import {
   Banner,
   Badge,
@@ -19,6 +19,7 @@ import {
 import prisma from "../db.server";
 import { isSafeStorefrontCss } from "../utils/custom-css";
 import { requireActiveBilling } from "../services/billing.server";
+import { clearDeliveryCheckCaches } from "../services/delivery-checker.server";
 
 type Customization = {
   storefrontFontFamily: string;
@@ -261,6 +262,7 @@ export async function action({ request }: ActionFunctionArgs) {
     } satisfies ActionData;
   }
 
+  clearDeliveryCheckCaches(session.shop);
   return { ok: true, message: "Storefront style saved." } satisfies ActionData;
 }
 
@@ -292,6 +294,9 @@ export default function StorefrontCustomizationPage() {
   const { customization, shop, apiKey } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const [form, setForm] = useState(customization);
+  const dirty = JSON.stringify(form) !== JSON.stringify(customization);
+  useBeforeUnload((event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
+  useBlocker(() => dirty && !window.confirm("Leave with unsaved storefront style changes?"));
   const [previewSurface, setPreviewSurface] = useState<string>("product");
   const [experienceMode, setExperienceMode] = useState<"checker" | "automatic">("checker");
   const [previewChecked, setPreviewChecked] = useState(false);
@@ -310,14 +315,14 @@ export default function StorefrontCustomizationPage() {
   const themeEditorUrl = (template: string) => {
     const blockHandle = experienceMode === "checker"
       ? "delivery-checker"
-      : template === "product"
+       : ["product", "index", "page"].includes(template)
         ? "estimated-delivery-date"
         : "delivery-checker-embed";
     return `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
   };
-  const placementEditorUrl = (template: "product" | "collection" | "cart") => themeEditorUrl(template);
-  const placementButtonLabel = (template: "product" | "collection" | "cart") =>
-    experienceMode === "automatic" && template !== "product" ? "Add dates to cards" : `Add ${experienceMode === "checker" ? "ZIP checker" : "ETA"}`;
+  const placementEditorUrl = (template: string) => themeEditorUrl(template);
+  const placementButtonLabel = (template: string) =>
+    experienceMode === "automatic" && ["collection", "cart", "search"].includes(template) ? "Add automatic dates to cards" : `Add ${experienceMode === "checker" ? "ZIP checker" : "ETA"}`;
 
   return (
     <Page title="Storefront style" subtitle="Create a polished delivery experience that matches your brand.">
@@ -351,6 +356,8 @@ export default function StorefrontCustomizationPage() {
                           ["product", "Product page", "Below product details or near Add to Cart"],
                           ["collection", "Collection page", "Help shoppers check before opening a product"],
                           ["cart", "Cart page", "Confirm delivery before checkout"],
+                          ["index", "Home page", "Add a general delivery estimate to a section"],
+                          ["page", "Content page", "Add a general delivery estimate to a section"],
                         ] as const).map(([template, label, description]) => (
                           <div key={template} className={`incode-placement-card${previewSurface === template ? " is-selected" : ""}`}>
                             <button type="button" onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}>
@@ -404,7 +411,7 @@ export default function StorefrontCustomizationPage() {
                       <Text as="h2" variant="headingLg">3. Checker and country selector</Text>
                       <Text as="p" tone="subdued">Controls the ZIP-code card, country dropdown, input, and Check button.</Text>
                     </BlockStack>
-                    <FormLayout.Group condensed>
+                    <div className="incode-color-grid">
                       {([
                         ["storefrontTextColor", "Text color"],
                         ["storefrontMutedColor", "Supporting text"],
@@ -415,12 +422,12 @@ export default function StorefrontCustomizationPage() {
                         ["storefrontFieldBackground", "Input and selector background"],
                         ["storefrontFieldBorderColor", "Input and selector border"],
                       ] as Array<[keyof Customization, string]>).map(([key, label]) => (
-                        <InlineStack key={key} gap="200" blockAlign="end" wrap={false}>
+                        <div key={key} className="incode-color-field">
                           <input className="incode-color-input" type="color" value={String(form[key])} onChange={(event) => update(key, event.currentTarget.value)} aria-label={label} />
                           <TextField label={label} name={key} value={String(form[key])} onChange={(value) => update(key, value)} autoComplete="off" />
-                        </InlineStack>
+                        </div>
                       ))}
-                    </FormLayout.Group>
+                    </div>
                     <TextField label="Corner radius" name="storefrontBorderRadius" type="number" min={0} max={28} suffix="px" value={String(form.storefrontBorderRadius)} onChange={(value) => update("storefrontBorderRadius", Number(value))} autoComplete="off" />
                   </BlockStack>
                 </Card>
@@ -431,7 +438,7 @@ export default function StorefrontCustomizationPage() {
                       <Text as="h2" variant="headingLg">4. Delivery result and journey</Text>
                       <Text as="p" tone="subdued">Style the result strip and order milestones shown after a successful ZIP-code check.</Text>
                     </BlockStack>
-                    <FormLayout.Group condensed>
+                    <div className="incode-color-grid">
                       {([
                         ["storefrontResultBackground", "Result strip background"],
                         ["storefrontResultTextColor", "Result strip text"],
@@ -439,12 +446,12 @@ export default function StorefrontCustomizationPage() {
                         ["storefrontJourneyActiveColor", "Active step background"],
                         ["storefrontJourneyLineColor", "Connector line"],
                       ] as Array<[keyof Customization, string]>).map(([key, label]) => (
-                        <InlineStack key={key} gap="200" blockAlign="end" wrap={false}>
+                        <div key={key} className="incode-color-field">
                           <input className="incode-color-input" type="color" value={String(form[key])} onChange={(event) => update(key, event.currentTarget.value)} aria-label={label} />
                           <TextField label={label} name={key} value={String(form[key])} onChange={(value) => update(key, value)} autoComplete="off" />
-                        </InlineStack>
+                        </div>
                       ))}
-                    </FormLayout.Group>
+                    </div>
                     <FormLayout.Group condensed>
                       <Select label="Storefront service and journey icons" name="storefrontIconStyle" options={ICON_OPTIONS} value={form.storefrontIconStyle} onChange={(value) => update("storefrontIconStyle", value)} helpText="This style controls delivery journey steps and Local delivery / Store pickup icons." />
                       <Select label="Animation" name="storefrontAnimation" options={ANIMATION_OPTIONS} value={form.storefrontAnimation} onChange={(value) => update("storefrontAnimation", value)} />
@@ -460,18 +467,18 @@ export default function StorefrontCustomizationPage() {
                       <Text as="p" tone="subdued">Customize the cutoff timer independently. Enable “Show cutoff countdown” in the theme block to display it.</Text>
                     </BlockStack>
                     <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="Example: Cyber Monday Countdown" />
-                    <FormLayout.Group condensed>
+                    <div className="incode-color-grid">
                       {([
                         ["storefrontCountdownBackground", "Panel background"],
                         ["storefrontCountdownDigitColor", "Number tile background"],
                         ["storefrontCountdownTextColor", "Countdown text"],
                       ] as Array<[keyof Customization, string]>).map(([key, label]) => (
-                        <InlineStack key={key} gap="200" blockAlign="end" wrap={false}>
+                        <div key={key} className="incode-color-field">
                           <input className="incode-color-input" type="color" value={String(form[key])} onChange={(event) => update(key, event.currentTarget.value)} aria-label={label} />
                           <TextField label={label} name={key} value={String(form[key])} onChange={(value) => update(key, value)} autoComplete="off" />
-                        </InlineStack>
+                        </div>
                       ))}
-                    </FormLayout.Group>
+                    </div>
                   </BlockStack>
                 </Card>
                 <Card>
@@ -501,8 +508,8 @@ export default function StorefrontCustomizationPage() {
               <Card>
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h2" variant="headingMd">Live preview</Text>
-                    <span className="incode-preview-live">LIVE</span>
+                    <Text as="h2" variant="headingMd">Style preview</Text>
+                    <span className="incode-preview-live">SIMULATED</span>
                   </InlineStack>
                   <InlineStack gap="200" wrap>
                     <Badge tone="info">{experienceMode === "checker" ? "ZIP check required" : "Automatic estimate"}</Badge>
@@ -610,7 +617,7 @@ export default function StorefrontCustomizationPage() {
                       <strong>Get it by Oct 6th - Oct 8th</strong>
                     </div> : null}
                   </div>
-                  <Text as="p" tone="subdued" variant="bodySm">Sample {previewLabel.toLowerCase()} preview. Placement buttons also open Theme Editor. Save changes here, then save the placement in your theme to publish it.</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Illustrative {previewLabel.toLowerCase()} preview with sample dates, not verified delivery results or an exact theme rendering. Shared shop styles apply to the main delivery widget; the independent Local delivery & pickup block has its own Theme Editor appearance settings. Save changes here, then save placement in your theme to publish it.</Text>
                 </BlockStack>
               </Card>
             </Layout.Section>

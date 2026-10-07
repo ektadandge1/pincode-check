@@ -3,13 +3,21 @@ box-sizing: border-box;
 width: min(100%, 760px);
 margin: 18px auto;
 isolation: isolate;
+min-width: 0;
+max-width: 100%;
+container-type: inline-size;
 }
 .pin-checker *,
 .pin-checker *::before,
 .pin-checker *::after {
 box-sizing: border-box;
 }
-.pin-checker [hidden] { display: none !important; }
+.pin-checker[hidden], .pin-checker [hidden] { display: none !important; }
+@container (max-width: 600px) {
+  .pin-checker .pin-checker__row { grid-template-columns: minmax(0, 1fr); }
+  .pin-checker .pin-checker__button { width: 100%; white-space: normal; }
+  .pin-checker .pin-checker__journey-title { flex-wrap: wrap; }
+}
 .pin-checker .pin-checker__header {
 display: flex;
 gap: 12px;
@@ -712,4 +720,159 @@ padding-inline: 4px;
 .pin-checker .pin-checker__countdown { padding-inline: 10px; }
 .pin-checker .pin-checker__countdown > strong { gap: 6px; }
 .pin-checker .pin-checker__countdown > strong > span b { min-width: 0; font-size: 24px; }
+}
+
+/* Storefront refinement: preserve the hierarchy at narrow theme and editor widths. */
+.pin-checker {
+  width: min(100%, 760px);
+  margin: 24px auto;
+  padding: clamp(16px, 3vw, 24px);
+  border: 1px solid color-mix(in srgb, var(--pc-heading) 10%, transparent);
+  border-radius: clamp(14px, 2vw, var(--pc-radius));
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--pc-journey-bg) 72%, transparent), transparent 44%),
+    var(--pc-card);
+  box-shadow: 0 14px 36px rgba(17, 24, 39, .08);
+}
+.pin-checker .pin-checker__header {
+  gap: 11px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.pin-checker .pin-checker__mark {
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--pc-focus) 12%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--pc-journey-bg) 80%, white);
+}
+.pin-checker .pin-checker__heading {
+  font-size: clamp(16px, 2vw, var(--pc-heading-size));
+  letter-spacing: -.015em;
+}
+.pin-checker .pin-checker__sub {
+  max-width: 46ch;
+  font-size: 12px;
+}
+.pin-checker .pin-checker__row {
+  grid-template-columns: minmax(112px, .8fr) minmax(120px, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.pin-checker .pin-checker__select,
+.pin-checker .pin-checker__input,
+.pin-checker .pin-checker__button {
+  min-height: 42px;
+  border-radius: 10px;
+}
+.pin-checker .pin-checker__select,
+.pin-checker .pin-checker__input {
+  padding-block: 9px;
+  font-size: 13px;
+}
+.pin-checker .pin-checker__button {
+  padding-inline: 16px;
+  font-size: 12px;
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--pc-btn) 22%, transparent);
+}
+.pin-checker .pin-checker__result[data-state='success'] {
+  margin-top: 12px;
+  padding: 12px 14px 12px 40px;
+  border: 1px solid color-mix(in srgb, var(--pc-result-text) 12%, transparent);
+  border-radius: 11px;
+  text-align: left;
+  font-size: 12px;
+}
+.pin-checker .pin-checker__result[data-state='success']::before {
+  left: 14px;
+  font-size: 17px;
+}
+.pin-checker .pin-checker__journey {
+  margin: 14px 0 12px;
+  border-color: color-mix(in srgb, var(--pc-heading) 12%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--pc-journey-bg) 86%, white);
+}
+.pin-checker .pin-checker__journey-title {
+  min-height: 42px;
+  padding: 12px 14px 6px;
+  justify-content: flex-start;
+  font-size: 12px;
+}
+.pin-checker .pin-checker__journey-title > span:first-child { font-size: 15px; }
+.pin-checker .pin-checker__journey-step {
+  min-height: 100px;
+  gap: 5px;
+  padding: 9px 6px 14px;
+  font-size: 11px;
+}
+.pin-checker .pin-checker__journey-marker {
+  width: 28px;
+  height: 28px;
+  background: color-mix(in srgb, var(--pc-card) 82%, white);
+  font-size: 11px;
+}
+.pin-checker .pin-checker__journey-step strong { font-size: 11px; }
+.pin-checker .pin-checker__journey-step small { font-size: 10px; }
+.pin-checker .pin-checker__journey-step:not(:last-child)::after {
+  top: 28px;
+  left: calc(50% + 17px);
+  right: calc(-50% + 17px);
+  border-top-width: 2px;
+}
+.pin-checker .pin-checker__options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 12px;
+}
+.pin-checker .pin-checker__option {
+  min-width: 0;
+  justify-content: flex-start;
+  padding: 7px 9px;
+  border-color: color-mix(in srgb, var(--pc-heading) 13%, transparent);
+  background: color-mix(in srgb, var(--pc-card) 72%, white);
+  font-size: 11px;
+}
+.pin-checker .pin-checker__option[data-service-kind='local'],
+.pin-checker .pin-checker__option[data-service-kind='pickup'] {
+  grid-template-columns: 22px minmax(0, 1fr);
+  min-width: 0;
+  padding: 8px;
+  border-radius: 9px;
+}
+.pin-checker .pin-checker__option-copy,
+.pin-checker .pin-checker__option-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pin-checker .pin-checker__methods { margin-top: 16px; }
+.pin-checker .pin-checker__method-label,
+.pin-checker .pin-checker__method-legend {
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: .01em;
+}
+.pin-checker .pin-checker__method-select { min-height: 42px; border-radius: 10px; font-size: 12px; }
+.pin-checker .pin-checker__method-disclaimer {
+  margin-top: 6px;
+  font-size: 9px;
+  line-height: 1.35;
+}
+@media (max-width: 520px) {
+  .pin-checker .pin-checker__row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .pin-checker .pin-checker__button { grid-column: 1 / -1; }
+  .pin-checker .pin-checker__options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 360px) {
+  .pin-checker { padding: 14px; }
+  .pin-checker .pin-checker__header { margin-bottom: 14px; }
+  .pin-checker .pin-checker__journey-step { min-height: 92px; padding-inline: 3px; }
+  .pin-checker .pin-checker__options { grid-template-columns: 1fr; }
+  .pin-checker .pin-checker__option[data-service-kind='local'],
+  .pin-checker .pin-checker__option[data-service-kind='pickup'] { grid-template-columns: 24px minmax(0, 1fr); }
 }

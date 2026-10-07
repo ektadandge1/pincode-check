@@ -8,6 +8,7 @@ import {
 } from "../app/services/billing-config.server.ts";
 
 function withEnv(values, callback) {
+  values = { NODE_ENV: "test", APP_ENV: "test", SHOPIFY_BILLING_DEV_BYPASS: undefined, ...values };
   const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
   try {
     for (const [key, value] of Object.entries(values)) {
@@ -54,9 +55,35 @@ test("development bypass avoids billing network failures without changing produc
 
   withEnv({
     APP_ENV: "production",
+    SHOPIFY_BILLING_TEST: "false",
     SHOPIFY_BILLING_DEV_BYPASS: undefined,
     SHOPIFY_BILLING_REQUIRED: "true",
   }, () => {
     assert.equal(isBillingRequired(), true);
+  });
+});
+
+test("production billing fails closed for unsafe or missing flags in either environment marker", () => {
+  for (const marker of ["NODE_ENV", "APP_ENV"]) {
+    for (const overrides of [
+      { SHOPIFY_BILLING_TEST: undefined },
+      { SHOPIFY_BILLING_TEST: "true" },
+      { SHOPIFY_BILLING_REQUIRED: undefined },
+      { SHOPIFY_BILLING_REQUIRED: "false" },
+      { SHOPIFY_BILLING_DEV_BYPASS: "true" },
+      { SHOPIFY_BILLING_DEV_BYPASS: "yes" },
+    ]) {
+      withEnv({ [marker]: "production", SHOPIFY_BILLING_TEST: "false", SHOPIFY_BILLING_REQUIRED: "true", ...overrides }, () => {
+        assert.throws(() => isBillingTestMode(), /SHOPIFY_BILLING_/);
+        assert.throws(() => isBillingRequired(), /SHOPIFY_BILLING_/);
+      });
+    }
+  }
+});
+
+test("NODE_ENV production cannot use an APP_ENV development bypass", () => {
+  withEnv({ NODE_ENV: "production", APP_ENV: "development", SHOPIFY_BILLING_TEST: "false", SHOPIFY_BILLING_REQUIRED: "true", SHOPIFY_BILLING_DEV_BYPASS: "false" }, () => {
+    assert.equal(isBillingRequired(), true);
+    assert.equal(isBillingTestMode(), false);
   });
 });

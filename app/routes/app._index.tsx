@@ -45,6 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     searches,
     availabilityRate: searches > 0 ? Math.round((available / searches) * 100) : 0,
     settingsConfigured: Boolean(settings),
+    cartProtectionEnabled: Boolean(settings?.requireValidPin || settings?.disableAddToCart),
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shop,
     access,
@@ -70,7 +71,7 @@ function MetricCard({ label, value, detail }: { label: string; value: string | n
 export default function Index() {
   const data = useLoaderData<typeof loader>();
   const completedSteps = Number(data.settingsConfigured) + Number(data.rules > 0);
-  const progress = Math.round((completedSteps / 3) * 100);
+  const progress = Math.round((completedSteps / 2) * 100);
   const shopHandle = data.shop.replace(/\.myshopify\.com$/i, "");
   const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
 
@@ -116,7 +117,7 @@ export default function Index() {
                     <Text as="h2" variant="headingLg">Launch checklist</Text>
                     <Text as="p" tone="subdued">Complete these steps before promoting the checker.</Text>
                   </BlockStack>
-                  <Badge tone={progress === 100 ? "success" : "attention"}>{`${completedSteps} of 3 complete`}</Badge>
+                   <Badge tone={progress === 100 ? "success" : "attention"}>{`${completedSteps} of 2 configuration checks complete`}</Badge>
                 </InlineStack>
                 <ProgressBar progress={progress} size="small" tone={progress === 100 ? "success" : "primary"} />
                 <Divider />
@@ -126,7 +127,7 @@ export default function Index() {
                     <Text as="h3" fontWeight="semibold">Configure delivery behavior</Text>
                     <Text as="p" tone="subdued">Set cutoff time, weekends, messaging, and cart protection.</Text>
                   </BlockStack>
-                  <Button url="/app/delivery-settings#behavior" size="slim">{data.settingsConfigured ? "Review" : "Configure"}</Button>
+                  <Button url="/app/delivery-settings?tab=timing" size="slim">{data.settingsConfigured ? "Review" : "Configure"}</Button>
                 </div>
                 <div className="incode-step">
                   <span className="incode-step__number">2</span>
@@ -134,13 +135,13 @@ export default function Index() {
                     <Text as="h3" fontWeight="semibold">Add delivery coverage</Text>
                     <Text as="p" tone="subdued">Import CSV data or create your first postal rule.</Text>
                   </BlockStack>
-                  <Button url="/app/delivery-settings#coverage" size="slim">{data.rules > 0 ? "Manage" : "Add rules"}</Button>
+                  <Button url="/app/delivery-settings?tab=coverage" size="slim">{data.rules > 0 ? "Manage" : "Add rules"}</Button>
                 </div>
                 <div className="incode-step">
                   <span className="incode-step__number">3</span>
                   <BlockStack gap="050">
                     <Text as="h3" fontWeight="semibold">Publish the storefront block</Text>
-                    <Text as="p" tone="subdued">Add the checker to your product template and test two postal codes.</Text>
+                    <Text as="p" tone="subdued">Manual verification required, not included in the configuration count. Add the checker to your published product template and test a serviceable and an unavailable code.</Text>
                   </BlockStack>
                   <Button url={themeEditorUrl} external size="slim">Open editor</Button>
                 </div>
@@ -154,14 +155,14 @@ export default function Index() {
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
                     <Text as="h2" variant="headingMd">Storefront protection</Text>
-                    <Badge tone={data.settingsConfigured ? "success" : "attention"}>
-                      {data.settingsConfigured ? "Configured" : "Setup needed"}
+                    <Badge tone={data.cartProtectionEnabled ? "success" : "attention"}>
+                      {data.cartProtectionEnabled ? "Shop-wide controls enabled" : "Shop-wide controls disabled"}
                     </Badge>
                   </InlineStack>
                   <Text as="p" tone="subdued">
                     Require a serviceable postal code before Add to Cart globally or only for selected products, collections, and tags.
                   </Text>
-                  <Button url="/app/delivery-settings#targeting" fullWidth>Review targeting</Button>
+                  <Button url="/app/delivery-settings?tab=products" fullWidth>Review targeting</Button>
                 </BlockStack>
               </Card>
               <Card>
