@@ -2,10 +2,27 @@
   assign service_id = block.id | replace: '-', ''
    assign service_country = localization.country.iso_code | default: 'US'
    assign service_postal = ''
-   if customer and customer.default_address
-     assign service_country = customer.default_address.country_code | default: service_country
-     assign service_postal = customer.default_address.zip | default: ''
-   endif
+    if localization.available_countries.size > 0
+      assign country_available = false
+      for country in localization.available_countries
+        if country.iso_code == service_country
+          assign country_available = true
+        endif
+      endfor
+      unless country_available
+        assign service_country = localization.available_countries.first.iso_code
+      endunless
+    endif
+    if customer and customer.default_address
+      assign saved_country = customer.default_address.country_code
+      for country in localization.available_countries
+        if country.iso_code == saved_country
+          assign service_country = saved_country
+          assign service_postal = customer.default_address.zip | default: ''
+          break
+        endif
+      endfor
+    endif
   assign service_product_id = product.id | default: ''
   assign service_cart_items = '[]'
   if template.name == 'cart' and cart.item_count > 0
@@ -52,7 +69,6 @@
     data-show-local="{{ block.settings.show_local_delivery }}"
     data-show-pickup="{{ block.settings.show_store_pickup }}"
     data-show-eta="{{ block.settings.show_estimated_delivery }}"
-    data-auto-check="{{ block.settings.auto_check_saved_address }}"
     data-icon-style="{{ block.settings.icon_style }}"
     data-effect="{{ block.settings.effect }}"
     data-saved-postal="{{ service_postal | escape }}"
@@ -75,7 +91,7 @@
         <label class="incode-service-card__sr-only" for="incode-service-country-{{ service_id }}">Country</label>
         <select id="incode-service-country-{{ service_id }}" aria-label="Select country">
           {% for country in localization.available_countries %}
-            <option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }}</option>
+            <option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }} ({{ country.iso_code | escape }})</option>
           {% else %}
             <option value="{{ service_country | escape }}" selected>{{ service_country | escape }}</option>
           {% endfor %}
@@ -85,6 +101,9 @@
       <input id="incode-service-postal-{{ service_id }}" type="text" inputmode="text" autocomplete="postal-code" value="{{ service_postal | escape }}" placeholder="Enter PIN / ZIP code" aria-label="Enter PIN or ZIP code">
       <button type="button">{{ block.settings.button_label | default: 'Check availability' | escape }}</button>
     </div>
+    {% if service_postal != blank %}
+      <p class="incode-service-card__saved">Using saved address: <strong>{{ service_postal | escape }}</strong></p>
+    {% endif %}
 
     <p class="incode-service-card__status" role="status" aria-live="polite"></p>
     <div class="incode-service-card__result" hidden>
@@ -116,119 +135,15 @@
   </div>
 {% endif %}
 
+<link rel="stylesheet" href="{{ 'delivery-service-options.css' | asset_url }}">
 <style>
-  .incode-service-card,
-  .incode-service-card * { box-sizing: border-box; }
+  .incode-service-card [hidden] { display: none !important; }
   #incode-service-card-{{ service_id }} {
     --isc-accent: {{ block.settings.accent_color | default: '#1f4f91' }};
     --isc-surface: {{ block.settings.background_color | default: '#ffffff' }};
     --isc-option: {{ block.settings.option_background | default: '#fff8e8' }};
     --isc-text: {{ block.settings.text_color | default: '#172033' }};
     --isc-radius: {{ block.settings.corner_radius | default: 16 }}px;
-    width: min(100%, 680px);
-    margin: 18px auto;
-    padding: 18px;
-    border: 1px solid color-mix(in srgb, var(--isc-accent) 22%, #d8dee8);
-    border-radius: var(--isc-radius);
-    background: radial-gradient(circle at top left, color-mix(in srgb, var(--isc-accent) 8%, transparent), transparent 38%), var(--isc-surface);
-    box-shadow: 0 18px 46px rgba(17, 24, 39, .1);
-    color: var(--isc-text);
-    font-family: inherit;
-  }
-  .incode-service-card[hidden], .incode-service-card [hidden] { display: none !important; }
-  .incode-service-card { min-width: 0; max-width: 100%; container-type: inline-size; }
-  .incode-service-card__intro { display: flex; gap: 12px; align-items: center; }
-  .incode-service-card__intro-icon,
-  .incode-service-card__option-icon,
-  .incode-service-card__empty-icon { display: grid; place-items: center; flex: 0 0 auto; color: var(--isc-accent); background: color-mix(in srgb, var(--isc-accent) 11%, #fff); }
-  .incode-service-card__intro-icon { width: 42px; height: 42px; border-radius: 13px; }
-  .incode-service-card svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .incode-service-card h3 { margin: 0; color: var(--isc-text); font-size: 18px; line-height: 1.3; }
-  .incode-service-card__intro p { margin: 3px 0 0; color: color-mix(in srgb, var(--isc-text) 66%, transparent); font-size: 13px; line-height: 1.45; }
-  .incode-service-card__form { display: grid; grid-template-columns: minmax(125px, .38fr) minmax(180px, 1fr) auto; gap: 9px; margin-top: 16px; }
-  .incode-service-card__country { position: relative; display: flex; align-items: center; }
-  .incode-service-card__country > span { position: absolute; z-index: 1; left: 12px; pointer-events: none; }
-  .incode-service-card select,
-  .incode-service-card input,
-  .incode-service-card button { min-height: 46px; border-radius: 11px; font: inherit; font-size: 14px; }
-  .incode-service-card select,
-  .incode-service-card input { width: 100%; min-width: 0; border: 1px solid #cfd6df; background: #fff; color: #202733; }
-  .incode-service-card select { padding: 10px 11px 10px 40px; }
-  .incode-service-card input { padding: 10px 12px; }
-  .incode-service-card button { border: 0; padding: 10px 17px; background: var(--isc-accent); color: #fff; font-weight: 750; white-space: nowrap; cursor: pointer; box-shadow: 0 10px 22px color-mix(in srgb, var(--isc-accent) 24%, transparent); transition: transform .15s ease, filter .15s ease; }
-  .incode-service-card button:hover { filter: brightness(.94); transform: translateY(-1px); }
-  .incode-service-card button:disabled { opacity: .62; cursor: wait; transform: none; }
-  .incode-service-card select:focus-visible,
-  .incode-service-card input:focus-visible,
-  .incode-service-card button:focus-visible { outline: 2px solid var(--isc-accent); outline-offset: 2px; }
-  .incode-service-card__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .incode-service-card__status { display: none; margin: 11px 0 0; padding: 10px 12px; border-radius: 9px; font-size: 12px; }
-  .incode-service-card__status[data-state='loading'] { display: block; background: #eff6ff; color: #1f4f91; }
-  .incode-service-card__status[data-state='error'] { display: block; background: #fff1f1; color: #a51d1d; }
-  .incode-service-card__result { display: grid; gap: 10px; margin-top: 14px; }
-  .incode-service-card__result-head { display: flex; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid #e5e9ef; color: #5d6673; font-size: 12px; }
-  .incode-service-card__result-head b { color: #087443; }
-  .incode-service-card__result-head b[data-available='false'] { color: #a51d1d; }
-  .incode-service-card__eta { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--isc-accent) 8%, #fff); }
-  .incode-service-card__eta-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--isc-accent) 14%, #fff); color: var(--isc-accent); font-size: 18px; font-weight: 800; }
-  .incode-service-card__eta > div { display: grid; gap: 3px; }
-  .incode-service-card__eta strong { font-size: 13px; }
-  .incode-service-card__eta small { color: #697383; font-size: 11px; }
-  .incode-service-card__eta > b { color: var(--isc-accent); font-size: 13px; white-space: nowrap; }
-  .incode-service-card__options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .incode-service-card__options > div { display: grid; gap: 4px; min-width: 0; padding: 10px; border: 1px solid color-mix(in srgb, var(--isc-accent) 28%, #e2e6ec); border-radius: 9px; background: var(--isc-option); font-size: 12px; }
-  .incode-service-card__option-icon { width: 30px; height: 30px; border-radius: 9px; }
-  .incode-service-card[data-icon-style='number'] .incode-service-card__option-icon svg,
-  .incode-service-card[data-icon-style='circle'] .incode-service-card__option-icon svg,
-  .incode-service-card[data-icon-style='minimal'] .incode-service-card__option-icon svg,
-  .incode-service-card[data-icon-style='emoji'] .incode-service-card__option-icon svg { display: none; }
-  .incode-service-card[data-icon-style='number'] .incode-service-card__option-icon::before { content: '\2713'; font-size: 14px; font-weight: 800; }
-  .incode-service-card[data-icon-style='circle'] .incode-service-card__option-icon::before { content: '\2713'; display: grid; width: 20px; height: 20px; place-items: center; border: 2px solid currentColor; border-radius: 50%; font-size: 10px; font-weight: 800; }
-  .incode-service-card[data-icon-style='minimal'] .incode-service-card__option-icon::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .incode-service-card[data-icon-style='emoji'] .incode-service-card__option-icon[data-service-kind='local']::before { content: '\1F69A'; font-size: 16px; }
-  .incode-service-card[data-icon-style='emoji'] .incode-service-card__option-icon[data-service-kind='pickup']::before { content: '\1F3EA'; font-size: 16px; }
-  .incode-service-card[data-icon-style='duotone'] .incode-service-card__option-icon { border: 1px solid currentColor; }
-  .incode-service-card[data-effect='soft'] .incode-service-card__option-icon { animation: incode-service-block-rise .45s ease both; }
-  .incode-service-card[data-effect='pulse'] .incode-service-card__option-icon { animation: incode-service-block-pulse 2.1s ease-in-out infinite; }
-  .incode-service-card[data-effect='float'] .incode-service-card__option-icon { animation: incode-service-block-float 2.6s ease-in-out infinite; }
-  .incode-service-card[data-effect='shimmer'] .incode-service-card__option-icon { background-image: linear-gradient(110deg, transparent 20%, rgba(255,255,255,.7) 45%, transparent 70%); background-size: 220% 100%; animation: incode-service-block-shimmer 2.8s ease-in-out infinite; }
-  .incode-service-card__options span:not(.incode-service-card__option-icon) { color: #5d6673; }
-  .incode-service-card__options b { color: #8a6116; font-size: 11px; }
-  .incode-service-card__options [data-available='true'] b { color: #087443; }
-  .incode-service-card__options [data-available='false'] { opacity: .72; background: #f7f8fa; }
-  .incode-service-card__options [data-available='false'] b { color: #7c8490; }
-  .incode-service-card__location { color: #087443; font-size: 11px; }
-  .incode-service-card__pickup-copy { margin: 0; padding: 9px 10px; border-radius: 8px; background: #f6f8fb; color: #5d6673; font-size: 11px; }
-  .incode-service-card--empty { display: flex; gap: 12px; align-items: center; width: min(100%, 680px); margin: 18px auto; }
-  .incode-service-card--empty strong,
-  .incode-service-card--empty span { display: block; }
-  .incode-service-card--empty span { margin-top: 3px; color: #697383; font-size: 12px; }
-  .incode-service-card__empty-icon { width: 42px; height: 42px; border-radius: 13px; font-size: 20px; }
-  @keyframes incode-service-block-rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes incode-service-block-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
-  @keyframes incode-service-block-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-  @keyframes incode-service-block-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
-  @media (max-width: 640px) {
-    .incode-service-card { margin: 14px auto; padding: 14px; border-radius: min(var(--isc-radius), 14px); }
-    .incode-service-card__form { grid-template-columns: 1fr; }
-    .incode-service-card button { width: 100%; }
-  }
-  @media (max-width: 390px) {
-    .incode-service-card__options { grid-template-columns: 1fr; }
-    .incode-service-card__eta { grid-template-columns: 30px minmax(0, 1fr); }
-    .incode-service-card__eta > b { grid-column: 2; }
-  }
-  @container (max-width: 580px) {
-    .incode-service-card__form { grid-template-columns: minmax(0, 1fr); }
-    .incode-service-card button { width: 100%; white-space: normal; }
-  }
-  @container (max-width: 340px) {
-    .incode-service-card__options { grid-template-columns: minmax(0, 1fr); }
-    .incode-service-card__eta { grid-template-columns: 30px minmax(0, 1fr); }
-    .incode-service-card__eta > b { grid-column: 2; white-space: normal; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .incode-service-card *, .incode-service-card *::before, .incode-service-card *::after { animation: none !important; transition: none !important; }
   }
 </style>
 
@@ -260,6 +175,7 @@
       setStatus('', '');
     };
     const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
+    const rememberPostal = window.incodeThemeContext.postalHistory?.(root, postal, country, eventOptions);
 
     const variantGid = () => {
       return window.incodeThemeContext.productContext(root).variantId;
@@ -344,6 +260,7 @@
           return;
         }
         setStatus('', '');
+        if (data.available || data.local_delivery_available || data.pickup_available) rememberPostal?.(data.postal_code || postal.value);
         render(data);
       } catch (error) {
         if (current !== version || error.name === 'AbortError') return;
@@ -357,7 +274,7 @@
     postal.addEventListener('input', invalidate, eventOptions);
     country.addEventListener('change', () => { invalidate(); flag(); }, eventOptions);
     flag();
-    if (root.dataset.autoCheck === 'true' && postal.value.trim()) check();
+    if (root.dataset.savedPostal && postal.value.trim() === root.dataset.savedPostal) check();
     };
     if (window.incodeThemeContext) initialize();
     else {
@@ -386,7 +303,6 @@
     { "type": "checkbox", "id": "show_estimated_delivery", "label": "Show estimated delivery", "default": true },
     { "type": "checkbox", "id": "show_local_delivery", "label": "Show local delivery", "default": true },
     { "type": "checkbox", "id": "show_store_pickup", "label": "Show store pickup", "default": true },
-    { "type": "checkbox", "id": "auto_check_saved_address", "label": "Auto-check logged-in customer address", "info": "Uses the customer's saved address when available; never uses the fulfillment location as the destination.", "default": false },
     { "type": "header", "content": "Appearance" },
     { "type": "color", "id": "accent_color", "label": "Accent and icon color", "default": "#1f4f91" },
     { "type": "color", "id": "background_color", "label": "Card background", "default": "#ffffff" },

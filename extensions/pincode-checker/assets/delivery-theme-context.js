@@ -93,7 +93,7 @@
   };
   const cutoffTime = (data) => {
     const seconds = Number(data.seconds_until_cutoff ?? data.cutoff_seconds_remaining);
-    if (Number.isFinite(seconds) && seconds > 0) return Date.now() + seconds * 1000;
+    if (Number.isFinite(seconds) && seconds >= 0) return Date.now() + seconds * 1000;
     const raw = data.cutoff_at || data.delivery_cutoff_at || data.cutoff_timestamp;
     return raw ? new Date(typeof raw === 'number' && raw < 1000000000000 ? raw * 1000 : raw).getTime() : NaN;
   };
@@ -168,6 +168,45 @@
     document.addEventListener('shopify:section:unload', (event) => { if (event.target?.contains?.(root)) dispose(); }, options);
     return options;
   };
-  window.incodeThemeContext = { cartUrl, freshCart, cartParams, productForm, productContext, watch, lockButtons, cutoffTime, expiryDelay, emptyEstimate, queueAttributes, invalidateEstimate, releaseEstimate };
+  const postalHistory = (root, input, country, eventOptions) => {
+    const list = document.createElement('datalist');
+    list.id = `${root.id}-postal-history`;
+    input.setAttribute('list', list.id);
+    root.append(list);
+    const key = () => `incode:postal-history:${String(country.value || '').toUpperCase()}`;
+    const read = () => {
+      try {
+        const records = JSON.parse(window.localStorage.getItem(key()) || '[]');
+        if (!Array.isArray(records)) return [];
+        return records.filter((record) => record && typeof record.code === 'string'
+          && /^[A-Z0-9][A-Z0-9 -]{1,28}[A-Z0-9]$/.test(record.code)
+          && Number.isFinite(record.at) && record.at > Date.now() - 30 * 86400000).slice(0, 8);
+      } catch { return []; }
+    };
+    const refresh = () => {
+      const prefix = input.value.trim().toUpperCase().replace(/[ -]/g, '');
+      const fragment = document.createDocumentFragment();
+      read().filter((record) => record.code.replace(/[ -]/g, '').startsWith(prefix)).forEach((record) => {
+        const option = document.createElement('option');
+        option.value = record.code;
+        fragment.append(option);
+      });
+      list.replaceChildren(fragment);
+    };
+    input.addEventListener('input', refresh, eventOptions);
+    input.addEventListener('focus', refresh, eventOptions);
+    country.addEventListener('change', refresh, eventOptions);
+    refresh();
+    return (code) => {
+      const normalized = String(code || '').trim().toUpperCase();
+      if (!/^[A-Z0-9][A-Z0-9 -]{1,28}[A-Z0-9]$/.test(normalized)) return;
+      try {
+        const records = [{ code: normalized, at: Date.now() }, ...read().filter((record) => record.code !== normalized)].slice(0, 8);
+        window.localStorage.setItem(key(), JSON.stringify(records));
+      } catch { /* Browsing still works when storage is unavailable. */ }
+      refresh();
+    };
+  };
+  window.incodeThemeContext = { cartUrl, freshCart, cartParams, productForm, productContext, watch, lockButtons, cutoffTime, expiryDelay, emptyEstimate, queueAttributes, invalidateEstimate, releaseEstimate, postalHistory };
   document.dispatchEvent(new Event('incode:theme-context-ready'));
 })();

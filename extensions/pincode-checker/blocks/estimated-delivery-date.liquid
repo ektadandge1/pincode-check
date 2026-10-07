@@ -29,6 +29,31 @@
   if eta_heading == blank
     assign eta_heading = 'automatic_eta.heading' | t
   endif
+  assign eta_country = localization.country.iso_code | default: 'US'
+  assign eta_saved_postal = ''
+  if customer and customer.default_address
+    assign eta_country = customer.default_address.country_code | default: eta_country
+    assign eta_saved_postal = customer.default_address.zip | default: ''
+  endif
+  assign eta_display_sections = ''
+  if block.settings.show_delivery_date
+    assign eta_display_sections = 'date'
+  endif
+  if block.settings.show_journey
+    if eta_display_sections != blank
+      assign eta_display_sections = eta_display_sections | append: ','
+    endif
+    assign eta_display_sections = eta_display_sections | append: 'journey'
+  endif
+  if block.settings.show_countdown
+    if eta_display_sections != blank
+      assign eta_display_sections = eta_display_sections | append: ','
+    endif
+    assign eta_display_sections = eta_display_sections | append: 'countdown'
+  endif
+  if eta_display_sections == blank
+    assign eta_display_sections = 'date'
+  endif
 %}
 
 <div
@@ -41,9 +66,14 @@
   data-product-vendor="{{ eta_vendor | escape }}"
   data-product-tags="{{ eta_tags | escape }}"
   data-collections="{{ eta_collections | escape }}"
-  data-country="{{ localization.country.iso_code | default: 'US' | escape }}"
+  data-country="{{ eta_country | escape }}"
+  data-saved-postal="{{ eta_saved_postal | escape }}"
+  data-display-mode="{{ eta_display_sections }}"
   data-today="{{ 'automatic_eta.today' | t | escape }}"
   data-unavailable="{{ 'automatic_eta.unavailable' | t | escape }}"
+  data-countdown-hours="{{ 'delivery_checker.countdown_hours' | t | escape }}"
+  data-countdown-minutes="{{ 'delivery_checker.countdown_minutes' | t | escape }}"
+  data-countdown-seconds="{{ 'delivery_checker.countdown_seconds' | t | escape }}"
   {{ block.shopify_attributes }}
 >
   <div class="incode-eta__status" aria-live="polite">
@@ -51,37 +81,46 @@
     <span>{{ 'automatic_eta.calculating' | t }}</span>
   </div>
   <div class="incode-eta__content" hidden>
-    <p class="incode-eta__eyebrow">{{ eta_eyebrow | escape }}</p>
-    <h3 class="incode-eta__heading">
-      <span>{{ eta_heading | escape }}</span>
-      <strong data-eta-range></strong>
-    </h3>
-    {% if block.settings.appearance_source != 'block' or block.settings.show_journey %}
-      <div class="incode-eta__journey" aria-label="{{ 'automatic_eta.journey_aria_label' | t | escape }}">
-        <div class="incode-eta__step is-active">
-          <span class="incode-eta__marker" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 5h2l2 10h9l2-7H7"></path><circle cx="10" cy="19" r="1.5"></circle><circle cx="18" cy="19" r="1.5"></circle></svg>
-          </span>
-          <span>{{ 'automatic_eta.order_confirmed' | t }}</span>
-          <strong data-eta-order></strong>
-        </div>
-        <div class="incode-eta__step">
-          <span class="incode-eta__marker" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4-8-4Z"></path><path d="M4 7v10l8 4 8-4V7M12 11v10"></path></svg>
-          </span>
-          <span>{{ 'automatic_eta.ready_to_ship' | t }}</span>
-          <strong data-eta-dispatch></strong>
-        </div>
-        <div class="incode-eta__step">
-          <span class="incode-eta__marker" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v11h14V10M9 21v-7h6v7"></path></svg>
-          </span>
-          <span>{{ 'automatic_eta.at_doorstep' | t }}</span>
-          <strong data-eta-delivery></strong>
-        </div>
-      </div>
+    {% if eta_saved_postal != blank %}
+      <p class="incode-eta__saved">{{ 'automatic_eta.saved_address_notice' | t: postal_code: eta_saved_postal | escape }}</p>
     {% endif %}
-    <p class="incode-eta__note">{{ 'automatic_eta.note' | t }}</p>
+    <div data-eta-summary>
+      <p class="incode-eta__eyebrow">{{ eta_eyebrow | escape }}</p>
+      <h3 class="incode-eta__heading">
+        <span>{{ eta_heading | escape }}</span>
+        <strong data-eta-range></strong>
+      </h3>
+    </div>
+    <div class="incode-eta__journey" aria-label="{{ 'automatic_eta.journey_aria_label' | t | escape }}">
+      <div class="incode-eta__step is-active">
+        <span class="incode-eta__marker" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 5h2l2 10h9l2-7H7"></path><circle cx="10" cy="19" r="1.5"></circle><circle cx="18" cy="19" r="1.5"></circle></svg>
+        </span>
+        <span>{{ 'automatic_eta.order_confirmed' | t }}</span>
+        <strong data-eta-order></strong>
+      </div>
+      <div class="incode-eta__step">
+        <span class="incode-eta__marker" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4-8-4Z"></path><path d="M4 7v10l8 4 8-4V7M12 11v10"></path></svg>
+        </span>
+        <span>{{ 'automatic_eta.ready_to_ship' | t }}</span>
+        <strong data-eta-dispatch></strong>
+      </div>
+      <div class="incode-eta__step">
+        <span class="incode-eta__marker" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"></path><path d="M5 10v11h14V10M9 21v-7h6v7"></path></svg>
+        </span>
+        <span>{{ 'automatic_eta.at_doorstep' | t }}</span>
+        <strong data-eta-delivery></strong>
+      </div>
+    </div>
+    <section class="incode-eta__countdown" data-eta-countdown hidden aria-live="polite">
+      <strong data-eta-countdown-title>{{ 'delivery_checker.countdown_title' | t }}</strong>
+      <span>{{ 'delivery_checker.order_within' | t }}</span>
+      <div data-eta-countdown-value></div>
+      <b data-eta-countdown-delivery></b>
+    </section>
+    <p class="incode-eta__note" data-eta-note>{{ 'automatic_eta.note' | t }}</p>
   </div>
 </div>
 
@@ -96,6 +135,9 @@
     --eta-font: inherit;
     --eta-font-size: 14px;
     --eta-heading-size: 17px;
+    --eta-countdown-bg: #06451f;
+    --eta-countdown-digit: #ff6500;
+    --eta-countdown-text: #ffffff;
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
@@ -116,6 +158,7 @@
   #incode-eta-{{ eta_id }} .incode-eta__status { display: flex; align-items: center; gap: 9px; font-size: 13px; opacity: .72; }
   #incode-eta-{{ eta_id }} .incode-eta__pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--eta-accent); animation: incodeEtaPulse 1.2s ease-in-out infinite; }
   #incode-eta-{{ eta_id }} .incode-eta__eyebrow { margin: 0 0 6px; color: var(--eta-accent); font-size: 11px; font-weight: 800; letter-spacing: .09em; }
+  #incode-eta-{{ eta_id }} .incode-eta__saved { width: fit-content; margin: 0 0 10px; padding: 5px 8px; border-radius: 999px; background: color-mix(in srgb, var(--eta-accent) 10%, #fff); color: var(--eta-text); font-size: 11px; font-weight: 650; }
   #incode-eta-{{ eta_id }} .incode-eta__heading { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 15px; font-size: var(--eta-heading-size); line-height: 1.35; }
   #incode-eta-{{ eta_id }} .incode-eta__heading strong { color: var(--eta-accent); }
   #incode-eta-{{ eta_id }} .incode-eta__journey { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 1px solid color-mix(in srgb, var(--eta-accent) 28%, #d7dce2); border-radius: 12px; background: var(--eta-panel); }
@@ -126,6 +169,13 @@
   #incode-eta-{{ eta_id }} .incode-eta__step strong { overflow-wrap: anywhere; font-size: 11px; line-height: 1.35; }
   #incode-eta-{{ eta_id }} .incode-eta__marker { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 50%; background: var(--eta-card); color: var(--eta-accent); box-shadow: 0 2px 8px rgba(17, 24, 39, .1); }
   #incode-eta-{{ eta_id }} .incode-eta__marker svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown { display: grid; justify-items: center; gap: 8px; margin-top: 12px; padding: 15px; border-radius: 12px; background: var(--eta-countdown-bg); color: var(--eta-countdown-text); text-align: center; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown > span { font-size: 11px; opacity: .82; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown > div { display: flex; gap: 7px; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown > div span { display: grid; gap: 3px; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown > div b { min-width: 34px; padding: 7px 5px; border-radius: 7px; background: var(--eta-countdown-digit); color: #fff; font-variant-numeric: tabular-nums; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown small { font-size: 9px; font-weight: 500; }
+  #incode-eta-{{ eta_id }} .incode-eta__countdown > b { font-size: 11px; }
   #incode-eta-{{ eta_id }} .incode-eta__note { margin: 10px 0 0; font-size: 11px; opacity: .62; }
   @keyframes incodeEtaPulse { 50% { opacity: .35; transform: scale(.8); } }
   @media (prefers-reduced-motion: reduce) {
@@ -152,6 +202,7 @@
     let active = null;
     let refreshTimer = null;
     let expiryTimer = null;
+    let countdownTimer = null;
     const calculating = root.querySelector('.incode-eta__status span:last-child').textContent;
     const fonts = {
       system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -160,6 +211,19 @@
       'dm-sans': "'DM Sans', system-ui, sans-serif",
       jakarta: "'Plus Jakarta Sans', system-ui, sans-serif"
     };
+    const applyDisplayMode = (value) => {
+      const sections = new Set(value === 'both' ? ['date', 'journey'] : String(value || 'date,journey').split(','));
+      const summary = root.querySelector('[data-eta-summary]');
+      const journey = root.querySelector('.incode-eta__journey');
+      const countdown = root.querySelector('[data-eta-countdown]');
+      const note = root.querySelector('[data-eta-note]');
+      root.dataset.displaySections = [...sections].join(',');
+      if (summary) summary.hidden = !sections.has('date');
+      if (journey) journey.hidden = !sections.has('journey');
+      if (countdown && !sections.has('countdown')) countdown.hidden = true;
+      if (note) note.hidden = !sections.has('date');
+    };
+    applyDisplayMode(root.dataset.displayMode);
     const applyStorefrontStyle = (style) => {
       if (root.dataset.appearanceSource === 'block' || !style || typeof style !== 'object') return;
       const setColor = (name, value) => {
@@ -174,8 +238,23 @@
       setColor('--eta-panel', style.journey_background);
       setColor('--eta-text', style.text_color);
       setColor('--eta-muted', style.muted_color);
+      setColor('--eta-countdown-bg', style.countdown_background);
+      setColor('--eta-countdown-digit', style.countdown_digit_color);
+      setColor('--eta-countdown-text', style.countdown_text_color);
+      const sections = new Set(style.eta_display_mode === 'both'
+        ? ['date', 'journey']
+        : String(style.eta_display_mode || (style.show_journey === false ? 'date' : 'date,journey')).split(','));
+      const summary = root.querySelector('[data-eta-summary]');
       const journey = root.querySelector('.incode-eta__journey');
-      if (journey) journey.hidden = style.show_journey === false;
+      const countdown = root.querySelector('[data-eta-countdown]');
+      const note = root.querySelector('[data-eta-note]');
+      root.dataset.displaySections = [...sections].join(',');
+      if (summary) summary.hidden = !sections.has('date');
+      if (journey) journey.hidden = !sections.has('journey');
+      if (countdown && !sections.has('countdown')) countdown.hidden = true;
+      if (note) note.hidden = !sections.has('date');
+      const countdownTitle = root.querySelector('[data-eta-countdown-title]');
+      if (countdownTitle && typeof style.countdown_title === 'string' && style.countdown_title.trim()) countdownTitle.textContent = style.countdown_title.trim();
       if (typeof style.custom_css === 'string' && style.custom_css.length <= 5000 && !/@import|url\s*\(|expression\s*\(|javascript:|<\/?(?:script|style)/i.test(style.custom_css)) {
         let customStyle = document.getElementById('incode-storefront-custom-css');
         if (!customStyle) {
@@ -193,9 +272,39 @@
     const getQuantity = () => {
       return window.incodeThemeContext.productContext(root).quantity;
     };
+    const renderCountdown = (data) => {
+      if (countdownTimer) window.clearInterval(countdownTimer);
+      countdownTimer = null;
+      const countdown = root.querySelector('[data-eta-countdown]');
+      const sections = new Set(String(root.dataset.displaySections || '').split(','));
+      const seconds = Number(data.seconds_until_cutoff ?? data.cutoff_seconds_remaining);
+      if (!countdown || !sections.has('countdown') || data.countdown_visible === false || !Number.isFinite(seconds) || seconds <= 0) {
+        if (countdown) countdown.hidden = true;
+        return;
+      }
+      const deadline = Date.now() + seconds * 1000;
+      const value = countdown.querySelector('[data-eta-countdown-value]');
+      const delivery = countdown.querySelector('[data-eta-countdown-delivery]');
+      if (delivery) delivery.textContent = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
+      const updateCountdown = () => {
+        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        const parts = [
+          [Math.floor(remaining / 3600), root.dataset.countdownHours || 'Hours'],
+          [Math.floor((remaining % 3600) / 60), root.dataset.countdownMinutes || 'Minutes'],
+          [remaining % 60, root.dataset.countdownSeconds || 'Seconds']
+        ];
+        value.innerHTML = parts.map(([part, label]) => `<span><b>${String(part).padStart(2, '0')}</b><small>${label}</small></span>`).join('');
+        if (remaining === 0 && countdownTimer) { window.clearInterval(countdownTimer); countdownTimer = null; }
+      };
+      countdown.hidden = false;
+      updateCountdown();
+      countdownTimer = window.setInterval(updateCountdown, 1000);
+    };
     const refresh = async () => {
       const current = ++version;
       clearTimeout(expiryTimer);
+      if (countdownTimer) window.clearInterval(countdownTimer);
+      countdownTimer = null;
       active?.abort();
       const controller = new AbortController();
       active = controller;
@@ -205,6 +314,7 @@
       root.querySelector('.incode-eta__content').hidden = true;
       const params = new URLSearchParams({ estimate: '1' });
       if (root.dataset.country) params.set('country', root.dataset.country);
+      if (root.dataset.savedPostal) params.set('postal_code', root.dataset.savedPostal);
       if (root.dataset.productId) params.set('productId', root.dataset.productId);
       if (root.dataset.productVendor) params.set('productVendor', root.dataset.productVendor);
       const tags = parse(root.dataset.productTags);
@@ -234,6 +344,7 @@
           ['[data-eta-dispatch]', data.dispatch_date_label || ''],
           ['[data-eta-delivery]', data.estimated_date_max_label || data.estimated_date_label || '']
         ]) { const element = root.querySelector(selector); if (element) element.textContent = copy; }
+        renderCountdown(data);
         root.querySelector('.incode-eta__status').hidden = true;
         root.querySelector('.incode-eta__content').hidden = false;
         expiryTimer = setTimeout(() => { if (current === version && root.isConnected) refresh(); }, window.incodeThemeContext.expiryDelay(data));
@@ -248,6 +359,8 @@
       active?.abort();
       root.querySelector('.incode-eta__content').hidden = true;
       clearTimeout(expiryTimer);
+      if (countdownTimer) window.clearInterval(countdownTimer);
+      countdownTimer = null;
       if (root.dataset.surface === 'cart') void window.incodeThemeContext.invalidateEstimate(root).write.catch(() => {});
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refresh, 100);
@@ -257,6 +370,7 @@
       active?.abort();
       clearTimeout(refreshTimer);
       clearTimeout(expiryTimer);
+      if (countdownTimer) window.clearInterval(countdownTimer);
     });
     refresh();
     };
@@ -279,13 +393,16 @@
   "name": "t:automatic_eta.schema.name",
   "target": "section",
   "enabled_on": {
-    "templates": ["product", "collection", "index", "cart", "search", "page"]
+    "templates": ["product", "collection", "cart"]
   },
   "settings": [
     { "type": "select", "id": "appearance_source", "label": "Appearance source", "default": "shop", "info": "Use shared app appearance or customize this block independently in the Theme Editor.", "options": [{ "value": "shop", "label": "Shared shop settings" }, { "value": "block", "label": "This block's settings" }] },
     { "type": "text", "id": "eyebrow", "label": "t:automatic_eta.schema.eyebrow_label" },
     { "type": "text", "id": "heading", "label": "t:automatic_eta.schema.heading_label" },
-    { "type": "checkbox", "id": "show_journey", "label": "t:automatic_eta.schema.show_journey_label", "default": true },
+    { "type": "header", "content": "t:automatic_eta.schema.content_heading" },
+    { "type": "checkbox", "id": "show_delivery_date", "label": "t:automatic_eta.schema.show_delivery_date", "default": true },
+    { "type": "checkbox", "id": "show_journey", "label": "t:automatic_eta.schema.show_journey", "default": true },
+    { "type": "checkbox", "id": "show_countdown", "label": "t:automatic_eta.schema.show_countdown", "default": true },
     { "type": "color", "id": "accent_color", "label": "t:automatic_eta.schema.accent_color_label", "default": "#f47d32" },
     { "type": "color", "id": "text_color", "label": "t:automatic_eta.schema.text_color_label", "default": "#1f2937" },
     { "type": "color", "id": "card_color", "label": "t:automatic_eta.schema.card_color_label", "default": "#ffffff" },

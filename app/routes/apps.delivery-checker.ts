@@ -21,12 +21,19 @@ import { resolvePlanAccess } from "../services/plan-access.server";
 import { billingRequiredResponse } from "../services/billing.server";
 import prisma from "../db.server";
 import { countdownVisible } from "../utils/countdown-visibility";
+import { COUNTRY_CODES } from "../utils/countries";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_REQUESTS = 120;
 const lookupWindows = new Map<string, { count: number; resetsAt: number }>();
 
 function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetting.findUnique>>) {
+  const etaSections = new Set(
+    setting?.storefrontEtaDisplayMode === "both"
+      ? ["date", "journey"]
+      : String(setting?.storefrontEtaDisplayMode ?? "date,journey").split(",").filter(Boolean),
+  );
+  if (setting?.countdownEnabled ?? true) etaSections.add("countdown");
   return {
     font_family: setting?.storefrontFontFamily ?? "system",
     font_size: setting?.storefrontFontSize ?? 14,
@@ -50,10 +57,12 @@ function storefrontStyle(setting: Awaited<ReturnType<typeof prisma.deliverySetti
     icon_style: setting?.storefrontIconStyle ?? "number",
     animation: setting?.storefrontAnimation ?? "soft",
     show_journey: setting?.storefrontShowJourney ?? true,
+    eta_display_mode: ["date", "journey", "countdown"].filter((section) => etaSections.has(section)).join(",") || "date,journey",
     countdown_background: setting?.storefrontCountdownBackground ?? "#06451f",
     countdown_digit_color: setting?.storefrontCountdownDigitColor ?? "#ff6500",
     countdown_text_color: setting?.storefrontCountdownTextColor ?? "#ffffff",
     countdown_title: setting?.storefrontCountdownTitle ?? "Order cutoff countdown",
+    show_countdown: setting?.countdownEnabled ?? true,
     custom_css: setting?.storefrontCustomCss ?? "",
     shipping_method_display_style: setting?.shippingMethodDisplayStyle === "dropdown" ? "dropdown" : "visual",
   };
@@ -149,11 +158,15 @@ export async function action({ request }: ActionFunctionArgs) {
   const country = typeof (body as { country?: unknown }).country === "string"
     ? (body as { country: string }).country.slice(0, 2)
     : undefined;
+  const postalCode = typeof (body as { postal_code?: unknown }).postal_code === "string"
+    ? (body as { postal_code: string }).postal_code.trim().slice(0, 30)
+    : undefined;
 
   try {
     const results = await getProductCardDeliveryEstimates({
       shop,
       country,
+      postalCode,
       features: access.features,
       admin: proxyContext.admin,
     }, canonicalItems);
@@ -175,6 +188,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const country = url.searchParams.get("country") ?? undefined;
+  if (country !== undefined && !COUNTRY_CODES.has(country.trim().toUpperCase() === "UK" ? "GB" : country.trim().toUpperCase())) {
+    return Response.json({ enabled: false, available: false, reason: "invalid_country", message: "Choose a valid country." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
   const postalCode =
     url.searchParams.get("postal_code") ??
     url.searchParams.get("postalCode") ??
@@ -191,6 +207,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const surface = url.searchParams.get("surface") ?? "product";
   const isInit = url.searchParams.get("init") === "1";
   const isEstimate = url.searchParams.get("estimate") === "1";
+  const countdownOverride = url.searchParams.get("countdown") === "1" ? true
+    : url.searchParams.get("countdown") === "0" ? false : undefined;
   const requireTarget = url.searchParams.get("targeted") === "1";
   const cart = parseCartDeliveryItems(url.searchParams.get("cartItems"));
   const shop = proxyContext.session?.shop ?? (url.searchParams.get("shop") ?? undefined);
@@ -312,7 +330,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const estimate = cartRequest
         ? await getGeneralCartDeliveryEstimate(estimateInput, canonicalCartItems, { complete: cart.complete })
         : await getGeneralDeliveryEstimate(estimateInput);
-      return Response.json({ ...estimate, storefront_style: style, countdown_visible: countdownVisible(setting, context, surface) }, {
+      const estimateZoneId = "zone_id" in estimate && typeof estimate.zone_id === "number"
+        ? estimate.zone_id
+        : null;
+      return Response.json({ ...estimate, storefront_style: style, countdown_visible: countdownVisible(setting, { ...context, zoneId: estimateZoneId }, surface, countdownOverride) }, {
         headers: { "Cache-Control": "no-store" },
       });
     } catch (error) {
@@ -324,7 +345,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         reason: "configuration_error",
         message: "Delivery dates are temporarily unavailable due to an invalid schedule.",
         storefront_style: style,
-        countdown_visible: countdownVisible(setting, context, surface),
+        countdown_visible: countdownVisible(setting, context, surface, countdownOverride),
       }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
   }
@@ -358,7 +379,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return Response.json({
       ...result,
       storefront_style: style,
-      countdown_visible: countdownVisible(setting, { ...context, zoneId: result.zone_id ?? null }, surface),
+      countdown_visible: countdownVisible(setting, { ...context, zoneId: result.zone_id ?? null }, surface, countdownOverride),
     }, {
       headers: { "Cache-Control": "no-store" },
     });

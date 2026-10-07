@@ -46,6 +46,7 @@ import {
   unsupportedDeliveryShortcodes,
 } from "../utils/delivery-message";
 import { regionsForCountry, suggestedRegions } from "../utils/regions";
+import { COUNTRY_OPTIONS } from "../utils/countries";
 import { compactCollectionName } from "../utils/target-display";
 import { buildPostalCsvTemplate } from "../utils/postal-csv-template";
 import { BULK_RULE_FIELDS, parseZoneRulePatch, validatePatchedRule } from "../utils/zone-rule-edit";
@@ -59,21 +60,6 @@ type ActionData = {
   savedRules?: string[];
   postalRuleId?: number;
 };
-
-const COUNTRY_OPTIONS = [
-  { label: "Australia", value: "AU" },
-  { label: "Canada", value: "CA" },
-  { label: "France", value: "FR" },
-  { label: "Germany", value: "DE" },
-  { label: "India", value: "IN" },
-  { label: "Italy", value: "IT" },
-  { label: "Japan", value: "JP" },
-  { label: "Netherlands", value: "NL" },
-  { label: "New Zealand", value: "NZ" },
-  { label: "Spain", value: "ES" },
-  { label: "United Kingdom", value: "GB" },
-  { label: "United States", value: "US" },
-];
 
 const ISO_COUNTRY_CODES = new Set(
   "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW".split(" "),
@@ -144,8 +130,8 @@ const SETTINGS_TABS = [
   { id: "coverage", label: "Coverage", description: "Start here: create zones, add postal rules, and review where you deliver." },
   { id: "timing", label: "Delivery Timing", description: "Set preparation and transit defaults, then configure your business calendar and date display." },
   { id: "products", label: "Product Rules", description: "Add exceptions for products, collections, vendors, or tags after setting your coverage and timing defaults." },
-  { id: "cart", label: "Cart Protection", description: "Choose how the storefront widget controls Add to Cart. These controls are not server-side checkout validation." },
   { id: "messages", label: "Messages", description: "Choose shopper-facing wording and review a sample before saving. Product rules can override the success message." },
+  { id: "optional", label: "Optional", description: "Add cart protection or a cutoff countdown only when your storefront needs them." },
   { id: "imports", label: "Imports & Sync", description: "Add coverage in bulk with a CSV, a published Google Sheet, or pasted rows. Review import results here." },
 ] as const;
 
@@ -297,7 +283,7 @@ function previewIsoDate(days: number): string {
 
 const ETA_MESSAGE_TEMPLATES = [
   { label: "Choose a ready template", value: "" },
-  { label: "Delivery date range", value: "Receive your order between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}" },
+  { label: "Delivery date range", value: "Delivery between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}" },
   { label: "Promised delivery date", value: "Get it by {max_delivery_date}. {cod_message}{delivery_charge_message}" },
   { label: "Order to doorstep", value: "Order on {order_date}, ships by {dispatch_date_formatted}, and arrives between {min_delivery_date} and {max_delivery_date}." },
   { label: "Dates and lead days", value: "Estimated delivery: {delivery_date_range} ({min_lead_days}-{max_lead_days} business days)." },
@@ -451,7 +437,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       retryCount: 1,
       disableAddToCart: false,
       requireValidPin: false,
-      successMessage: "Receive your order between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}",
+       successMessage: "Delivery between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}",
       unavailableMessage: "Sorry, delivery is not available for this postal code.",
       codAvailableMessage: "COD available.",
       codUnavailableMessage: "Prepaid only.",
@@ -1498,7 +1484,7 @@ function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
               <Text as="h2" variant="headingMd">Zone details</Text>
               <FormLayout.Group condensed>
                 <TextField label="Zone name" name="zoneName" value={metadata.name} maxLength={60} autoComplete="off" onChange={(name) => setMetadata((value) => ({ ...value, name }))} />
-                <TextField label="Country (optional)" name="zoneCountry" value={metadata.country} maxLength={2} autoComplete="off" onChange={(country) => setMetadata((value) => ({ ...value, country: country.toUpperCase() }))} helpText="2-letter ISO code, or blank for any. Does not change postal rule countries." />
+                <Select label="Country (optional)" name="zoneCountry" value={metadata.country} options={[{ label: "All countries", value: "" }, ...COUNTRY_OPTIONS]} onChange={(country) => setMetadata((value) => ({ ...value, country }))} helpText="Does not change postal rule countries." />
                 <TextField label="Priority" name="zonePriority" type="number" min={0} max={9999} value={metadata.priority} autoComplete="off" onChange={(priority) => setMetadata((value) => ({ ...value, priority }))} helpText="Lower wins." />
               </FormLayout.Group>
               <Button submit variant="primary" disabled={saving || !metadataDirty} loading={saving && pending.current?.intent === "update_zone"}>Save zone details</Button>
@@ -1823,7 +1809,7 @@ export default function DeliverySettingsPage() {
       ? ["courierTimeoutMs", "retryCount", "courierEnabled", "dbFallbackEnabled"]
       : activeTab.id === "products"
         ? ["inventoryAwareEnabled"]
-        : activeTab.id === "cart"
+        : activeTab.id === "optional"
           ? ["disableAddToCart", "requireValidPin"]
           : activeTab.id === "messages"
             ? ["successMessage", "unavailableMessage", "codAvailableMessage", "codUnavailableMessage", "deliveryChargeMessage"]
@@ -2134,41 +2120,27 @@ export default function DeliverySettingsPage() {
       <BlockStack gap="400">
         <Card>
           <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
-              <BlockStack gap="050">
-                <Text as="h2" variant="headingMd">Make ZIP checks live on your store</Text>
-                <Text as="p" tone="subdued">Complete these three steps to let shoppers enter a postal code and receive delivery availability.</Text>
-              </BlockStack>
-              <Badge tone={data.totalPatterns > 0 ? "success" : "attention"}>
-                {data.totalPatterns > 0 ? "Coverage added" : "Coverage needed"}
-              </Badge>
-            </InlineStack>
-            <div className="incode-launch-checklist">
-              <div className={`incode-launch-checklist__step${data.totalPatterns > 0 ? " is-complete" : ""}`}>
-                <span>1</span>
+            <BlockStack gap="050">
+              <Text as="h2" variant="headingMd">Delivery availability</Text>
+              <Text as="p" tone="subdued">Add one block to show delivery availability, estimated dates, and available services. It automatically uses a logged-in customer&apos;s saved address or asks guests for their ZIP or PIN.</Text>
+            </BlockStack>
+            <div className="incode-storefront-experience is-recommended">
+              <div className="incode-storefront-experience__header">
+                <span className="incode-storefront-experience__icon" aria-hidden="true">&#10003;</span>
                 <div>
-                  <strong>Add ZIP coverage</strong>
-                  <small>{data.totalPatterns > 0 ? `${data.totalPatterns} rule${data.totalPatterns === 1 ? "" : "s"} ready` : "Create a rule or import a CSV"}</small>
+                  <strong>Check delivery availability</strong>
+                  <Badge tone={data.totalPatterns > 0 ? "success" : "attention"}>
+                    {data.totalPatterns > 0 ? "Coverage ready" : "Add coverage first"}
+                  </Badge>
                 </div>
-                {data.totalPatterns > 0 ? <Badge tone="success">Ready</Badge> : <Button url={tabUrl("coverage")} size="slim">Add coverage</Button>}
               </div>
-              <div className="incode-launch-checklist__step">
-                <span>2</span>
-                <div>
-                  <strong>Add the storefront checker</strong>
-                  <small>Shopify Admin → Online Store → Themes → Customize → Add app block</small>
-                </div>
-                <Button url={themeEditorUrl} external target="_blank" size="slim">Add ZIP checker block</Button>
-              </div>
-              <div className="incode-launch-checklist__step">
-                <span>3</span>
-                <div>
-                  <strong>Test before publishing</strong>
-                  <small>Try one available and one unavailable postal code on a product page</small>
-                </div>
-                <Button url="/app/additional" size="slim">View guide</Button>
-              </div>
+              <p>One block handles both customers: logged-in customers are checked using their saved address, while guests can enter a ZIP or PIN manually.</p>
+              <InlineStack gap="200" wrap>
+                {data.totalPatterns > 0 ? null : <Button url={tabUrl("coverage")} size="slim">Add coverage</Button>}
+                <Button url={themeEditorUrl} external target="_blank" variant="primary" size="slim">Add delivery availability block</Button>
+              </InlineStack>
             </div>
+            <Text as="p" tone="subdued">Add this single block from Shopify Admin → Online Store → Themes → Customize. No second delivery block is required.</Text>
           </BlockStack>
         </Card>
         <nav className="incode-delivery-settings__tabs" aria-label="Delivery settings sections">
@@ -2226,15 +2198,12 @@ export default function DeliverySettingsPage() {
                         autoComplete="off"
                         requiredIndicator
                       />
-                      <TextField
+                      <Select
                         label="Country (optional)"
                         name="zoneCountry"
                         value={zoneForm.country}
                         onChange={(value) => setZoneForm((current) => ({ ...current, country: value.toUpperCase() }))}
-                        placeholder="US"
-                        maxLength={2}
-                        autoComplete="off"
-                        helpText="2-letter ISO code, or blank for any."
+                        options={[{ label: "All countries", value: "" }, ...COUNTRY_OPTIONS]}
                       />
                       <TextField
                         label="Priority"
@@ -2597,7 +2566,7 @@ export default function DeliverySettingsPage() {
                 <InlineStack align="space-between" gap="300" blockAlign="center">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingMd">
-                      {activeTab.id === "coverage" ? "Optional courier and coverage fallback" : activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "cart" ? "Shop-wide cart controls" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
+                      {activeTab.id === "coverage" ? "Optional courier and coverage fallback" : activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "optional" ? "Cart protection" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
                     </Text>
                     <Text as="p" tone="subdued">
                       Save applies all settings drafts, including changes made in other tabs. Coverage and product rules are saved separately.
@@ -2728,7 +2697,7 @@ export default function DeliverySettingsPage() {
                       }
                     />
                     : null}
-                    {activeTab.id === "cart" ? <>
+                    {activeTab.id === "optional" ? <>
                     <Checkbox
                       label="Disable Add to Cart when delivery is unavailable"
                       checked={settings.disableAddToCart}
@@ -3378,7 +3347,7 @@ export default function DeliverySettingsPage() {
                 <div className="incode-store-preview">
                   <div className="incode-store-preview__product">
                     <div className="incode-store-preview__image" aria-hidden="true">ETA</div>
-                    <Badge tone="info">Delivery checker</Badge>
+                    <Badge tone="info">Check delivery availability</Badge>
                   </div>
                   <Text as="p" variant="bodyMd">
                     Receive your order by <strong>{previewDeliveryDate}</strong>
@@ -3451,6 +3420,8 @@ export default function DeliverySettingsPage() {
                 )}
               </BlockStack>
             </Card>
+            </> : null}
+            {activeTab.id === "optional" ? <>
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">Cutoff countdown display</Text>
@@ -3562,7 +3533,7 @@ export default function DeliverySettingsPage() {
                   <span><strong>35</strong><small>Minutes</small></span>
                   <span><strong>40</strong><small>Seconds</small></span>
                 </div>
-                <Text as="p" tone="subdued" variant="bodySm">Setup: save these settings, open the Theme Editor, add the Delivery Checker block to the selected templates, then publish the theme.</Text>
+                <Text as="p" tone="subdued" variant="bodySm">Setup: save these settings, open the Theme Editor, add the Check delivery availability block to the selected templates, then publish the theme.</Text>
               </BlockStack>
             </Card>
             </> : null}

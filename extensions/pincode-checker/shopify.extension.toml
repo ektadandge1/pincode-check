@@ -1,4 +1,4 @@
-name = "Delivery Checker"
+name = "Check delivery availability"
 handle = "delivery-checker"
 uid = "2cc2cf4e-881e-8ceb-32dd-206af3870511272272c8"
 type = "theme_app_extension"

@@ -3,13 +3,14 @@ export type LocationPriorityMode = "manual" | "highest_stock";
 export function selectedLocationOptions(
   location: { shopifyLocationId: string; name: string; pickupEnabled: boolean; pickupInstructions: string | null } | null,
   localDeliveryAvailable: boolean,
+  pickupAvailable = location?.pickupEnabled ?? false,
 ) {
   return {
     fulfillment_location_id: location?.shopifyLocationId,
     fulfillment_location_name: location?.name,
     local_delivery_available: Boolean(location && localDeliveryAvailable),
-    pickup_available: location?.pickupEnabled ?? false,
-    pickup_instructions: location?.pickupEnabled ? location.pickupInstructions || undefined : undefined,
+    pickup_available: pickupAvailable,
+    pickup_instructions: pickupAvailable ? location?.pickupInstructions || undefined : undefined,
   };
 }
 

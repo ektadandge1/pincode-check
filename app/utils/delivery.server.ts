@@ -1,3 +1,5 @@
+import { COUNTRY_CODES } from "./countries.ts";
+
 export type DeliveryComputationInput = {
   baseDays: number;
   cutoffHour24: number;
@@ -63,7 +65,7 @@ const POSTAL_CODE_PATTERNS: Record<string, RegExp> = {
   DE: /^\d{5}$/,
   ES: /^\d{5}$/,
   FR: /^\d{5}$/,
-  GB: /^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$/,
+  GB: /^(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})$/,
   IN: /^[1-9][0-9]{5}$/,
   IT: /^\d{5}$/,
   JP: /^\d{3}-?\d{4}$/,
@@ -77,7 +79,10 @@ export function normalizeCountryCode(country: string | null | undefined): string
     .trim()
     .toUpperCase();
 
-  return /^[A-Z]{2}$/.test(normalized) ? normalized : "US";
+  // Missing countries have historically defaulted to US in delivery callers.
+  if (!normalized) return "US";
+  if (normalized === "UK") return "GB";
+  return normalized;
 }
 
 export function normalizePostalCode(country: string, postalCode: string): string {
@@ -88,22 +93,43 @@ export function normalizePostalCode(country: string, postalCode: string): string
     .replace(/\s+/g, " ");
 
   if (["IN", "AU", "DE", "ES", "FR", "IT", "NZ"].includes(countryCode)) {
-    return value.replace(/\D/g, "");
+    return value.replace(/\s+/g, "");
   }
 
+  const compact = value.replace(/\s+/g, "");
+  if (countryCode === "CA") {
+    return compact.replace(/^([A-Z]\d[A-Z])(\d[A-Z]\d)$/, "$1 $2");
+  }
+  if (countryCode === "GB") {
+    return compact.replace(/^(GIR|[A-Z]{1,2}\d[A-Z\d]?)(\d[A-Z]{2})$/, "$1 $2");
+  }
+  if (countryCode === "NL") {
+    return compact.replace(/^(\d{4})([A-Z]{2})$/, "$1 $2");
+  }
   if (countryCode === "US") {
-    return value.replace(/\s+/g, "");
+    return compact.replace(/^(\d{5})(\d{4})$/, "$1-$2");
   }
-
   if (countryCode === "JP") {
-    return value.replace(/\s+/g, "");
+    return compact.replace(/^(\d{3})(\d{4})$/, "$1-$2");
   }
 
   return value;
 }
 
+/** Canonical first, then compact optional-separator keys for legacy exact rows. */
+export function postalCodeLookupValues(country: string, code: string): string[] {
+  const countryCode = normalizeCountryCode(country);
+  const canonical = normalizePostalCode(countryCode, code);
+  if (["CA", "GB", "NL", "JP", "US"].includes(countryCode)
+    && validatePostalCode(countryCode, canonical)) {
+    return [...new Set([canonical, canonical.replace(/[ -]/g, "")])];
+  }
+  return canonical ? [canonical] : [];
+}
+
 export function validatePostalCode(country: string, postalCode: string): boolean {
   const countryCode = normalizeCountryCode(country);
+  if (!COUNTRY_CODES.has(countryCode)) return false;
   const normalized = normalizePostalCode(countryCode, postalCode);
   const pattern = POSTAL_CODE_PATTERNS[countryCode];
 
@@ -618,8 +644,16 @@ function compareRangeBounds(country: string, start: string, end: string): number
   return null;
 }
 
+function normalizePostalWildcardLiteral(country: string, value: string): string {
+  const normalized = normalizePostalCode(country, value);
+  if (["CA", "GB", "NL"].includes(country)) return normalized.replace(/\s/g, "");
+  if (country === "JP" || country === "US") return normalized.replace(/[\s-]/g, "");
+  return normalized;
+}
+
 export function parsePostalPattern(country: string, rawPattern: string): ParsedPostalPattern | null {
   const countryCode = normalizeCountryCode(country);
+  if (!COUNTRY_CODES.has(countryCode)) return null;
   const pattern = String(rawPattern ?? "").trim().replace(/\s+/g, " ");
   if (!pattern) return null;
 
@@ -628,21 +662,27 @@ export function parsePostalPattern(country: string, rawPattern: string): ParsedP
       return null;
     }
 
-    const parts = pattern
+    const normalizedPattern = pattern
+      .split("*")
+      .map((part) => normalizePostalWildcardLiteral(countryCode, part))
+      .join("*");
+    if (normalizedPattern.replace(/\*/g, "").length < 2) return null;
+    const parts = normalizedPattern
       .split("*")
       .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     return {
       type: "wildcard",
-      pattern: pattern.toUpperCase(),
+      pattern: normalizedPattern,
       regex: new RegExp(`^${parts.join(".*")}$`, "i"),
     };
   }
 
-  if (validatePostalCode(countryCode, pattern)) {
+  const explicitRange = pattern.match(/^(.+?)\s+-\s+(.+)$/);
+  if (!explicitRange && validatePostalCode(countryCode, pattern)) {
     return { type: "exact", pattern: normalizePostalCode(countryCode, pattern) };
   }
 
-  const rangeMatch = pattern.match(/^(.+?)\s+-\s+(.+)$/) ?? pattern.match(/^(.+?)-(.+)$/);
+  const rangeMatch = explicitRange ?? pattern.match(/^(.+?)-(.+)$/);
   if (rangeMatch) {
     const rawStart = rangeMatch[1].trim();
     const rawEnd = rangeMatch[2].trim();
@@ -655,7 +695,11 @@ export function parsePostalPattern(country: string, rawPattern: string): ParsedP
     }
     if (compareRangeBounds(countryCode, start, end) === null) return null;
 
-    return { type: "range", pattern: `${start}-${end}`, start, end };
+    // Preserve an unambiguous range delimiter for generic exact formats and
+    // endpoints that already contain a postal-code hyphen.
+    const delimiter = (explicitRange && !POSTAL_CODE_PATTERNS[countryCode])
+      || start.includes("-") || end.includes("-") ? " - " : "-";
+    return { type: "range", pattern: `${start}${delimiter}${end}`, start, end };
   }
 
   return null;
@@ -675,15 +719,18 @@ export function matchesPostalPattern(
   postalCode: string,
 ): boolean {
   const countryCode = normalizeCountryCode(country);
+  if (!COUNTRY_CODES.has(countryCode)) return false;
   const value = normalizePostalCode(countryCode, postalCode);
   if (!value) return false;
 
   if (parsed.type === "exact") {
-    return parsed.pattern === value;
+    return normalizePostalCode(countryCode, parsed.pattern) === value;
   }
 
   if (parsed.type === "wildcard") {
-    return parsed.regex.test(value) || parsed.regex.test(postalCode);
+    const wildcard = parsePostalPattern(countryCode, parsed.pattern);
+    const matchValue = normalizePostalWildcardLiteral(countryCode, value);
+    return wildcard?.type === "wildcard" && wildcard.regex.test(matchValue);
   }
 
   const startDigits = /^\d+$/.test(parsed.start);

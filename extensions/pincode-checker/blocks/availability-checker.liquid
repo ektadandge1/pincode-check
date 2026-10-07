@@ -1,0 +1,77 @@
+{% liquid
+  assign availability_id = block.id | replace: '-', ''
+  assign availability_country = localization.available_countries.first.iso_code | default: localization.country.iso_code
+  assign availability_postal = ''
+  for country in localization.available_countries
+    if country.iso_code == localization.country.iso_code
+      assign availability_country = country.iso_code
+    endif
+  endfor
+  if customer and customer.default_address
+    for country in localization.available_countries
+      if country.iso_code == customer.default_address.country_code
+        assign availability_country = country.iso_code
+        assign availability_postal = customer.default_address.zip | default: ''
+      endif
+    endfor
+  endif
+  assign availability_product_id = product.id | default: ''
+  assign availability_variant_id = product.selected_or_first_available_variant.id | default: ''
+%}
+
+<div
+  id="incode-availability-{{ availability_id }}"
+  class="incode-availability"
+  data-product-id="{{ availability_product_id }}"
+  data-initial-variant="{{ availability_variant_id }}"
+  data-surface="{{ template.name | escape }}"
+  data-country="{{ availability_country }}"
+  data-saved-postal="{{ availability_postal | escape }}"
+  style="--ia-accent: {{ block.settings.accent_color | default: '#1f4f91' }}; --ia-bg: {{ block.settings.background_color | default: '#ffffff' }}; --ia-radius: {{ block.settings.corner_radius | default: 14 }}px;"
+  {{ block.shopify_attributes }}
+>
+  <div class="incode-availability__heading">
+    <span aria-hidden="true">+</span>
+    <div>
+      <h3>{{ block.settings.heading | default: 'Check delivery to your address' | escape }}</h3>
+      <p>{{ block.settings.supporting_text | default: 'Enter your ZIP or postal code to see if we deliver to you.' | escape }}</p>
+    </div>
+  </div>
+  {% if availability_postal != blank %}
+    <p class="incode-availability__saved">Using saved address: <strong>{{ availability_postal | escape }}</strong></p>
+  {% endif %}
+  <div class="incode-availability__form">
+    <label class="incode-availability__label" for="incode-availability-country-{{ availability_id }}">Country</label>
+    <select id="incode-availability-country-{{ availability_id }}" aria-label="Country">
+      {% for country in localization.available_countries %}
+        <option value="{{ country.iso_code }}" {% if country.iso_code == availability_country %}selected{% endif %}>{{ country.name | escape }}</option>
+      {% else %}
+        <option value="{{ availability_country }}" selected>{{ availability_country }}</option>
+      {% endfor %}
+    </select>
+    <label class="incode-availability__label" for="incode-availability-postal-{{ availability_id }}">ZIP or postal code</label>
+    <input id="incode-availability-postal-{{ availability_id }}" type="text" inputmode="text" autocomplete="postal-code" value="{{ availability_postal | escape }}" placeholder="Enter ZIP / postal code" />
+    <button type="button">{{ block.settings.button_label | default: 'Check availability' | escape }}</button>
+  </div>
+  <p class="incode-availability__status" role="status" aria-live="polite"></p>
+</div>
+
+<link rel="stylesheet" href="{{ 'availability-checker.css' | asset_url }}">
+<script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
+<script src="{{ 'availability-checker.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "ZIP availability checker",
+  "target": "section",
+  "enabled_on": { "templates": ["product", "cart"] },
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery to your address" },
+    { "type": "text", "id": "supporting_text", "label": "Supporting text", "default": "Enter your ZIP or postal code to see if we deliver to you." },
+    { "type": "text", "id": "button_label", "label": "Button label", "default": "Check availability" },
+    { "type": "color", "id": "accent_color", "label": "Accent color", "default": "#1f4f91" },
+    { "type": "color", "id": "background_color", "label": "Card background", "default": "#ffffff" },
+    { "type": "range", "id": "corner_radius", "label": "Corner radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 14 }
+  ]
+}
+{% endschema %}

@@ -1,0 +1,62 @@
+.incode-availability,
+.incode-availability * { box-sizing: border-box; }
+
+.incode-availability {
+  --ia-accent: #1f4f91;
+  width: min(100%, 680px);
+  max-width: 100%;
+  min-width: 0;
+  margin: 18px auto;
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--ia-accent) 24%, #d8dee8);
+  border-radius: var(--ia-radius, 14px);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--ia-accent) 5%, var(--ia-bg, #fff)), var(--ia-bg, #fff) 45%);
+  color: #172033;
+  font-family: inherit;
+  box-shadow: 0 12px 32px rgba(17, 24, 39, .08);
+  container-type: inline-size;
+  overflow-wrap: anywhere;
+}
+
+.incode-availability__heading { display: flex; gap: 12px; align-items: flex-start; }
+.incode-availability__heading > span { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; border-radius: 12px; background: color-mix(in srgb, var(--ia-accent) 12%, #fff); color: var(--ia-accent); font-size: 24px; font-weight: 700; }
+.incode-availability__heading > div { min-width: 0; }
+.incode-availability h3 { margin: 0; color: #172033; font-size: 17px; font-weight: 700; line-height: 1.4; }
+.incode-availability p { margin: 4px 0 0; color: #667085; font-size: 13px; line-height: 1.5; }
+.incode-availability .incode-availability__saved { width: fit-content; max-width: 100%; margin-top: 12px; padding: 6px 9px; border-radius: 8px; background: #eef6ff; color: #1f4f91; font-size: 12px; }
+.incode-availability__form { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr); gap: 10px; align-items: stretch; margin-top: 18px; }
+.incode-availability__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.incode-availability select,
+.incode-availability input,
+.incode-availability button { width: 100%; min-width: 0; max-width: 100%; min-height: 46px; margin: 0; border-radius: 10px; font: inherit; font-size: 14px; line-height: 1.4; }
+.incode-availability select,
+.incode-availability input { padding: 10px 12px; border: 1px solid #cfd6df; background-color: #fff; color: #202733; box-shadow: none; }
+.incode-availability select { padding-right: 30px; }
+.incode-availability input::placeholder { color: #7a8495; opacity: 1; }
+.incode-availability button { grid-column: 1 / -1; padding: 12px 16px; border: 0; background: linear-gradient(135deg, var(--ia-accent), color-mix(in srgb, var(--ia-accent) 82%, #172033)); color: #fff; font-weight: 700; cursor: pointer; box-shadow: 0 6px 14px color-mix(in srgb, var(--ia-accent) 18%, transparent); transition: filter .15s ease; }
+.incode-availability button:hover { filter: brightness(.95); }
+.incode-availability button:disabled { opacity: .65; cursor: wait; }
+.incode-availability :is(select, input, button):focus-visible { outline: 2px solid var(--ia-accent); outline-offset: 3px; }
+.incode-availability .incode-availability__status { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid #d9e6f7; border-radius: 10px; background: #eff6ff; color: #1f4f91; font-size: 13px; line-height: 1.5; }
+.incode-availability .incode-availability__status[data-state] { display: flex; align-items: flex-start; gap: 9px; }
+.incode-availability__status[data-state]::before { flex: 0 0 18px; text-align: center; font-weight: 800; }
+.incode-availability .incode-availability__status[data-state='available'] { border-color: #bce4ce; background: #edf9f2; color: #087443; }
+.incode-availability__status[data-state='available']::before { content: '\2713'; }
+.incode-availability .incode-availability__status[data-state='unavailable'],
+.incode-availability .incode-availability__status[data-state='error'] { border-color: #f0cccc; background: #fff3f3; color: #a51d1d; }
+.incode-availability__status[data-state='unavailable']::before,
+.incode-availability__status[data-state='error']::before { content: '!'; }
+@container (min-width: 540px) {
+  .incode-availability__form { grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, .9fr); }
+  .incode-availability button { grid-column: auto; }
+}
+@container (max-width: 300px) {
+  .incode-availability__form { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .incode-availability { padding: 16px; margin: 14px auto; }
+  .incode-availability h3 { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .incode-availability button { transition: none; }
+}

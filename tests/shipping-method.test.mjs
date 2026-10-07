@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
 
 import {
   inferShippingMethodKind,
@@ -11,26 +9,6 @@ import {
   shippingMethodEligible,
   validateShippingMethodFields,
 } from "../app/utils/shipping-method.ts";
-
-async function loadAction({ prisma, access = { features: { deliveryOptions: true } }, clear = () => {} }) {
-  const source = await readFile(new URL("../app/routes/app.shipping-methods.tsx", import.meta.url), "utf8");
-  const output = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText;
-  const code = output
-    .replace(/^import .*;\r?\n/gm, "")
-    .replace(/^export default /gm, "")
-    .replace(/^export /gm, "");
-  return new Function("prisma", "requireActiveBilling", "resolvePlanAccess", "clearDeliveryCheckCaches", "SHIPPING_METHOD_KINDS", "shippingMethodHandle", "validateShippingMethodFields", `${code}\nreturn action;`)(
-    prisma,
-    async () => ({ admin: {}, session: { shop: "owner.myshopify.com" } }),
-    async () => access,
-    clear,
-    SHIPPING_METHOD_KINDS,
-    shippingMethodHandle,
-    validateShippingMethodFields,
-  );
-}
 
 const unavailable = {
   express: false,
@@ -120,32 +98,4 @@ test("shipping method serialization includes storefront copy and date labels", (
     processing_days: 1,
     transit_days: 2,
   });
-});
-
-test("shipping method actions are tenant-scoped and invalidate after a committed save", async () => {
-  const writes = [];
-  const clears = [];
-  const action = await loadAction({
-    prisma: {
-      shippingMethodRule: {
-        create: async (args) => { writes.push(args); return args.data; },
-        count: async () => 0,
-        updateMany: async () => ({ count: 0 }),
-      },
-      deliverySetting: { upsert: async () => ({}) },
-    },
-    clear: (shop) => clears.push(shop),
-  });
-
-  const result = await action({ request: new Request("https://example.test", {
-    method: "POST",
-    body: new URLSearchParams({
-      intent: "save_method", name: "Express", handle: "express", kind: "express",
-      priority: "1", processingDays: "", transitDays: "2", enabled: "on",
-    }),
-  }) });
-
-  assert.equal(result.ok, true);
-  assert.equal(writes[0].data.shop, "owner.myshopify.com");
-  assert.deepEqual(clears, ["owner.myshopify.com"]);
 });

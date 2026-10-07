@@ -86,7 +86,7 @@
         const response = await fetch('/apps/delivery-checker?batch=1', {
           method: 'POST', signal: controller.signal,
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ country: root.dataset.country || 'US', items: items.slice(offset, offset + 24).map(({ key, productId }) => ({ key, productId })) })
+          body: JSON.stringify({ country: root.dataset.country || 'US', postal_code: root.dataset.savedPostal || '', items: items.slice(offset, offset + 24).map(({ key, productId }) => ({ key, productId })) })
         });
         if (!response.ok) throw new Error('Estimate unavailable');
         const data = await response.json();

@@ -16,9 +16,13 @@
   assign localization_country = localization.country.iso_code | default: 'US'
    assign selected_country = localization_country
    assign saved_postal_code = ''
+   assign customer_address_locked = false
    if customer and customer.default_address
-     assign selected_country = customer.default_address.country_code | default: localization_country
-     assign saved_postal_code = customer.default_address.zip | default: ''
+      assign selected_country = customer.default_address.country_code | default: localization_country
+      assign saved_postal_code = customer.default_address.zip | default: ''
+      if saved_postal_code != blank
+        assign customer_address_locked = true
+      endif
    endif
   assign product_id_value = ''
   assign product_vendor_value = ''
@@ -90,35 +94,11 @@
       <div class="pin-checker__header">
         <span class="pin-checker__empty-icon" aria-hidden="true">📦</span>
         <div>
-          <h3 class="pin-checker__heading">Delivery checker appears when the cart has items</h3>
+          <h3 class="pin-checker__heading">Check delivery availability appears when the cart has items</h3>
           <p class="pin-checker__sub">Add a product to preview the live ZIP/PIN check, local delivery, pickup, and delivery estimate card.</p>
         </div>
       </div>
     </div>
-    {{ 'delivery-checker.css' | asset_url | stylesheet_tag }}
-    <style>
-      .pin-checker--editor-empty-cart {
-        max-width: 720px;
-        margin: 18px auto;
-        border: 1px solid rgba(17, 24, 39, .1);
-        border-radius: 18px;
-        padding: 18px;
-        background: linear-gradient(135deg, #ffffff 0%, #f5fbff 100%);
-        box-shadow: 0 16px 40px rgba(17, 24, 39, .08);
-        color: #172033;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      }
-      .pin-checker--editor-empty-cart .pin-checker__empty-icon {
-        display: grid;
-        width: 42px;
-        height: 42px;
-        place-items: center;
-        flex: 0 0 auto;
-        border-radius: 14px;
-        background: #e9f6ff;
-        font-size: 21px;
-      }
-    </style>
   {% endif %}
 {% else %}
 
@@ -126,13 +106,18 @@
   class="pin-checker"
   id="pin-checker-{{ block_id }}"
   data-cod="{{ cod_enabled }}"
-  data-auto-check-saved-address="{{ block.settings.auto_check_saved_address }}"
   data-localization-country="{{ localization_country | escape }}"
-  data-saved-country="{{ selected_country | escape }}"
   data-saved-postal="{{ saved_postal_code | escape }}"
   data-show-countdown="{{ block.settings.show_cutoff_countdown }}"
+  data-show-service-badges="{{ block.settings.show_service_badges }}"
+  data-show-same-day="{{ block.settings.show_same_day }}"
+  data-show-next-day="{{ block.settings.show_next_day }}"
+  data-show-express="{{ block.settings.show_express }}"
+  data-show-local="{{ block.settings.show_local }}"
+  data-show-pickup="{{ block.settings.show_pickup }}"
   data-surface="{{ template.name | escape }}"
   data-show-journey="{{ block.settings.show_delivery_journey }}"
+  data-icon-style="{{ block.settings.journey_marker_style | default: 'number' }}"
   data-line-style="dotted"
   data-template="modern-card"
   data-product-id="{{ product_id_value | escape }}"
@@ -186,6 +171,7 @@
       <select
         class="pin-checker__select"
         name="country"
+        {% if customer_address_locked %}disabled{% endif %}
         aria-label="{{ 'delivery_checker.country_aria_label' | t | escape }}"
         id="pin-country-{{ block_id }}"
       >
@@ -212,23 +198,17 @@
       name="postal_code"
       autocomplete="postal-code"
       inputmode="text"
+      {% if customer_address_locked %}readonly{% endif %}
       placeholder="{{ 'delivery_checker.postal_placeholder' | t | escape }}"
       aria-label="{{ 'delivery_checker.postal_aria_label' | t | escape }}"
       id="pin-input-{{ block_id }}"
       value="{{ saved_postal_code | escape }}"
     >
-    <button class="pin-checker__button" type="button" id="pin-btn-{{ block_id }}">{{ button_text | escape }}</button>
+      <button class="pin-checker__button" type="button" id="pin-btn-{{ block_id }}" {% if customer_address_locked %}hidden{% endif %}>{{ button_text | escape }}</button>
   </div>
   {% if saved_postal_code != blank %}
     <div class="pin-checker__saved-location" data-saved-location>
-      <span>{{ 'delivery_checker.saved_address_notice' | t }}</span>
-      <button
-        class="pin-checker__location-action"
-        type="button"
-        data-location-action
-        data-change-label="{{ 'delivery_checker.change_location' | t | escape }}"
-        data-restore-label="{{ 'delivery_checker.use_saved_address' | t | escape }}"
-      >{{ 'delivery_checker.change_location' | t }}</button>
+      <span>{{ 'delivery_checker.saved_address_notice' | t }} <strong>{{ saved_postal_code | escape }}</strong></span>
     </div>
   {% endif %}
   <p class="pin-checker__result" id="pin-result-{{ block_id }}" aria-live="polite" aria-atomic="true"></p>
@@ -273,7 +253,7 @@
       </div>
     </div>
     <section class="pin-checker__countdown" id="pin-countdown-{{ block_id }}" hidden aria-live="polite">
-      <span class="pin-checker__countdown-title" data-countdown-title>🔥 {{ 'delivery_checker.countdown_title' | t }} 🔥</span>
+      <span class="pin-checker__countdown-title" data-countdown-title>{{ 'delivery_checker.countdown_title' | t }}</span>
       <span class="pin-checker__countdown-label" id="pin-countdown-label-{{ block_id }}">{{ 'delivery_checker.order_within' | t }}</span>
       <strong id="pin-countdown-value-{{ block_id }}"></strong>
       <span class="pin-checker__countdown-delivery" data-countdown-delivery></span>
@@ -292,7 +272,6 @@
   </div>
 </div>
 
-{{ 'delivery-checker.css' | asset_url | stylesheet_tag }}
 <style>
   #pin-checker-{{ block_id }} {
     --pc-border: rgba(17, 24, 39, 0.12);
@@ -327,6 +306,10 @@
     font-family: var(--pc-font);
     font-size: var(--pc-font-size);
   }
+  .pin-checker__row { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1fr); gap:8px; }
+  .pin-checker__label { display:none; }
+  .pin-checker__select,.pin-checker__input { width:100%; padding:9px 12px; border:1px solid var(--pc-input-border); border-radius:10px; background:var(--pc-field-bg); }
+  .pin-checker__button { grid-column:1/-1; width:100%; padding:9px 16px; border:0; background:var(--pc-btn) }
 </style>
 
 <script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
@@ -355,15 +338,15 @@
     const methodSummary = document.getElementById('pin-method-summary-{{ block_id }}');
     const cod = root.dataset.cod === 'true';
     const savedLocation = root.querySelector('[data-saved-location]');
-    const locationAction = root.querySelector('[data-location-action]');
-    const savedCountry = String(root.dataset.savedCountry || '').trim();
     const savedPostal = String(root.dataset.savedPostal || '').trim();
+    const customerAddressLocked = savedPostal !== '';
     const localizationCountry = String(root.dataset.localizationCountry || 'US').trim();
     const cartItemsElement = document.getElementById('pin-cart-items-{{ block_id }}');
     const hasProduct = root.dataset.surface !== 'cart' && Boolean(String(root.dataset.productId || '').trim());
     const productScope = document;
     const eventController = new AbortController();
     const eventOptions = { signal: eventController.signal };
+    const rememberPostal = window.incodeThemeContext.postalHistory?.(root, pinInput, countrySelect, eventOptions);
 
     let requireValidPin = false;
     let pinUnlocked = false;
@@ -422,7 +405,7 @@
       setColor('--pc-countdown-text', style.countdown_text_color);
       const countdownTitle = root.querySelector('[data-countdown-title]');
       if (countdownTitle && typeof style.countdown_title === 'string' && style.countdown_title.trim()) {
-        countdownTitle.textContent = `🔥 ${style.countdown_title.trim()} 🔥`;
+        countdownTitle.textContent = style.countdown_title.trim();
       }
       root.dataset.iconStyle = String(style.icon_style || root.dataset.iconStyle || 'number');
       root.dataset.animation = String(style.animation || 'soft');
@@ -443,6 +426,7 @@
     const productContextParams = () => {
       const params = new URLSearchParams();
       params.set('surface', String(root.dataset.surface || 'product'));
+      params.set('countdown', root.dataset.showCountdown === 'true' ? '1' : '0');
       if (countrySelect && countrySelect.value) params.set('country', countrySelect.value);
       const productId = String(root.dataset.productId || '').trim();
       if (productId) params.set('productId', productId);
@@ -544,6 +528,12 @@
     };
 
       const renderShippingOptions = (data) => {
+      if (root.dataset.showServiceBadges === 'false') {
+        options.replaceChildren();
+        options.hidden = true;
+        return;
+      }
+      const badgeSettings = { same_day_available: 'showSameDay', next_day_available: 'showNextDay', express_available: 'showExpress', local_delivery_available: 'showLocal', pickup_available: 'showPickup' };
       const optionFields = [
         ['cod_available', root.dataset.codLabel],
         ['same_day_available', root.dataset.sameDayLabel],
@@ -555,14 +545,16 @@
       const fragment = document.createDocumentFragment();
 
       optionFields.forEach(([field, label]) => {
+        if (field === 'cod_available' && !cod) return;
+        if (root.dataset[badgeSettings[field]] === 'false') return;
         if (typeof data[field] !== 'boolean') return;
         const item = document.createElement('li');
         const mark = document.createElement('span');
         const copy = document.createElement('span');
          const state = document.createElement('strong');
          const available = data[field];
-         if (!available) return;
-         const iconStyle = ['number', 'delivery', 'duotone', 'circle', 'minimal', 'emoji'].includes(root.dataset.iconStyle)
+          if (!available && field !== 'cod_available') return;
+         const iconStyle = ['number', 'delivery', 'duotone', 'circle', 'minimal', 'emoji', 'text'].includes(root.dataset.iconStyle)
           ? root.dataset.iconStyle
           : 'number';
         const serviceKind = field === 'local_delivery_available' ? 'local' : field === 'pickup_available' ? 'pickup' : 'standard';
@@ -694,17 +686,19 @@
     const renderCountdown = (data) => {
       if (root.dataset.showCountdown !== 'true' || root.dataset.countdownVisible === 'false') return;
       const cutoffTime = window.incodeThemeContext.cutoffTime(data);
-      if (!Number.isFinite(cutoffTime) || cutoffTime <= Date.now()) return;
+      if (!Number.isFinite(cutoffTime)) return;
 
       const updateCountdown = () => {
         const remaining = Math.max(0, Math.ceil((cutoffTime - Date.now()) / 1000));
         if (remaining === 0) {
+          countdown.dataset.state = 'expired';
           countdownLabel.hidden = true;
           countdownValue.textContent = root.dataset.countdownExpired;
           window.clearInterval(countdownTimer);
           countdownTimer = null;
           return;
         }
+        countdown.dataset.state = 'running';
         const hours = Math.floor(remaining / 3600);
         const minutes = Math.floor((remaining % 3600) / 60);
         const seconds = remaining % 60;
@@ -738,7 +732,7 @@
            if (!disposed && root.isConnected && expiryVersion === requestVersion) runCheck();
          }, window.incodeThemeContext.expiryDelay(data));
        }
-       if (data.available !== true) return;
+        if (data.available !== true) return;
       root.dataset.countdownVisible = String(data.countdown_visible !== false);
       renderJourney(data);
       renderShippingOptions(data);
@@ -954,6 +948,7 @@
           return;
         }
         setResult(data.message || root.dataset.requestError, data.available ? 'success' : 'error');
+        if (data.available) rememberPostal?.(data.postal_code || pin);
         renderDetails(data);
         await persistEstimate(data, country, pin).catch(() => {});
         if (currentVersion !== requestVersion) return;
@@ -1010,11 +1005,6 @@
     const setSavedLocationActive = (active) => {
       root.dataset.savedLocationActive = String(active);
       if (savedLocation) savedLocation.querySelector('span').hidden = !active;
-      if (locationAction) {
-        locationAction.textContent = active
-          ? locationAction.dataset.changeLabel
-          : locationAction.dataset.restoreLabel;
-      }
     };
     countrySelect.addEventListener('change', () => {
       updateCountryFlags();
@@ -1025,25 +1015,6 @@
       clearStaleResult();
       setSavedLocationActive(false);
     }, eventOptions);
-    if (locationAction) {
-      locationAction.addEventListener('click', () => {
-        const restore = root.dataset.savedLocationActive !== 'true';
-        clearStaleResult();
-        if (restore) {
-          if (savedCountry) countrySelect.value = savedCountry;
-          updateCountryFlags();
-          pinInput.value = savedPostal;
-          setSavedLocationActive(true);
-          pinInput.focus();
-          return;
-        }
-        countrySelect.value = localizationCountry;
-        updateCountryFlags();
-        pinInput.value = '';
-        setSavedLocationActive(false);
-        pinInput.focus();
-      }, eventOptions);
-    }
     pinInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
@@ -1095,7 +1066,8 @@
     updateCountryFlags();
     initPolicy().then(() => {
       if (
-        root.dataset.autoCheckSavedAddress === 'true'
+        customerAddressLocked
+        && savedPostal
         && root.dataset.savedLocationActive === 'true'
         && pinInput.value === savedPostal
         && !root.hidden
@@ -1124,8 +1096,9 @@
 {
   "name": "t:delivery_checker.schema.name",
   "target": "section",
+  "stylesheet": "delivery-checker.css",
   "enabled_on": {
-    "templates": ["product", "collection", "index", "cart", "search", "blog", "article", "page", "list-collections", "404", "password"]
+    "templates": ["product", "cart"]
   },
   "settings": [
     { "type": "select", "id": "appearance_source", "label": "Appearance source", "default": "shop", "info": "Use shared app appearance or customize this block independently in the Theme Editor.", "options": [{ "value": "shop", "label": "Shared shop settings" }, { "value": "block", "label": "This block's settings" }] },
@@ -1148,14 +1121,8 @@
       "type": "checkbox",
       "id": "cod_enabled",
       "label": "t:delivery_checker.schema.cod_enabled_label",
+      "info": "t:delivery_checker.schema.cod_enabled_info",
       "default": true
-    },
-    {
-      "type": "checkbox",
-      "id": "auto_check_saved_address",
-      "label": "t:delivery_checker.schema.auto_check_saved_address_label",
-      "info": "t:delivery_checker.schema.auto_check_saved_address_info",
-      "default": false
     },
     {
       "type": "checkbox",
@@ -1171,6 +1138,27 @@
       "info": "t:delivery_checker.schema.show_delivery_journey_info",
       "default": true
     },
+    {
+      "type": "select",
+      "id": "journey_marker_style",
+      "label": "Journey display",
+      "info": "Choose whether delivery steps use numbers, icons, dots, emoji, or text only.",
+      "default": "number",
+      "options": [
+        { "value": "number", "label": "Numbers" },
+        { "value": "delivery", "label": "Delivery icons" },
+        { "value": "minimal", "label": "Minimal dots" },
+        { "value": "emoji", "label": "Emoji" },
+        { "value": "text", "label": "Text only" }
+      ]
+    },
+    { "type": "header", "content": "Service badges" },
+    { "type": "checkbox", "id": "show_service_badges", "label": "Show service badges", "info": "Hide or show all badges after a ZIP check. Only eligible services are displayed.", "default": true },
+    { "type": "checkbox", "id": "show_same_day", "label": "Show Same day badge", "default": true },
+    { "type": "checkbox", "id": "show_next_day", "label": "Show Next day badge", "default": true },
+    { "type": "checkbox", "id": "show_express", "label": "Show Express badge", "default": true },
+    { "type": "checkbox", "id": "show_local", "label": "Show Local delivery badge", "default": true },
+    { "type": "checkbox", "id": "show_pickup", "label": "Show Store pickup badge", "default": true },
     {
       "type": "header",
       "content": "t:delivery_checker.schema.appearance"

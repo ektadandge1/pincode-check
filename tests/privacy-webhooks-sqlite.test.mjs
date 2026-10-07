@@ -20,14 +20,18 @@ async function sqliteFixture(t) {
     await rm(directory, { recursive: true, force: true });
   });
   const migrations = new URL("../prisma/migrations/", import.meta.url);
-  const migrate = async (name = ownershipMigration) => {
+  const applyMigration = async (name) => {
     const sql = await readFile(new URL(`${name}/migration.sql`, migrations), "utf8");
     for (const statement of sql.split(/;\s*(?:\r?\n|$)/).filter((statement) => statement.trim())) {
       await prisma.$executeRawUnsafe(statement);
     }
   };
+  const migrate = async (name) => {
+    if (name) return applyMigration(name);
+    await applyMigration(ownershipMigration);
+  };
   for (const entry of (await readdir(migrations, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory() && entry.name < ownershipMigration) await migrate(entry.name);
+    if (entry.isDirectory() && entry.name !== ownershipMigration) await migrate(entry.name);
   }
   const actionFor = (db = prisma) => injectedServer({
     "app/db.server.ts": db,

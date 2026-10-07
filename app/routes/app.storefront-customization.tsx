@@ -44,10 +44,12 @@ type Customization = {
   storefrontIconStyle: string;
   storefrontAnimation: string;
   storefrontShowJourney: boolean;
+  storefrontEtaDisplayMode: string;
   storefrontCountdownBackground: string;
   storefrontCountdownDigitColor: string;
   storefrontCountdownTextColor: string;
   storefrontCountdownTitle: string;
+  countdownEnabled: boolean;
   storefrontCustomCss: string;
 };
 
@@ -76,10 +78,12 @@ const DEFAULTS: Customization = {
   storefrontIconStyle: "number",
   storefrontAnimation: "soft",
   storefrontShowJourney: true,
+  storefrontEtaDisplayMode: "both",
   storefrontCountdownBackground: "#06451f",
   storefrontCountdownDigitColor: "#ff6500",
   storefrontCountdownTextColor: "#ffffff",
   storefrontCountdownTitle: "Order cutoff countdown",
+  countdownEnabled: true,
   storefrontCustomCss: "",
 };
 
@@ -116,8 +120,10 @@ const LINE_OPTIONS = [
   { label: "No connector", value: "none" },
 ];
 
+const ETA_CONTENT_SECTIONS = ["date", "journey", "countdown"] as const;
+
 const TEMPLATE_OPTIONS = [
-  { label: "ZIP checker + ETA journey (recommended)", value: "modern-card" },
+  { label: "ZIP checker + ETA journey", value: "modern-card" },
   { label: "Soft segmented journey", value: "soft-segments" },
   { label: "Pastel connected timeline", value: "pastel-timeline" },
   { label: "Fresh progress track", value: "progress-track" },
@@ -132,9 +138,6 @@ const STOREFRONT_SURFACES = [
   ["Product page", "product"],
   ["Collection page", "collection"],
   ["Cart page", "cart"],
-  ["Home page", "index"],
-  ["Search page", "search"],
-  ["Other pages", "page"],
 ] as const;
 
 const TEMPLATE_PRESETS: Record<string, Partial<Customization>> = {
@@ -153,8 +156,25 @@ function isHex(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value);
 }
 
+function normalizeEtaSections(value: string | undefined, countdownEnabled: boolean): string {
+  const sections = new Set(
+    value === "both"
+      ? ["date", "journey"]
+      : String(value ?? "").split(",").map((section) => section.trim()).filter(Boolean),
+  );
+  if (countdownEnabled) sections.add("countdown");
+  const normalized = ETA_CONTENT_SECTIONS.filter((section) => sections.has(section));
+  return (normalized.length > 0 ? normalized : ["date", "journey"]).join(",");
+}
+
 function readCustomization(setting: Partial<Customization> | null): Customization {
-  return { ...DEFAULTS, ...(setting ?? {}) };
+  const customization = { ...DEFAULTS, ...(setting ?? {}) };
+  customization.storefrontEtaDisplayMode = normalizeEtaSections(
+    customization.storefrontEtaDisplayMode,
+    customization.countdownEnabled,
+  );
+  customization.countdownEnabled = customization.storefrontEtaDisplayMode.split(",").includes("countdown");
+  return customization;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -166,6 +186,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await requireActiveBilling(request);
   const formData = await request.formData();
+  const storefrontEtaDisplayMode = normalizeEtaSections(
+    String(formData.get("storefrontEtaDisplayMode") ?? ""),
+    false,
+  );
   const customization = {
     storefrontFontFamily: String(formData.get("storefrontFontFamily") ?? "system"),
     storefrontFontSize: Number(formData.get("storefrontFontSize") ?? 14),
@@ -188,11 +212,13 @@ export async function action({ request }: ActionFunctionArgs) {
     storefrontBorderRadius: Number(formData.get("storefrontBorderRadius") ?? 14),
     storefrontIconStyle: String(formData.get("storefrontIconStyle") ?? "number"),
     storefrontAnimation: String(formData.get("storefrontAnimation") ?? "soft"),
-    storefrontShowJourney: formData.has("storefrontShowJourney"),
+    storefrontShowJourney: storefrontEtaDisplayMode.split(",").includes("journey"),
+    storefrontEtaDisplayMode,
     storefrontCountdownBackground: String(formData.get("storefrontCountdownBackground") ?? "").trim(),
     storefrontCountdownDigitColor: String(formData.get("storefrontCountdownDigitColor") ?? "").trim(),
     storefrontCountdownTextColor: String(formData.get("storefrontCountdownTextColor") ?? "").trim(),
     storefrontCountdownTitle: String(formData.get("storefrontCountdownTitle") ?? "").trim(),
+    countdownEnabled: storefrontEtaDisplayMode.split(",").includes("countdown"),
     storefrontCustomCss: String(formData.get("storefrontCustomCss") ?? "").trim(),
   } satisfies Customization;
 
@@ -204,6 +230,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   if (!ANIMATION_OPTIONS.some((option) => option.value === customization.storefrontAnimation)) {
     return { ok: false, message: "Choose a supported animation." } satisfies ActionData;
+  }
+  const etaSections = customization.storefrontEtaDisplayMode.split(",");
+  if (etaSections.length === 0 || etaSections.some((section) => !ETA_CONTENT_SECTIONS.includes(section as typeof ETA_CONTENT_SECTIONS[number]))) {
+    return { ok: false, message: "Choose at least one supported automatic ETA section." } satisfies ActionData;
   }
   if (!LINE_OPTIONS.some((option) => option.value === customization.storefrontJourneyLineStyle)) {
     return { ok: false, message: "Choose a supported journey connector." } satisfies ActionData;
@@ -298,9 +328,12 @@ export default function StorefrontCustomizationPage() {
   useBeforeUnload((event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
   useBlocker(() => dirty && !window.confirm("Leave with unsaved storefront style changes?"));
   const [previewSurface, setPreviewSurface] = useState<string>("product");
-  const [experienceMode, setExperienceMode] = useState<"checker" | "automatic">("checker");
+  const experienceMode = "checker" as const;
   const [previewChecked, setPreviewChecked] = useState(false);
+  const previewSavedPostal = "10001";
   const previewLabel = STOREFRONT_SURFACES.find(([, template]) => template === previewSurface)?.[0] ?? "Product page";
+  const previewExperienceMode = previewSurface === "collection" ? "automatic" : experienceMode;
+  const selectedEtaSections = form.storefrontEtaDisplayMode.split(",");
   const update = <K extends keyof Customization>(key: K, value: Customization[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -311,21 +344,38 @@ export default function StorefrontCustomizationPage() {
       storefrontTemplate: value,
     }));
   };
+  const toggleEtaSection = (section: typeof ETA_CONTENT_SECTIONS[number], checked: boolean) => {
+    setForm((current) => {
+      const sections = new Set(current.storefrontEtaDisplayMode.split(",").filter(Boolean));
+      if (checked) sections.add(section);
+      else sections.delete(section);
+      if (sections.size === 0) return current;
+      const storefrontEtaDisplayMode = ETA_CONTENT_SECTIONS.filter((value) => sections.has(value)).join(",");
+      return {
+        ...current,
+        storefrontEtaDisplayMode,
+        storefrontShowJourney: sections.has("journey"),
+        countdownEnabled: sections.has("countdown"),
+      };
+    });
+  };
   const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
   const themeEditorUrl = (template: string) => {
-    const blockHandle = experienceMode === "checker"
+    const blockHandle = experienceMode === "checker" && template !== "collection"
       ? "delivery-checker"
-       : ["product", "index", "page"].includes(template)
-        ? "estimated-delivery-date"
-        : "delivery-checker-embed";
+      : template === "collection"
+        ? "delivery-checker-embed"
+        : "estimated-delivery-date";
     return `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
   };
   const placementEditorUrl = (template: string) => themeEditorUrl(template);
   const placementButtonLabel = (template: string) =>
-    experienceMode === "automatic" && ["collection", "cart", "search"].includes(template) ? "Add automatic dates to cards" : `Add ${experienceMode === "checker" ? "ZIP checker" : "ETA"}`;
+    template === "collection"
+      ? "Add ETA to product cards"
+      : "Add delivery availability";
 
   return (
-    <Page title="Storefront style" subtitle="Create a polished delivery experience that matches your brand.">
+      <Page title="Storefront style" subtitle="Create a polished delivery availability experience that matches your brand.">
       <fetcher.Form method="post">
         <BlockStack gap="500">
           {fetcher.data ? <Banner tone={fetcher.data.ok ? "success" : "critical"}>{fetcher.data.message}</Banner> : null}
@@ -335,29 +385,16 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Choose the storefront experience</Text>
-                      <Text as="p" tone="subdued">Decide whether shoppers enter a ZIP code first or see a general estimate immediately.</Text>
+                      <Text as="h2" variant="headingLg">Delivery availability block</Text>
+                      <Text as="p" tone="subdued">Use one block for every customer. Logged-in customers are checked using their saved address, while guests can enter their ZIP or PIN manually.</Text>
                     </BlockStack>
-                    <div className="incode-experience-options">
-                      <button type="button" className={experienceMode === "checker" ? "is-selected" : ""} onClick={() => { setExperienceMode("checker"); setPreviewChecked(false); }}>
-                        <span className="incode-experience-options__badge">Recommended</span>
-                        <strong>ZIP checker first</strong>
-                        <small>Ask for a postal code, then reveal availability, delivery dates, COD, and delivery options.</small>
-                      </button>
-                      <button type="button" className={experienceMode === "automatic" ? "is-selected" : ""} onClick={() => { setExperienceMode("automatic"); setPreviewChecked(false); }}>
-                        <strong>Automatic ETA</strong>
-                        <small>Show a general estimated date immediately without asking for a postal code.</small>
-                      </button>
-                    </div>
                     <BlockStack gap="200">
                       <Text as="h3" variant="headingMd">Add it where shoppers decide</Text>
                       <div className="incode-placement-grid">
                         {([
                           ["product", "Product page", "Below product details or near Add to Cart"],
-                          ["collection", "Collection page", "Help shoppers check before opening a product"],
+                          ["collection", "Collection product cards", "Show an ETA on each product card before shoppers open it"],
                           ["cart", "Cart page", "Confirm delivery before checkout"],
-                          ["index", "Home page", "Add a general delivery estimate to a section"],
-                          ["page", "Content page", "Add a general delivery estimate to a section"],
                         ] as const).map(([template, label, description]) => (
                           <div key={template} className={`incode-placement-card${previewSurface === template ? " is-selected" : ""}`}>
                             <button type="button" onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}>
@@ -372,9 +409,9 @@ export default function StorefrontCustomizationPage() {
                       </div>
                     </BlockStack>
                     <Banner tone="info">
-                      {experienceMode === "checker"
-                        ? "Delivery dates stay hidden until the shopper enters a valid ZIP or postal code. This is the recommended product-page experience."
-                        : "Automatic ETA is a general estimate. Use the ZIP checker when availability depends on the shopper's location."}
+                      {previewSurface === "collection"
+                        ? "Collection cards show delivery estimates before shoppers open a product. Product and cart pages use the unified availability checker."
+                        : "Logged-in customers with a default address are checked automatically. Guests enter a ZIP or PIN manually. No IP location is used."}
                     </Banner>
                   </BlockStack>
                 </Card>
@@ -457,7 +494,16 @@ export default function StorefrontCustomizationPage() {
                       <Select label="Animation" name="storefrontAnimation" options={ANIMATION_OPTIONS} value={form.storefrontAnimation} onChange={(value) => update("storefrontAnimation", value)} />
                       <Select label="Icon connector" name="storefrontJourneyLineStyle" options={LINE_OPTIONS} value={form.storefrontJourneyLineStyle} onChange={(value) => update("storefrontJourneyLineStyle", value)} />
                     </FormLayout.Group>
-                    <Checkbox label="Show Order now, Ready to ship, and At your doorstep" name="storefrontShowJourney" checked={form.storefrontShowJourney} onChange={(value) => update("storefrontShowJourney", value)} />
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">Delivery content to display</Text>
+                      <Text as="p" tone="subdued">Choose one section, multiple sections, or all three. At least one section must remain selected.</Text>
+                      <InlineStack gap="400" wrap>
+                        <Checkbox label="Delivery date" checked={selectedEtaSections.includes("date")} onChange={(checked) => toggleEtaSection("date", checked)} />
+                        <Checkbox label="Delivery journey" checked={selectedEtaSections.includes("journey")} onChange={(checked) => toggleEtaSection("journey", checked)} />
+                        <Checkbox label="Countdown timer" checked={selectedEtaSections.includes("countdown")} onChange={(checked) => toggleEtaSection("countdown", checked)} />
+                      </InlineStack>
+                      <input type="hidden" name="storefrontEtaDisplayMode" value={form.storefrontEtaDisplayMode} readOnly />
+                    </BlockStack>
                   </BlockStack>
                 </Card>
                 <Card>
@@ -466,7 +512,7 @@ export default function StorefrontCustomizationPage() {
                       <Text as="h2" variant="headingLg">5. Countdown timer</Text>
                       <Text as="p" tone="subdued">Customize the cutoff timer independently. Enable “Show cutoff countdown” in the theme block to display it.</Text>
                     </BlockStack>
-                    <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="Example: Cyber Monday Countdown" />
+                    <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="The countdown is controlled by the content choices above and appears only for eligible cutoff and targeting rules." disabled={!selectedEtaSections.includes("countdown")} />
                     <div className="incode-color-grid">
                       {([
                         ["storefrontCountdownBackground", "Panel background"],
@@ -512,8 +558,9 @@ export default function StorefrontCustomizationPage() {
                     <span className="incode-preview-live">SIMULATED</span>
                   </InlineStack>
                   <InlineStack gap="200" wrap>
-                    <Badge tone="info">{experienceMode === "checker" ? "ZIP check required" : "Automatic estimate"}</Badge>
+                    <Badge tone="info">{previewExperienceMode === "checker" ? "ZIP check required" : "Automatic estimate"}</Badge>
                     <Badge>{previewLabel}</Badge>
+                    <Badge tone="success">{`Saved ZIP ${previewSavedPostal}`}</Badge>
                   </InlineStack>
                   <div className="incode-preview-tabs" role="tablist" aria-label="Preview page type">
                     {STOREFRONT_SURFACES.map(([label, template]) => (
@@ -536,23 +583,17 @@ export default function StorefrontCustomizationPage() {
                           <div className="incode-storefront-mock__bar"><span>Northstar Supply</span><span>⌕ &nbsp; ♡ &nbsp; 🛒</span></div>
                           <div className="incode-product-mock">
                             <div className="incode-product-mock__image">Canvas<br />tote</div>
-                            <div className="incode-product-mock__details"><strong>Everyday canvas tote</strong><span>$39.00 · In stock</span><small>{experienceMode === "checker" ? "Delivery check near Add to Cart" : "Automatic ETA below product details"}</small><button type="button">Add to cart</button></div>
+                            <div className="incode-product-mock__details"><strong>Everyday canvas tote</strong><span>$39.00 · In stock</span><small>{previewExperienceMode === "checker" ? "Delivery check near Add to Cart" : "Automatic ETA below product details"}</small><button type="button">Add to cart</button></div>
                           </div>
                         </>
-                      ) : previewSurface === "collection" || previewSurface === "search" ? (
+                      ) : previewSurface === "collection" ? (
                         <>
-                          <div className="incode-storefront-mock__bar"><span>{previewSurface === "collection" ? "Everyday essentials" : 'Search results'}</span><span>Sort by ▾</span></div>
-                          <div className="incode-preview-surface__products"><span><b>Canvas tote</b><small>$39.00</small><em>{experienceMode === "checker" ? "Check delivery" : "Delivery by Oct 8"}</em></span><span><b>Travel tote</b><small>$49.00</small><em>{experienceMode === "checker" ? "Check delivery" : "Delivery by Oct 9"}</em></span></div>
+                          <div className="incode-storefront-mock__bar"><span>Everyday essentials</span><span>Sort by ▾</span></div>
+                          <div className="incode-preview-surface__products"><span><b>Canvas tote</b><small>$39.00</small><em>Delivery by Oct 8</em></span><span><b>Travel tote</b><small>$49.00</small><em>Delivery by Oct 9</em></span></div>
                         </>
                       ) : previewSurface === "cart" ? (
-                        <><div className="incode-storefront-mock__bar"><span>Your cart</span><span>2 items</span></div><div className="incode-cart-mock"><span className="incode-cart-mock__thumb">Tote</span><span><b>Everyday canvas tote × 2</b><small>$78.00</small><em>{experienceMode === "checker" ? "Check delivery before checkout" : "Estimated delivery: Oct 8–10"}</em></span></div><div className="incode-cart-mock__total"><span>Total</span><b>$78.00</b></div></>
-                      ) : previewSurface === "index" ? (
-                        <><div className="incode-storefront-mock__bar"><span>Northstar Supply</span><span>Shop &nbsp; About &nbsp; 🛒</span></div><div className="incode-home-mock"><b>Made for your everyday</b><span>Thoughtful essentials, delivered on your schedule.</span><button type="button">Shop new arrivals</button></div></>
-                      ) : previewSurface === "page" ? (
-                        <><div className="incode-storefront-mock__bar"><span>Northstar Supply</span><span>Help center</span></div><div className="incode-page-mock"><b>Shipping and delivery</b><span>Find out when your order will arrive</span><small>{experienceMode === "checker" ? "Checker can be placed within content" : "Automatic delivery guidance"}</small></div></>
-                      ) : (
-                        <><strong>Delivery help on every page</strong><span>App embed available across your storefront</span></>
-                      )}
+                        <><div className="incode-storefront-mock__bar"><span>Your cart</span><span>2 items</span></div><div className="incode-cart-mock"><span className="incode-cart-mock__thumb">Tote</span><span><b>Everyday canvas tote × 2</b><small>$78.00</small><em>{previewExperienceMode === "checker" ? "Check delivery before checkout" : "Estimated delivery: Oct 8–10"}</em></span></div><div className="incode-cart-mock__total"><span>Total</span><b>$78.00</b></div></>
+                      ) : null}
                     </div>
                   </div>
                   <div
@@ -569,8 +610,9 @@ export default function StorefrontCustomizationPage() {
                       borderRadius: `${form.storefrontBorderRadius}px`,
                     }}
                   >
-                    <strong style={{ fontSize: `${form.storefrontHeadingSize}px` }}>{experienceMode === "checker" ? "Check delivery availability" : "Estimated delivery"}</strong>
-                    {experienceMode === "checker" ? (
+                    <strong style={{ fontSize: `${form.storefrontHeadingSize}px` }}>{previewExperienceMode === "checker" ? "Check delivery to your address" : "Estimated delivery"}</strong>
+                    <span className="incode-custom-preview__saved" style={{ color: form.storefrontMutedColor }}>Using saved address: <strong>{previewSavedPostal}</strong></span>
+                    {previewExperienceMode === "checker" ? (
                       <>
                         <span style={{ color: form.storefrontMutedColor }}>Enter your ZIP or postal code to see delivery dates.</span>
                         <div className="incode-custom-preview__country" style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>🇺🇸 United States <span>⌄</span></div>
@@ -578,14 +620,14 @@ export default function StorefrontCustomizationPage() {
                           <span style={{ background: form.storefrontFieldBackground, borderColor: form.storefrontFieldBorderColor }}>Enter ZIP code · 10001</span>
                           <button type="button" style={{ background: form.storefrontButtonColor, color: form.storefrontButtonTextColor }} onClick={() => setPreviewChecked(true)}>Check</button>
                         </div>
-                        {previewChecked
+                        {previewChecked || Boolean(previewSavedPostal)
                           ? <div className="incode-custom-preview__result" style={{ background: form.storefrontResultBackground, color: form.storefrontResultTextColor }}>📦 Delivery between Oct 6th and Oct 8th</div>
                           : <div className="incode-custom-preview__locked" style={{ borderColor: form.storefrontFieldBorderColor, color: form.storefrontMutedColor }}>Delivery date appears here after a successful ZIP check</div>}
                       </>
-                    ) : (
+                    ) : selectedEtaSections.includes("date") ? (
                       <div className="incode-custom-preview__result" style={{ background: form.storefrontResultBackground, color: form.storefrontResultTextColor }}>📦 Delivery between Oct 6th and Oct 8th</div>
-                    )}
-                    {form.storefrontShowJourney && (experienceMode === "automatic" || previewChecked) ? (
+                    ) : null}
+                    {selectedEtaSections.includes("journey") && (previewExperienceMode === "automatic" || previewChecked || Boolean(previewSavedPostal)) ? (
                       <div className="incode-custom-preview__journey-shell" style={{ background: form.storefrontJourneyBackground, borderColor: form.storefrontFieldBorderColor }}>
                         <strong>🇺🇸 Estimated Delivery Date&nbsp; Oct 9th to Oct 10th</strong>
                         <div
@@ -607,7 +649,7 @@ export default function StorefrontCustomizationPage() {
                         </div>
                       </div>
                     ) : null}
-                    {experienceMode === "checker" && previewChecked ? <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
+                    {selectedEtaSections.includes("countdown") && (previewExperienceMode === "automatic" || previewChecked || Boolean(previewSavedPostal)) ? <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
                       <strong>🔥 {form.storefrontCountdownTitle} 🔥</strong>
                       <div>
                         {[["07", "Hours"], ["27", "Minutes"], ["46", "Seconds"]].map(([value, label]) => (

@@ -96,7 +96,7 @@ model DeliverySetting {
   inventoryAwareEnabled         Boolean   @default(false)
   disableAddToCart              Boolean   @default(false)
   requireValidPin               Boolean   @default(false)
-  successMessage                String    @default("Delivery by {date}. {cod_message}{delivery_charge_message}")
+  successMessage                String    @default("Delivery between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}")
   unavailableMessage            String    @default("Sorry, delivery is not available for this postal code.")
   codAvailableMessage           String    @default("COD available.")
   codUnavailableMessage         String    @default("Prepaid only.")
@@ -123,6 +123,7 @@ model DeliverySetting {
   storefrontIconStyle           String    @default("number")
   storefrontAnimation           String    @default("soft")
   storefrontShowJourney         Boolean   @default(true)
+  storefrontEtaDisplayMode      String    @default("both")
   storefrontCountdownBackground String    @default("#06451f")
   storefrontCountdownDigitColor String    @default("#ff6500")
   storefrontCountdownTextColor  String    @default("#ffffff")
@@ -183,9 +184,12 @@ model FulfillmentLocationRule {
   processingDays              Int?
   transitDays                 Int?
   localDeliveryEnabled        Boolean  @default(false)
+  localDeliveryCountry         String   @default("")
   localDeliveryPostalCodesCsv String   @default("")
   pickupEnabled               Boolean  @default(false)
   pickupInstructions          String   @default("")
+  serviceTargetMode           String   @default("all")
+  serviceTargetValuesCsv      String   @default("")
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
 

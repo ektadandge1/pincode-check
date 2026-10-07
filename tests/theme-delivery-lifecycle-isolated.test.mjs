@@ -198,6 +198,9 @@ test('ETA refetch and checker expiry are versioned and keep local theme settings
   assert.match(checker, /expiryVersion === requestVersion\) runCheck\(\)/);
   assert.match(checker, /params\.set\('qty', String\(getQuantity\(\)\)\)/);
   assert.match(eta, /root\.dataset\.appearanceSource === 'block'/);
+  assert.match(eta, /sections\.has\('countdown'\)/);
+  assert.match(eta, /data\.seconds_until_cutoff \?\? data\.cutoff_seconds_remaining/);
+  assert.match(eta, /window\.clearInterval\(countdownTimer\)/);
   assert.match(checker, /root\.dataset\.appearanceSource === 'block'/);
   assert.match(source('blocks/delivery-service-options.liquid'), /\.incode-service-card \[hidden\]/);
   assert.match(source('assets/delivery-checker.css'), /@container/);
@@ -226,6 +229,9 @@ test('product checker persistence is cart-only and cart writes require a complet
   assert.match(checker, /root\.dataset\.surface !== 'cart'\) return Promise\.resolve\(\)/);
   assert.match(checker, /data\.cart_complete === true/);
   assert.match(checker, /Number\(data\.cart_items_checked\) === snapshotItems\.length/);
-  assert.match(source('blocks/delivery-checker.liquid'), /if customer and customer\.default_address/);
+  const checkerLiquid = source('blocks/delivery-checker.liquid');
+  assert.match(checkerLiquid, /if customer and customer\.default_address/);
+  assert.match(checkerLiquid, /customerAddressLocked\s*&&\s*savedPostal\s*&&\s*root\.dataset\.savedLocationActive/);
+  assert.match(checkerLiquid, /customer_address_locked %\}disabled/);
   assert.match(source('blocks/delivery-service-options.liquid'), /if customer and customer\.default_address/);
 });

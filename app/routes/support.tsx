@@ -55,7 +55,7 @@ export default function Support() {
                       Upload country and postal code coverage by CSV or add records manually.
                     </List.Item>
                     <List.Item>
-                      Add the Delivery availability checker app block to the product template.
+                      Add the Check delivery availability app block to the product template.
                     </List.Item>
                     <List.Item>
                       Test a valid postal code and an unavailable postal code on a product

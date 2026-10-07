@@ -43,9 +43,9 @@ export default function AdditionalPage() {
                     <Badge tone="info">About 10 minutes</Badge>
                   </InlineStack>
                   {[
-                    ["1", "Set delivery behavior", "Choose weekends and cutoff time in Delivery Timing. Review Messages and Cart Protection separately.", "/app/delivery-settings?tab=timing", "Configure"],
+                    ["1", "Set delivery behavior", "Choose weekends and cutoff time in Delivery Timing. Messages and Optional features can be configured later.", "/app/delivery-settings?tab=timing", "Configure"],
                     ["2", "Add coverage", "Upload a CSV or create exact codes, ranges, and wildcard rules. Group them into zones when priorities overlap.", "/app/delivery-settings?tab=coverage", "Add coverage"],
-                    ["3", "Set product targeting", "Apply PIN enforcement globally in Cart Protection or override it for products, collections, vendors, and tags.", "/app/delivery-settings?tab=products", "Set targets"],
+                    ["3", "Set product targeting", "Add product, collection, vendor, or tag overrides when needed. Shop-wide cart protection is available under Optional.", "/app/delivery-settings?tab=products", "Set targets"],
                     ["4", "Publish and test", "Add the app block to the product template. Test one serviceable and one unavailable postal code before publishing.", themeEditorUrl, "Open editor"],
                   ].map(([number, title, description, url, action]) => (
                     <div className="incode-step" key={number}>

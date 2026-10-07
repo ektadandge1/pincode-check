@@ -46,9 +46,15 @@
     endfor
   endif
   assign inline_items = inline_items | prepend: '[' | append: ']'
+  assign inline_country = localization.country.iso_code | default: 'US'
+  assign inline_saved_postal = ''
+  if customer and customer.default_address
+    assign inline_country = customer.default_address.country_code | default: inline_country
+    assign inline_saved_postal = customer.default_address.zip | default: ''
+  endif
 %}
 
-<div class="incode-inline-delivery" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ localization.country.iso_code | default: 'US' }}">
+<div class="incode-inline-delivery" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ inline_country }}" data-saved-postal="{{ inline_saved_postal | escape }}">
   <script type="application/json" data-inline-items>{{ inline_items }}</script>
 </div>
 
@@ -71,7 +77,7 @@
   "name": "Delivery dates on cards",
   "target": "section",
   "enabled_on": {
-    "templates": ["collection", "search", "cart"]
+    "templates": ["collection", "cart"]
   },
   "settings": []
 }

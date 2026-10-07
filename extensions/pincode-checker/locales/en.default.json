@@ -1,9 +1,9 @@
 {
   "extension": {
-    "name": "Delivery Checker"
+    "name": "Check delivery availability"
   },
   "delivery_checker": {
-    "heading": "Check delivery availability",
+    "heading": "Check delivery to your address",
     "supporting_text": "Enter your PIN or ZIP code to see delivery dates and available services.",
     "check_button": "Check availability",
     "country_label": "Country",
@@ -82,6 +82,7 @@
     "at_doorstep": "At your doorstep",
     "note": "Final availability depends on your delivery postal code.",
     "today": "Today",
-    "unavailable": "Delivery estimate is temporarily unavailable."
+    "unavailable": "Delivery estimate is temporarily unavailable.",
+    "saved_address_notice": "Using saved address: {postal_code}"
   }
 }

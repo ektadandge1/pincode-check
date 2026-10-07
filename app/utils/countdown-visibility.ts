@@ -11,8 +11,10 @@ export function countdownVisible(
   setting: CountdownSetting | null,
   context: { productId?: string; collectionHandles?: string[]; zoneId?: number | null },
   surface: string,
+  enabledOverride?: boolean,
 ): boolean {
-  if (!setting?.countdownEnabled) return false;
+  if (!setting) return enabledOverride === true && ["product", "cart"].includes(surface);
+  if (!(enabledOverride ?? setting.countdownEnabled)) return false;
   const values = (csv: string) => csv.split(",").map((value) => value.trim()).filter(Boolean);
   if (!values(setting.countdownDisplaySurfacesCsv).includes(surface)) return false;
   if (setting.countdownTargetMode === "products") {
