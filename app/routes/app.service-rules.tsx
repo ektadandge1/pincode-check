@@ -126,6 +126,9 @@ export default function ServiceRulesPage() {
     } : EMPTY_FORM);
   }, [editingRule]);
   const saving = navigation.state !== "idle";
+  const pendingIntent = String(navigation.formData?.get("intent") ?? "");
+  const pendingId = Number(navigation.formData?.get("id") ?? 0);
+  const savePending = pendingIntent === "save";
   const targetHelp = form.targetKind === "product"
     ? "Enter the numeric Shopify product ID."
     : form.targetKind === "collection"
@@ -142,9 +145,9 @@ export default function ServiceRulesPage() {
       titleMetadata={<Badge tone={access.features.targeting ? "success" : "info"}>{access.features.targeting ? "Standard" : "Subscription required"}</Badge>}
     >
       <BlockStack gap="400">
-        {actionData ? <Banner tone={actionData.ok ? "success" : "critical"} title={actionData.ok ? "Service rule saved" : "Could not save service rule"}>{actionData.message}</Banner> : null}
+        {actionData ? <Banner tone={actionData.ok ? "success" : "critical"} title={actionData.ok ? "Service rules updated" : "Could not update service rules"}>{actionData.message}</Banner> : null}
         <Banner tone="info" title="Independent from delivery-date rules">
-          These rules only show or hide fulfillment services. Processing days, transit days, delivery messages, and PIN protection remain under Delivery control → Product rules.
+          These rules only show or hide fulfillment services. Processing days, transit days, delivery messages, and PIN protection remain under Delivery settings → Product rules.
         </Banner>
         <Card>
           <Form method="post">
@@ -169,8 +172,8 @@ export default function ServiceRulesPage() {
                 </InlineStack>
               </FormLayout>
               <InlineStack gap="200">
-                <Button submit variant="primary" loading={saving} disabled={!access.features.targeting}>{editingRule ? "Save service rule" : "Create service rule"}</Button>
-                {editingRule ? <Button url="/app/service-rules">Cancel</Button> : null}
+                <Button submit variant="primary" loading={savePending} disabled={!access.features.targeting || saving}>{editingRule ? "Save service rule" : "Create service rule"}</Button>
+                {editingRule ? <Button url="/app/service-rules" disabled={saving}>Cancel</Button> : null}
               </InlineStack>
             </BlockStack>
           </Form>
@@ -183,12 +186,16 @@ export default function ServiceRulesPage() {
                 <BlockStack gap="100">
                   <InlineStack gap="200" blockAlign="center"><Text as="h3" variant="headingMd">{rule.name}</Text>{rule.enabled ? <Badge tone="success">Enabled</Badge> : <Badge>Disabled</Badge>}</InlineStack>
                   <Text as="p" tone="subdued">{rule.targetKind}: {rule.targetValue} · Priority {rule.priority}</Text>
-                  <Text as="p">Shipping: {rule.shippingAvailable ? "Available" : "Blocked"} · Local delivery: {rule.localDeliveryAvailable ? "Available" : "Blocked"} · Store pickup: {rule.pickupAvailable ? "Available" : "Blocked"}</Text>
+                  <InlineStack gap="200" wrap>
+                    <Badge tone={rule.shippingAvailable ? "success" : undefined}>{`Shipping ${rule.shippingAvailable ? "available" : "blocked"}`}</Badge>
+                    <Badge tone={rule.localDeliveryAvailable ? "success" : undefined}>{`Local delivery ${rule.localDeliveryAvailable ? "available" : "blocked"}`}</Badge>
+                    <Badge tone={rule.pickupAvailable ? "success" : undefined}>{`Store pickup ${rule.pickupAvailable ? "available" : "blocked"}`}</Badge>
+                  </InlineStack>
                 </BlockStack>
                 <InlineStack gap="200">
-                  <Button size="slim" url={`/app/service-rules?edit=${rule.id}`}>Edit</Button>
-                  <Form method="post"><input type="hidden" name="intent" value="toggle" /><input type="hidden" name="id" value={rule.id} /><Button submit size="slim">{rule.enabled ? "Disable" : "Enable"}</Button></Form>
-                  <Form method="post" onSubmit={(event) => { if (!window.confirm(`Delete service rule "${rule.name}"?`)) event.preventDefault(); }}><input type="hidden" name="intent" value="delete" /><input type="hidden" name="id" value={rule.id} /><Button submit size="slim" tone="critical">Delete</Button></Form>
+                  <Button size="slim" url={`/app/service-rules?edit=${rule.id}`} disabled={saving}>Edit</Button>
+                  <Form method="post"><input type="hidden" name="intent" value="toggle" /><input type="hidden" name="id" value={rule.id} /><Button submit size="slim" disabled={saving} loading={pendingIntent === "toggle" && pendingId === rule.id}>{rule.enabled ? "Disable" : "Enable"}</Button></Form>
+                  <Form method="post" onSubmit={(event) => { if (!window.confirm(`Delete service rule "${rule.name}"?`)) event.preventDefault(); }}><input type="hidden" name="intent" value="delete" /><input type="hidden" name="id" value={rule.id} /><Button submit size="slim" tone="critical" disabled={saving} loading={pendingIntent === "delete" && pendingId === rule.id}>Delete</Button></Form>
                 </InlineStack>
               </InlineStack>
             </Card>

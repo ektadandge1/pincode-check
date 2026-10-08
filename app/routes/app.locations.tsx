@@ -1121,10 +1121,11 @@ export default function LocationsPage() {
                       <Badge tone={form.localDeliveryEnabled ? "success" : undefined}>{form.localDeliveryEnabled ? "Delivery on" : "Delivery off"}</Badge>
                       <Badge tone={form.pickupEnabled ? "success" : undefined}>{form.pickupEnabled ? "Pickup on" : "Pickup off"}</Badge>
                     </InlineStack>
-                  </InlineStack>
-                  <div className="incode-location-enable">
+                   </InlineStack>
+                   <Text as="p" tone="subdued" variant="bodySm">Each Save location button saves every section for this location, including collapsed sections.</Text>
+                   <div className="incode-location-enable">
                     <Checkbox label="Location enabled for services" name="enabled" checked={form.enabled} disabled={!isAdvanced || form.localDeliveryEnabled || form.pickupEnabled} onChange={(checked) => updateForm(location.id, "enabled", checked)} helpText={form.localDeliveryEnabled || form.pickupEnabled ? "Automatically enabled while delivery or pickup is on." : "Enable this location for routing."} />
-                    <Button submit disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save status</Button>
+                    <Button submit disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button>
                   </div>
                   <div className="incode-location-sections">
                     <LocationSettingsSection title="Routing & delivery timing" description="Priority and optional delivery-time overrides" status={selectedPriorityMode === "manual" ? `Priority ${form.priority}` : "Stock based"}>
@@ -1134,7 +1135,7 @@ export default function LocationsPage() {
                        <TextField label="Processing days override" name="processingDays" type="number" min={0} max={60} value={form.processingDays} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "processingDays", value)} autoComplete="off" />
                        <TextField label="Transit days override" name="transitDays" type="number" min={0} max={60} value={form.transitDays} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "transitDays", value)} autoComplete="off" />
                       </FormLayout.Group>
-                      <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save routing</Button></div>
+                      <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
                       </FormLayout>
                     </LocationSettingsSection>
                     <LocationSettingsSection title="Local delivery" description="Use existing delivery zones or manual postal coverage" status={form.localDeliveryEnabled ? form.localDeliveryCoverageMode === "zone" ? `${form.localDeliveryZoneIdsCsv.split(",").filter(Boolean).length} zones` : "Postal coverage" : "Off"}>
@@ -1167,7 +1168,7 @@ export default function LocationsPage() {
                     />
                     </>}
                     </div>
-                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save local delivery</Button></div>
+                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
                       </FormLayout>
                     </LocationSettingsSection>
                     <LocationSettingsSection title="Store pickup" description="Availability, schedule, contact and instructions" status={form.pickupEnabled ? "Enabled" : "Off"}>
@@ -1202,7 +1203,7 @@ export default function LocationsPage() {
                     </BlockStack>
                     <BlockedDatesPicker value={form.pickupBlockedDatesCsv} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "pickupBlockedDatesCsv", value)} />
                     </div>
-                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save store pickup</Button></div>
+                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
                       </FormLayout>
                     </LocationSettingsSection>
                     <LocationSettingsSection title="Service availability targeting" description="Show this location's services only for selected products, collections, tags or delivery zones" status={form.serviceTargetMode === "all" ? "Everyone" : SERVICE_TARGET_OPTIONS.find((option) => option.value === form.serviceTargetMode)?.label || "Filtered"}>
@@ -1232,7 +1233,7 @@ export default function LocationsPage() {
                           />
                           );
                         })() : null}
-                        <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save targeting</Button></div>
+                        <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
                       </BlockStack>
                     </LocationSettingsSection>
                   </div>

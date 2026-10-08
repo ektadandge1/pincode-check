@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
+import { Link, Outlet, useLoaderData, useNavigation, useRouteError } from "react-router";
 import { NavMenu } from "@shopify/app-bridge-react";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { AppProvider as PolarisProvider } from "@shopify/polaris";
@@ -40,6 +40,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const navigating = navigation.state !== "idle";
 
   return (
     <ShopifyAppProvider embedded apiKey={apiKey}>
@@ -48,14 +50,18 @@ export default function App() {
           <a href="/app" rel="home">
             Home
           </a>
-          <a href="/app/delivery-settings">Delivery control</a>
+          <a href="/app/delivery-settings">Delivery settings</a>
           <a href="/app/storefront-customization">Storefront style</a>
           <a href="/app/locations">Delivery &amp; pickup</a>
+          <a href="/app/service-rules">Service rules</a>
           <a href="/app/analytics">Analytics</a>
           <a href="/app/headless-api">Headless API</a>
           <a href="/app/plans">Plans</a>
-          <a href="/app/additional">Help</a>
+          <a href="/app/additional">Setup guide</a>
         </NavMenu>
+        <div className={`incode-route-progress${navigating ? " is-active" : ""}`} aria-hidden={!navigating}>
+          <span />
+        </div>
         <div className="incode-admin-shell">
           <Outlet />
         </div>

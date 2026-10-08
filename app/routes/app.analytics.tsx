@@ -109,7 +109,7 @@ export default function AnalyticsPage() {
     <Page
       title="Delivery analytics"
       subtitle="Privacy-safe insights from storefront delivery checks."
-      primaryAction={<Button url="/app/delivery-settings#coverage" variant="primary">Improve coverage</Button>}
+      primaryAction={<Button url="/app/delivery-settings?tab=coverage" variant="primary">Improve coverage</Button>}
     >
       <BlockStack gap="500">
         {data.total === 0 ? (
@@ -122,7 +122,7 @@ export default function AnalyticsPage() {
           <MetricCard label="All-time checks" value={data.total} detail="Masked postal regions only" tone="info" />
           <MetricCard label="Serviceable" value={data.available} detail="Successful delivery matches" tone="success" />
           <MetricCard label="Unavailable" value={data.unavailable} detail="Coverage opportunities" tone={data.unavailable > 0 ? "critical" : "success"} />
-          <MetricCard label="Availability rate" value={`${data.availabilityRate}%`} detail="Across all recorded checks" tone={data.availabilityRate >= 80 ? "success" : "critical"} />
+          <MetricCard label="Availability rate" value={data.total ? `${data.availabilityRate}%` : "No data"} detail={data.total ? "Across all recorded checks" : "Waiting for the first check"} tone={data.total === 0 ? "info" : data.availabilityRate >= 80 ? "success" : "critical"} />
         </div>
 
         <Layout>
@@ -160,9 +160,11 @@ export default function AnalyticsPage() {
               <Card>
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Coverage health</Text>
-                  <ProgressBar progress={data.availabilityRate} size="small" tone={data.availabilityRate >= 80 ? "success" : "critical"} />
+                  <ProgressBar progress={data.availabilityRate} size="small" tone={data.total === 0 ? "primary" : data.availabilityRate >= 80 ? "success" : "critical"} />
                   <Text as="p" tone="subdued">
-                    {data.availabilityRate >= 80
+                    {data.total === 0
+                      ? "Coverage health will appear after shoppers begin checking delivery."
+                      : data.availabilityRate >= 80
                       ? "Most shopper locations receive a serviceable response."
                       : "Review unavailable regions and add targeted coverage rules."}
                   </Text>

@@ -117,7 +117,7 @@ export default function Index() {
                     <Text as="h2" variant="headingLg">Launch checklist</Text>
                     <Text as="p" tone="subdued">Complete these steps before promoting the checker.</Text>
                   </BlockStack>
-                   <Badge tone={progress === 100 ? "success" : "attention"}>{`${completedSteps} of 2 configuration checks complete`}</Badge>
+                    <Badge tone={progress === 100 ? "success" : "attention"}>{`${completedSteps} of 2 automated checks complete`}</Badge>
                 </InlineStack>
                 <ProgressBar progress={progress} size="small" tone={progress === 100 ? "success" : "primary"} />
                 <Divider />
@@ -141,7 +141,7 @@ export default function Index() {
                   <span className="incode-step__number">3</span>
                   <BlockStack gap="050">
                     <Text as="h3" fontWeight="semibold">Publish the storefront block</Text>
-                    <Text as="p" tone="subdued">Manual verification required, not included in the configuration count. Add the checker to your published product template and test a serviceable and an unavailable code.</Text>
+                    <Text as="p" tone="subdued">Manual final step, shown separately from the two automated checks. Add the checker to your published product template and test a serviceable and an unavailable code.</Text>
                   </BlockStack>
                   <Button url={themeEditorUrl} external size="slim">Open editor</Button>
                 </div>
