@@ -22,7 +22,7 @@ function fixture({ location = { id, name: "Canonical Shopify store", address: { 
   const admin = { graphql: async (query, options) => {
     lookups.push({ query, options });
     if (lookupError) return Response.json({ errors: [{ message: "Access denied" }] });
-    if (query.includes("RecentPickupOrders")) return Response.json({ data: { orders: { nodes: orders } } });
+    if (query.includes("RecentServiceOrders")) return Response.json({ data: { orders: { nodes: orders } } });
     return Response.json({ data: query.includes("location(id:") ? { location } : {
       locations: { nodes: [location] }, products: { nodes: [], pageInfo: { hasNextPage: false } }, collections: { nodes: [], pageInfo: { hasNextPage: false } },
     } });
@@ -146,14 +146,39 @@ test("pickup orders view explains missing order authorization without querying o
   const result = await f.loader({ request: new Request("https://fixture.test/app/locations?view=pickups") });
   assert.equal(result.orderAccessGranted, false);
   assert.match(result.pickupOrdersError, /read_orders/);
-  assert.equal(f.lookups.some(({ query }) => query.includes("RecentPickupOrders")), false);
+  assert.equal(f.lookups.some(({ query }) => query.includes("RecentServiceOrders")), false);
+});
+
+test("delivery orders view reads local-delivery attributes without persisting customer data", async () => {
+  const order = {
+    id: "gid://shopify/Order/988",
+    name: "#1002",
+    createdAt: "2026-10-08T11:30:00Z",
+    email: "delivery@example.test",
+    shippingAddress: { name: "Checkout Name", address1: "10 Delivery Road", city: "Boston", zip: "02108", country: "United States" },
+    customAttributes: [
+      { key: "_incode_service_type", value: "delivery" },
+      { key: "_incode_service_postal_code", value: "02108" },
+      { key: "_incode_delivery_date", value: "Friday, 16 October" },
+      { key: "_incode_delivery_first_name", value: "Grace" },
+      { key: "_incode_delivery_last_name", value: "Hopper" },
+      { key: "_incode_delivery_phone", value: "+1 555 0200" },
+    ],
+  };
+  const f = fixture({ scope: "read_locations,read_orders", orders: [order] });
+  const result = await f.loader({ request: new Request("https://fixture.test/app/locations?view=deliveries") });
+  assert.equal(result.deliveryOrders.length, 1);
+  assert.equal(result.deliveryOrders[0].customerName, "Grace Hopper");
+  assert.equal(result.deliveryOrders[0].postalCode, "02108");
+  assert.equal(result.deliveryOrders[0].deliveryDate, "Friday, 16 October");
+  assert.equal(f.writes.length, 0);
 });
 
 test("locations admin stays focused on actionable delivery and pickup settings", () => {
   for (const guidance of [
     'title="Local delivery"',
     'title="Store pickup"',
-    "Limit services by product, collection, tag or zone",
+    "Show this location's services only for selected products, collections, tags or delivery zones",
     "Use existing delivery zones",
   ]) assert.match(source, new RegExp(guidance));
 
@@ -171,7 +196,7 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   assert.doesNotMatch(source, /label="Blocked pickup dates"/);
   assert.match(source, /function LocationSettingsSection/);
   assert.match(source, /Routing & delivery timing/);
-  assert.match(source, /Customer targeting/);
+  assert.match(source, /Service availability targeting/);
   assert.match(source, /incode-location-metrics/);
   assert.match(source, /name="localDeliveryZoneIdsCsv"/);
   assert.match(source, /One or more delivery zones are unavailable/);
@@ -181,6 +206,8 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   assert.match(source, /Needs setup/);
   assert.match(source, /incode-pickup-directory/);
   assert.match(source, /Pickup customer details/);
+  assert.match(source, /Delivery customer details/);
+  assert.match(source, /Delivery orders/);
   assert.match(source, /Customer data is read live and is not copied into the app database/);
   assert.match(source, /Search pickup locations/);
   assert.match(source, /name, city or postcode/);

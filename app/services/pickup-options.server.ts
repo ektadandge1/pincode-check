@@ -5,6 +5,7 @@ import {
   parsePostalPattern, postalPatternSpecificity, postalCodeLookupValues, validatePostalCode, type CartDeliveryItemInput,
 } from "../utils/delivery.server";
 import { isPickupDate, pickupAvailableDates, type PickupSchedule } from "../utils/pickup-schedule";
+import { matchDeliveryTarget, type DeliveryTargetRecord } from "../utils/targeting.server";
 
 type PickupRule = PickupSchedule & {
   shopifyLocationId: string;
@@ -39,6 +40,30 @@ export async function getPickupOptions(input: {
     where: { shop: input.shop, enabled: true, pickupEnabled: true },
     orderBy: [{ priority: "asc" }, { id: "asc" }], take: 101,
   }) as unknown as PickupRule[];
+  const serviceRules = prisma.serviceAvailabilityRule ? await prisma.serviceAvailabilityRule.findMany({
+    where: { shop: input.shop, enabled: true },
+    orderBy: [{ priority: "asc" }, { id: "asc" }],
+    take: 2_000,
+  }) : [];
+  const pickupAllowed = (item: CartDeliveryItemInput) => {
+    const matched = matchDeliveryTarget(serviceRules.map((rule): DeliveryTargetRecord => ({
+      ...rule,
+      requireValidPin: false,
+      processingDays: null,
+      transitDays: null,
+      excluded: false,
+      customSuccessMessage: null,
+    })), {
+      productId: item.productId,
+      vendor: item.productVendor,
+      tags: item.productTags,
+      collectionHandles: item.collectionHandles,
+      country: input.country,
+      timeZone: input.timeZone,
+      now: input.now,
+    });
+    return matched?.pickupAvailable ?? true;
+  };
   if (rules.length > 100) throw new Error("Pickup rules exceed limit");
 
   let zoneId: number | null = null;
@@ -75,6 +100,7 @@ export async function getPickupOptions(input: {
     }
   }
   const eligibleRules = rules.filter((rule) => input.items.every((item) => {
+    if (!pickupAllowed(item)) return false;
     const mode = rule.serviceTargetMode || "all";
     const values = new Set(rule.serviceTargetValuesCsv.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
     if (mode === "all") return true;

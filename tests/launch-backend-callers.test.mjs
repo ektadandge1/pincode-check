@@ -13,7 +13,7 @@ const rule = (overrides = {}) => ({
 const item = (id, quantity = 1) => ({ productId: `gid://shopify/Product/${id}`, variantId: `gid://shopify/ProductVariant/${id}`, quantity });
 const input = { shop: "test.myshopify.com", country: "US", postalCode: "10001", features, trackAnalytics: false };
 
-function fixture(targets = [rule()], { inventoryFailure = false, contextFailure = false, unknown = false, utils } = {}) {
+function fixture(targets = [rule()], { inventoryFailure = false, contextFailure = false, unknown = false, utils, cityRecords = [] } = {}) {
   const calls = [];
   const admin = { graphql: async (query, options) => {
     calls.push({ query, variables: options.variables });
@@ -35,7 +35,7 @@ function fixture(targets = [rule()], { inventoryFailure = false, contextFailure 
   const prisma = {
     deliverySetting: { findUnique: async () => null },
     deliveryTarget: { findMany: async () => targets },
-    postalCode: { findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 4, codAvailable: false }), findMany: async () => [] },
+    postalCode: { findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 4, codAvailable: false }), findMany: async (args = {}) => args.where?.city ? cityRecords : [] },
     shippingMethodRule: { findMany: async () => [] },
     fulfillmentLocationRule: { findMany: async () => [] },
   };
@@ -78,6 +78,18 @@ test("actual delivery, general estimate and policy callers fail closed on invent
   assert.equal(policy.require_valid_pin, true);
   assert.equal(policy.matched_target, null);
   assert.equal((await service.getGeneralDeliveryEstimate({ ...context, admin: undefined })).reason, "inventory_unavailable");
+});
+
+test("city suggestions return every configured exact postal code once", async () => {
+  const { proxy } = fixture([], { cityRecords: [
+    { id: 1, postalCode: "400001", city: "Mumbai", state: "Maharashtra" },
+    { id: 2, postalCode: "400002", city: "Mumbai", state: "Maharashtra" },
+    { id: 3, postalCode: "400001", city: "Mumbai", state: "Maharashtra" },
+  ] });
+  const result = await proxy(null, undefined, { city_suggestions: "1", city: "mumbai" });
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(result.body.suggestions.map((entry) => entry.postal_code), ["400001", "400002"]);
+  assert.equal(result.body.suggestions[0].state, "Maharashtra");
 });
 
 test("actual callers require variants for applicable inventory targets but do not block unrelated products", async () => {

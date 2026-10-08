@@ -22,6 +22,9 @@ export type DeliveryTargetRecord = {
   processingDays: number | null;
   transitDays: number | null;
   excluded: boolean;
+  shippingAvailable: boolean;
+  localDeliveryAvailable: boolean;
+  pickupAvailable: boolean;
   enabled: boolean;
   priority: number;
 };

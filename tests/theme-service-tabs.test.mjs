@@ -18,12 +18,13 @@ const element = (value = '') => ({
   append(...nodes) { this.children.push(...nodes); },
   replaceChildren(...nodes) { this.children = nodes; },
   setAttribute(name, value) { this[name] = value; },
+  removeAttribute(name) { delete this[name]; },
   checkValidity() { return this.valid !== false; },
   focus() { this.focused = true; }
 });
 
 const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWrites = false, pickupDisplay = 'all' } = {}) => {
-  const names = ['status', 'delivery-status', 'suggestions', 'retry', 'check', 'country', 'address', 'pickup-details', 'locations', 'clear', 'pickup-filter', 'pickup-postal', 'filter'];
+  const names = ['status', 'delivery-status', 'shipping-postal', 'shipping-check', 'shipping-status', 'shipping-result', 'shipping-date', 'suggestions', 'retry', 'check', 'country', 'address', 'pickup-details', 'delivery-details', 'locations', 'clear', 'pickup-filter', 'pickup-postal', 'filter'];
   const nodes = new Map(names.map((name) => [`[data-${name}]`, element()]));
   const country = nodes.get('[data-country]');
   country.value = 'CA';
@@ -32,7 +33,9 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
   country.selectedOptions = [country.options[0]];
   nodes.get('[data-address]').value = saved ? '' : '123 Main St, Ottawa, K1A 0B1';
   for (const name of ['date', 'first_name', 'last_name', 'email', 'phone']) nodes.set(`[data-field="${name}"]`, element());
+  for (const name of ['date', 'first_name', 'last_name', 'email', 'phone']) nodes.set(`[data-delivery-field="${name}"]`, element());
   for (const name of ['date', 'first_name', 'last_name', 'email', 'phone', 'address', 'pickup_postal']) nodes.set(`[data-error="${name}"]`, element());
+  for (const name of ['date', 'first_name', 'last_name', 'email', 'phone']) nodes.set(`[data-error="delivery_${name}"]`, element());
   const radios = ['shipping', 'pickup', 'delivery'].map((service) => ({ ...element(service), checked: service === 'shipping' }));
   const panels = radios.map((radio) => ({ ...element(), dataset: { panel: radio.value }, hidden: radio.value !== 'shipping' }));
   const root = {
@@ -46,9 +49,15 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
     nodes.set('[data-country-slot]', { replaceWith: (node) => nodes.set('[data-country]', node) });
     Object.defineProperty(root, 'innerHTML', { set(markup) {
       this.markup = markup;
-      nodes.set('[data-status]', element());
-      nodes.set('[data-delivery-status]', element());
-      nodes.set('[data-suggestions]', element());
+       nodes.set('[data-status]', element());
+       nodes.set('[data-delivery-status]', element());
+       nodes.set('[data-shipping-postal]', element());
+       nodes.set('[data-shipping-check]', element());
+       nodes.set('[data-shipping-status]', element());
+       nodes.set('[data-shipping-result]', element());
+       nodes.set('[data-shipping-date]', element());
+       nodes.set('[data-suggestions]', element());
+        nodes.set('[data-delivery-details]', element());
     } });
   }
   const roots = [root];
@@ -86,6 +95,7 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
     window, document, URLSearchParams, AbortController, Event,
     setTimeout: (callback) => { const id = ++timerId; timers.set(id, callback); return id; },
     clearTimeout: (id) => timers.delete(id),
+    console,
     fetch: (url, options = {}) => {
       const request = { url, options };
       requests.push(request);
@@ -127,6 +137,13 @@ const fillPickup = async (data) => {
     await field.fire('input');
   }
 };
+const fillDelivery = async (data) => {
+  for (const [name, value] of Object.entries({ first_name: 'Jane', last_name: 'Doe', email: 'jane@example.test', phone: '+1 555 1234' })) {
+    const field = data.nodes.get(`[data-delivery-field="${name}"]`);
+    field.value = value;
+    await field.fire('input');
+  }
+};
 
 test('Liquid renders service tabs before JavaScript and Theme Editor blocks can reinitialize', () => {
   const liquid = source('blocks/delivery-service-options.liquid');
@@ -151,11 +168,27 @@ test('generated markup has no checkout/navigation controls or technical instruct
 
 test('cart service tabs are kept directly above the native checkout actions', () => {
   assert.match(code, /placeAboveCheckout\(root\)/);
+  assert.match(code, /ensureCartPlacement\(root\)/);
+  assert.match(code, /setTimeout\(retry, 100\)/);
   assert.match(code, /button\[name="checkout"\]/);
   assert.match(code, /closest\?\.\('\.cart__ctas, \[data-cart-actions\]'\)/);
   assert.match(code, /insertBefore\(mount, anchor\)/);
   assert.doesNotMatch(code, /new MutationObserver\(initialize\)/);
-  assert.match(source('assets/delivery-service-options.css'), /data-checkout-placement="true"\]\s*\{[^}]*margin: 0 auto 14px/);
+  assert.match(source('assets/delivery-service-options.css'), /data-checkout-placement="true"\]\s*\{[^}]*var\(--ist-margin/);
+});
+
+test('cart placement exposes alignment, width, margin, and padding controls in the Theme Editor', () => {
+  const liquid = source('blocks/delivery-service-options.liquid');
+  assert.match(liquid, /data-cart-align=/);
+  for (const setting of ['cart_alignment', 'cart_width', 'cart_margin', 'cart_padding']) {
+    assert.match(liquid, new RegExp(`"id": "${setting}"`));
+  }
+  assert.match(liquid, /--ist-width:/);
+  assert.match(liquid, /--ist-padding:/);
+  const css = source('assets/delivery-service-options.css');
+  assert.match(css, /data-cart-align="left"/);
+  assert.match(css, /data-cart-align="right"/);
+  assert.match(css, /data-cart-align="center"/);
 });
 
 test('pickup date lists only server-approved dates so blocked dates never display', () => {
@@ -174,9 +207,36 @@ test('shipping is the default and cart initialization clears only block-owned se
   assert.ok(data.writes().length > 0);
   for (const request of data.writes()) {
     const attributes = JSON.parse(request.options.body).attributes;
-    assert.ok(Object.keys(attributes).every((key) => /^_incode_(service_|pickup_)/.test(key)));
+    assert.ok(Object.keys(attributes).every((key) => /^_incode_(service_|pickup_|delivery_)/.test(key)));
     assert.ok(Object.values(attributes).every((value) => value === ''));
   }
+});
+
+test('shipping displays availability and the delivery date only after a successful estimate', async () => {
+  const data = fixture();
+  const postal = data.nodes.get('[data-shipping-postal]');
+  postal.value = 'K1A 0B1';
+  assert.equal(data.nodes.get('[data-shipping-check]').handlers.click.length, 1);
+  const pending = data.nodes.get('[data-shipping-check]').fire('click');
+  await settle();
+  const query = new URL(data.api()[0].url, 'https://shop.test').searchParams;
+  assert.equal(query.get('country'), 'CA');
+  assert.equal(query.get('postal_code'), 'K1A 0B1');
+  assert.equal(query.get('estimate'), '1');
+  data.respond(data.api()[0], { available: true, delivery_date_range: 'Oct 12 to Oct 14, 2026' });
+  await pending;
+  assert.equal(data.nodes.get('[data-shipping-status]').textContent, '');
+  assert.equal(data.nodes.get('[data-shipping-result]').hidden, false);
+  assert.equal(data.nodes.get('[data-shipping-date]').textContent, 'Oct 12 to Oct 14, 2026');
+
+  const unavailable = fixture();
+  unavailable.nodes.get('[data-shipping-postal]').value = 'K1A 0B1';
+  const unavailablePending = unavailable.nodes.get('[data-shipping-check]').fire('click');
+  await settle();
+  unavailable.respond(unavailable.api()[0], { available: false });
+  await unavailablePending;
+  assert.equal(unavailable.nodes.get('[data-shipping-status]').textContent, 'Shipping is not available for this postcode.');
+  assert.equal(unavailable.nodes.get('[data-shipping-result]').hidden, true);
 });
 
 test('cart delivery automatically verifies a fresh snapshot and persists delivery attributes', async () => {
@@ -192,12 +252,21 @@ test('cart delivery automatically verifies a fresh snapshot and persists deliver
   data.respond(data.api()[0], { local_delivery_available: true, postal_code: 'K1A 0B1' });
   await pending;
   await settle();
+  assert.equal(data.nodes.get('[data-delivery-details]').hidden, false);
+  assert.equal(data.nodes.get('[data-delivery-field="date"]').value, '');
+  data.nodes.get('[data-delivery-field="date"]').value = 'Oct 12 to Oct 14, 2026';
+  await fillDelivery(data);
+  await data.flushTimers();
+  data.respond(data.api()[1], { local_delivery_available: true, delivery_date_range: 'Oct 12 to Oct 14, 2026', postal_code: 'K1A 0B1' });
+  await settle();
   const attributes = JSON.parse(data.writes().at(-1).options.body).attributes;
   assert.equal(attributes._incode_service_type, 'delivery');
   assert.equal(attributes._incode_service_country, 'CA');
   assert.equal(attributes._incode_service_postal_code, 'K1A 0B1');
+  assert.equal(attributes._incode_delivery_first_name, 'Jane');
+  assert.equal(attributes._incode_delivery_email, 'jane@example.test');
   for (const key of Object.keys(attributes).filter((key) => key.startsWith('_incode_pickup_'))) assert.equal(attributes[key], '');
-  assert.equal(data.requests.filter((request) => request.url === '/fr/cart.js').length, 2);
+  assert.equal(data.requests.filter((request) => request.url === '/fr/cart.js').length, 3);
   assert.equal(data.nodes.get('[data-delivery-status]').textContent, 'Local delivery is available.');
   assert.deepEqual(data.navigations, []);
 });
@@ -215,6 +284,7 @@ test('unavailable and failed delivery checks leave all owned attributes cleared'
     await settle();
     assert.ok(blank(data.writes().at(-1)));
     assert.equal(data.nodes.get('[data-delivery-status]').dataset.state, 'error');
+    assert.equal(data.nodes.get('[data-delivery-details]').hidden, true);
   }
 });
 
@@ -230,6 +300,53 @@ test('product delivery checks remain informational and never write or navigate',
   await pending;
   assert.equal(data.writes().length, 0);
   assert.deepEqual(data.navigations, []);
+  assert.equal(data.nodes.get('[data-delivery-status]').textContent, 'Local delivery is available.');
+});
+
+test('delivery shows the precise local-delivery failure reason', async () => {
+  for (const [reason, expected] of [
+    ['not_in_zone', 'This postcode is outside the configured delivery zones.'],
+    ['no_location_stock', 'These items are not in stock at the delivery location.'],
+    ['inventory_unavailable', 'Stock could not be verified right now. Please try again.'],
+  ]) {
+    const data = fixture();
+    await data.choose('delivery');
+    const pending = data.nodes.get('[data-check]').fire('click');
+    await settle();
+    data.respond(data.api()[0], { local_delivery_available: false, local_delivery_reason: reason });
+    await pending;
+    assert.equal(data.nodes.get('[data-delivery-status]').textContent, expected);
+  }
+});
+
+test('delivery city search lists all postal codes and checks the selected code', async () => {
+  const data = fixture();
+  await data.choose('delivery');
+  data.nodes.get('[data-country]').value = 'IN';
+  const address = data.nodes.get('[data-address]');
+  address.value = 'Mumbai';
+  await address.fire('input');
+  await data.flushTimers();
+  const suggestionRequest = data.api()[0];
+  const suggestionQuery = new URL(suggestionRequest.url, 'https://shop.test').searchParams;
+  assert.equal(suggestionQuery.get('city_suggestions'), '1');
+  assert.equal(suggestionQuery.get('city'), 'Mumbai');
+  data.respond(suggestionRequest, { suggestions: [
+    { postal_code: '400001', city: 'Mumbai', state: 'Maharashtra' },
+    { postal_code: '400002', city: 'Mumbai', state: 'Maharashtra' },
+  ] });
+  await settle();
+  const rows = data.nodes.get('[data-suggestions]').children;
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].children[1].children[0].textContent, '400001');
+  await rows[1].fire('click');
+  await settle();
+  const checkRequest = data.api()[1];
+  const checkQuery = new URL(checkRequest.url, 'https://shop.test').searchParams;
+  assert.equal(address.value, '400002');
+  assert.equal(checkQuery.get('postal_code'), '400002');
+  data.respond(checkRequest, { local_delivery_available: true, postal_code: '400002' });
+  await settle();
   assert.equal(data.nodes.get('[data-delivery-status]').textContent, 'Local delivery is available.');
 });
 
@@ -307,31 +424,27 @@ test('pickup snapshot changes prevent persistence and retain cleared attributes'
   assert.match(data.nodes.get('[data-status]').textContent, /cart changed/i);
 });
 
-test('a stale in-flight delivery save is followed by the latest clear', async () => {
-  const data = fixture({ surface: 'cart', holdWrites: true });
-  await settle();
-  data.writes()[0].resolve({ ok: true });
+test('delivery details save and clear with the selected service', async () => {
+  const data = fixture({ surface: 'cart' });
   await settle();
   await data.choose('delivery');
-  data.writes().at(-1).resolve({ ok: true });
-  await settle();
   const pending = data.nodes.get('[data-check]').fire('click');
   await settle();
-  data.writes().at(-1).resolve({ ok: true });
-  await settle();
   data.respond(data.api()[0], { local_delivery_available: true });
+  await pending;
+  data.nodes.get('[data-delivery-field="date"]').value = 'Oct 12, 2026';
+  await fillDelivery(data);
+  await data.flushTimers();
+  data.respond(data.api()[1], { local_delivery_available: true, delivery_date_range: 'Oct 12, 2026' });
   await settle();
   const save = data.writes().at(-1);
   assert.equal(JSON.parse(save.options.body).attributes._incode_service_type, 'delivery');
   data.nodes.get('[data-address]').value = '';
   await data.nodes.get('[data-address]').fire('input');
-  save.resolve({ ok: true });
-  await pending;
   await settle();
   const clear = data.writes().at(-1);
   assert.notEqual(clear, save);
   assert.ok(blank(clear));
-  clear.resolve({ ok: true });
   await settle();
   assert.deepEqual(data.navigations, []);
 });
@@ -339,15 +452,18 @@ test('a stale in-flight delivery save is followed by the latest clear', async ()
 test('pickup empty state, retry, collector fields, and premium tabs remain compact and responsive', () => {
   const css = source('assets/delivery-service-options.css');
   assert.match(css, /width: min\(100%, 410px\)/);
+  assert.match(css, /data-surface="cart"\]\s*\{ width: min\(calc\(100% - \(2 \* var\(--ist-margin/);
   assert.match(css, /border-radius: 16px;[^}]*background: #fff;[^}]*box-shadow:/);
   assert.match(css, /\.ist-services span \{[^}]*height: 100px;[^}]*border-radius: 10px/);
-  assert.match(css, /\.ist-locations > div \{ height: 180px;/);
+  assert.match(css, /\.ist-locations > div \{ max-height: 180px;/);
   assert.match(css, /\.ist-retry \{[^}]*border: 0;[^}]*background: transparent/);
   assert.match(css, /input:not\(\[type="radio"\]\),[^\n]+height: 42px/);
   assert.match(css, /@container \(max-width: 340px\)/);
   assert.match(css, /@container \(max-width: 310px\)/);
   assert.match(css, /background: #fff1f1/);
   assert.match(css, /background: #edf8f1/);
+  assert.match(css, /\.ist-shipping-result/);
+  assert.match(code, /query\.set\('estimate', '1'\)/);
   assert.match(code, /className = 'ist-empty'/);
 });
 

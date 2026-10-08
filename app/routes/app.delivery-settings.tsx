@@ -955,9 +955,9 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
         endTimeLocal: activationMode === "weekly" ? endTimeLocalRaw : null,
         requireValidPin,
         processingDays,
-        transitDays,
-        excluded,
-        priority,
+         transitDays,
+         excluded,
+         priority,
     };
     if (targetId === null) {
       await prisma.deliveryTarget.create({ data: { ...targetData, enabled: true } });
@@ -1685,9 +1685,9 @@ export default function DeliverySettingsPage() {
     priority: "100",
     requireValidPin: true,
     processingDays: "",
-    transitDays: "",
-    excluded: false,
-    countryCode: "",
+     transitDays: "",
+     excluded: false,
+     countryCode: "",
     stateRegion: "",
     inventoryMode: "any",
     customSuccessMessage: "",
@@ -1713,9 +1713,9 @@ export default function DeliverySettingsPage() {
       priority: "100",
       requireValidPin: true,
       processingDays: "",
-      transitDays: "",
-      excluded: false,
-      countryCode: "",
+       transitDays: "",
+       excluded: false,
+       countryCode: "",
       stateRegion: "",
       inventoryMode: "any",
       customSuccessMessage: "",
@@ -1935,8 +1935,8 @@ export default function DeliverySettingsPage() {
       priority: String(target.priority),
       requireValidPin: target.requireValidPin,
       processingDays: target.processingDays === null ? "" : String(target.processingDays),
-      transitDays: target.transitDays === null ? "" : String(target.transitDays),
-      excluded: target.excluded,
+       transitDays: target.transitDays === null ? "" : String(target.transitDays),
+       excluded: target.excluded,
       countryCode: target.countryCode ?? "",
       stateRegion: target.stateRegion ?? "",
       inventoryMode: target.inventoryMode,
@@ -2588,7 +2588,7 @@ export default function DeliverySettingsPage() {
                     {activeTab.id === "coverage" ? <>
                       <Text as="p" tone="subdued">Courier lookup is optional and requires server-configured Shiprocket credentials. Saved coverage rules can be used when courier lookup is disabled or fails. These controls do not enable server-side checkout validation.</Text>
                       <Checkbox label="Enable courier lookup" checked={settings.courierEnabled} disabled={!isAdvanced || !data.courierIntegrationAvailable} onChange={(value) => setSettings((current) => ({ ...current, courierEnabled: value }))} helpText={data.courierIntegrationAvailable ? "Credentials are configured; service availability is not verified here." : "Unavailable: server credentials have not been configured."} />
-                      <Checkbox label="Use saved coverage rules as fallback" checked={settings.dbFallbackEnabled} onChange={(value) => setSettings((current) => ({ ...current, dbFallbackEnabled: value }))} helpText="Turn this on to use your postal coverage rules. Default transit days alone do not establish serviceability." />
+                      <Checkbox label="Use saved coverage rules as fallback" checked={settings.dbFallbackEnabled} onChange={(value) => setSettings((current) => ({ ...current, dbFallbackEnabled: value }))} helpText="Shipping is available only when a matching postal code rule or delivery zone exists. Default transit days alone do not establish serviceability." />
                       <TextField label="Courier timeout (milliseconds)" name="courierTimeoutMs" type="number" min={500} max={15000} value={settings.courierTimeoutMs} onChange={(value) => setSettings((current) => ({ ...current, courierTimeoutMs: value }))} autoComplete="off" />
                       <TextField label="Courier retries" name="retryCount" type="number" min={0} max={3} value={settings.retryCount} onChange={(value) => setSettings((current) => ({ ...current, retryCount: value }))} autoComplete="off" />
                     </> : null}

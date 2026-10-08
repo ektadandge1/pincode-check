@@ -17,6 +17,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await tx.postalCodeSearchEvent.deleteMany({ where: { shop } });
       await tx.postalCode.deleteMany({ where: { shop } });
       await tx.deliveryTarget.deleteMany({ where: { shop } });
+      await tx.serviceAvailabilityRule.deleteMany({ where: { shop } });
       await tx.fulfillmentLocationRule.deleteMany({ where: { shop } });
       await tx.shippingMethodRule.deleteMany({ where: { shop } });
       await tx.zone.deleteMany({ where: { shop } });

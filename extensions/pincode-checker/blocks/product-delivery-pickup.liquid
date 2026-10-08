@@ -1,0 +1,66 @@
+{% liquid
+assign product_service_country = localization.country.iso_code | default: 'US'
+assign product_service_saved_postal = ''
+if localization.available_countries.size > 0
+assign product_country_available = false
+for country in localization.available_countries
+if country.iso_code == product_service_country
+assign product_country_available = true
+endif
+endfor
+unless product_country_available
+assign product_service_country = localization.available_countries.first.iso_code
+endunless
+endif
+if customer and customer.default_address
+assign product_saved_country = customer.default_address.country_code
+for country in localization.available_countries
+if country.iso_code == product_saved_country
+assign product_service_saved_postal = customer.default_address.zip | default: ''
+assign product_service_country = product_saved_country
+break
+endif
+endfor
+endif
+%}
+
+<div class="incode-product-service" data-product-service data-product-id="{{ product.id }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-saved-postal="{{ product_service_saved_postal | escape }}" style="--ips-accent:{{ block.settings.accent_color | default: '#1f4f91' }};--ips-card:#fff;--ips-option:#f7fbff;--ips-text:#202b40;--ips-radius:{{ block.settings.corner_radius | default: 14 }}px" {{ block.shopify_attributes }}>
+  <div class="incode-product-service__intro">
+    <span class="incode-product-service__intro-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg></span>
+    <div><h3>{{ block.settings.heading | default: 'Check delivery options' | escape }}</h3><p>{{ block.settings.supporting_text | default: 'Enter your PIN or ZIP code to see delivery and pickup availability.' | escape }}</p></div>
+  </div>
+  <div class="incode-product-service__form">
+    <label class="incode-product-service__country"><span aria-hidden="true">&#127463;&#127479;</span><span class="incode-product-service__sr-only">Country</span><select data-product-country aria-label="Country">{% for country in localization.available_countries %}<option value="{{ country.iso_code | escape }}" {% if country.iso_code == product_service_country %}selected{% endif %}>{{ country.name | escape }} ({{ country.iso_code | escape }})</option>{% else %}<option value="{{ product_service_country | escape }}" selected>{{ product_service_country | escape }}</option>{% endfor %}</select></label>
+     <label><span class="incode-product-service__sr-only">PIN or ZIP code</span><input data-product-postal type="text" inputmode="text" autocomplete="postal-code" value="{{ product_service_saved_postal | escape }}" placeholder="Enter PIN / ZIP code"></label>
+    <button type="button" data-product-check>{{ block.settings.button_label | default: 'Check availability' | escape }}</button>
+  </div>
+  <p class="incode-product-service__status" data-product-status role="status" aria-live="polite"></p>
+  <div class="incode-product-service__result" data-product-result hidden>
+    <div class="incode-product-service__result-head"><span data-product-destination></span><strong data-product-availability></strong></div>
+    <div class="incode-product-service__eta" data-product-eta hidden><span class="incode-product-service__eta-icon" aria-hidden="true">&#8985;</span><div><b>Estimated delivery</b><small data-product-eta-copy></small></div><strong data-product-eta-date></strong></div>
+    <div class="incode-product-service__options">
+      <div data-product-local><span class="incode-product-service__option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg></span><b>Local delivery</b><strong data-product-local-status></strong></div>
+      <div data-product-pickup><span class="incode-product-service__option-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10H3z"/><path d="M8 21v-6h8v6M7 10h10"/></svg></span><b>Store pickup</b><strong data-product-pickup-status></strong></div>
+    </div>
+    <small class="incode-product-service__location" data-product-location></small>
+    <p class="incode-product-service__pickup-copy" data-product-pickup-copy hidden></p>
+  </div>
+</div>
+
+<link rel="stylesheet" href="{{ 'product-delivery-pickup.css' | asset_url }}">
+<script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
+<script src="{{ 'product-delivery-pickup.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "Product delivery & pickup",
+  "target": "section",
+  "enabled_on": { "templates": ["product"] },
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery options" },
+    { "type": "text", "id": "supporting_text", "label": "Supporting text", "default": "Enter your PIN or ZIP code to see delivery and pickup availability." },
+    { "type": "color", "id": "accent_color", "label": "Accent color", "default": "#1f4f91" },
+    { "type": "range", "id": "corner_radius", "label": "Corner radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 14 }
+  ]
+}
+{% endschema %}

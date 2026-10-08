@@ -5,7 +5,9 @@ import vm from 'node:vm';
 
 const base = new URL('../extensions/pincode-checker/', import.meta.url);
 const source = (path) => readFileSync(new URL(path, base), 'utf8');
-const script = (name) => source(`blocks/${name}.liquid`).match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/{{[^}]+}}/g, '"product"');
+const script = (name) => name === 'delivery-service-options'
+  ? source('assets/delivery-service-card.js')
+  : source(`blocks/${name}.liquid`).match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/{{[^}]+}}/g, '"product"');
 const settle = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 
 test('theme inline scripts and assets parse as JavaScript', () => {

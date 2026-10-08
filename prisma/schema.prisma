@@ -164,10 +164,41 @@ model DeliveryTarget {
   processingDays       Int?
   transitDays          Int?
   excluded             Boolean  @default(false)
+  shippingAvailable    Boolean  @default(true)
+  localDeliveryAvailable Boolean @default(true)
+  pickupAvailable      Boolean  @default(true)
   enabled              Boolean  @default(true)
   priority             Int      @default(100)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+
+  @@unique([shop, name])
+  @@index([shop, targetKind, targetValue])
+  @@index([shop, enabled, priority])
+}
+
+model ServiceAvailabilityRule {
+  id                     Int      @id @default(autoincrement())
+  shop                   String
+  name                   String
+  targetKind             String
+  targetValue            String
+  countryCode            String?
+  stateRegion            String?
+  inventoryMode          String   @default("any")
+  activationMode         String   @default("always")
+  activeFromLocal        String?
+  activeUntilLocal       String?
+  weekdaysCsv            String   @default("")
+  startTimeLocal         String?
+  endTimeLocal           String?
+  shippingAvailable      Boolean  @default(true)
+  localDeliveryAvailable Boolean  @default(true)
+  pickupAvailable        Boolean  @default(true)
+  enabled                Boolean  @default(true)
+  priority               Int      @default(100)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   @@unique([shop, name])
   @@index([shop, targetKind, targetValue])

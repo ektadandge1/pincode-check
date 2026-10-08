@@ -42,7 +42,13 @@ type ShopifyLocation = {
   } | null;
 };
 
-type ActionData = { ok: boolean; message: string; previewKey?: string; postalCode?: string; localDelivery?: boolean };
+type ActionData = {
+  ok: boolean;
+  message: string;
+  previewKey?: string;
+  postalCode?: string;
+  localDelivery?: boolean;
+};
 
 type PickupOrder = {
   id: string;
@@ -58,6 +64,20 @@ type PickupOrder = {
   pickupLocationName: string;
   pickupLocationAddress: string;
   pickupDate: string;
+};
+
+type DeliveryOrder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  displayFinancialStatus?: string | null;
+  displayFulfillmentStatus?: string | null;
+  customerName: string;
+  email: string;
+  phone: string;
+  address: string;
+  postalCode: string;
+  deliveryDate: string;
 };
 
 type ShopifyOrder = {
@@ -301,14 +321,16 @@ function isHex(value: string): boolean {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await requireActiveBilling(request);
-  const view = new URL(request.url).searchParams.get("view") === "pickups" ? "pickups" : "setup";
-  const [rules, setting, zones] = await Promise.all([
+  const requestedView = new URL(request.url).searchParams.get("view");
+  const view = requestedView === "pickups" || requestedView === "deliveries" ? requestedView : "setup";
+  const [rules, setting, zones, targetRuleCount] = await Promise.all([
     prisma.fulfillmentLocationRule.findMany({
       where: { shop: session.shop },
       orderBy: [{ priority: "asc" }, { name: "asc" }],
     }),
     prisma.deliverySetting.findUnique({ where: { shop: session.shop } }),
     prisma.zone.findMany({ where: { shop: session.shop, enabled: true }, orderBy: [{ priority: "asc" }, { name: "asc" }] }),
+    prisma.serviceAvailabilityRule?.count?.({ where: { shop: session.shop, enabled: true } }) ?? 0,
   ]);
   const ruleByLocation = new Map(rules.map((rule) => [rule.shopifyLocationId, rule]));
   let locations: LocationRow[] = [];
@@ -411,13 +433,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderAccessGranted = new Set((session.scope ?? "").split(",").map((scope) => scope.trim())).has("read_orders");
   const pickupOrders: PickupOrder[] = [];
   let pickupOrdersError = "";
-  if (view === "pickups") {
+  const deliveryOrders: DeliveryOrder[] = [];
+  let deliveryOrdersError = "";
+  if (view === "pickups" || view === "deliveries") {
     if (!orderAccessGranted) {
       pickupOrdersError = "Shopify order access has not been granted yet. Reauthorize the app after adding read_orders to view pickup customer details.";
     } else {
       try {
         const response = await admin.graphql(`#graphql
-          query RecentPickupOrders {
+          query RecentServiceOrders {
             orders(first: 100, reverse: true, sortKey: CREATED_AT) {
               nodes {
                 id
@@ -441,9 +465,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
         if (!response.ok || !payload.data?.orders) {
           throw new Error(payload.errors?.[0]?.message ?? "Shopify could not load recent orders.");
         }
-        const locationById = new Map(locations.map((location) => [location.id, location]));
         for (const order of payload.data.orders.nodes ?? []) {
           const attributes = new Map((order.customAttributes ?? []).map((attribute) => [attribute.key, attribute.value ?? ""]));
+          if (view === "deliveries") {
+            const deliveryDate = attributes.get("_incode_delivery_date") ?? "";
+            if (attributes.get("_incode_service_type") !== "delivery" && !deliveryDate) continue;
+            const customerName = [attributes.get("_incode_delivery_first_name"), attributes.get("_incode_delivery_last_name")].filter(Boolean).join(" ")
+              || order.customer?.displayName || order.shippingAddress?.name || "Customer details unavailable";
+            deliveryOrders.push({
+              id: order.id,
+              name: order.name,
+              createdAt: order.createdAt,
+              displayFinancialStatus: order.displayFinancialStatus,
+              displayFulfillmentStatus: order.displayFulfillmentStatus,
+              customerName,
+              email: attributes.get("_incode_delivery_email") || order.email || "",
+              phone: attributes.get("_incode_delivery_phone") || order.phone || order.shippingAddress?.phone || "",
+              address: [order.shippingAddress?.address1, order.shippingAddress?.address2, order.shippingAddress?.city, order.shippingAddress?.province, order.shippingAddress?.zip, order.shippingAddress?.country].filter(Boolean).join(", "),
+              postalCode: attributes.get("_incode_service_postal_code") || order.shippingAddress?.zip || "",
+              deliveryDate,
+            });
+            continue;
+          }
+          const locationById = new Map(locations.map((location) => [location.id, location]));
           const pickupLocationId = attributes.get("_incode_pickup_location_id") ?? "";
           const pickupLocationName = attributes.get("_incode_pickup_location_name") ?? "";
           const pickupDate = attributes.get("_incode_pickup_date") ?? "";
@@ -468,10 +512,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
           });
         }
         if (payload.errors?.length) {
-          pickupOrdersError = "Some protected customer fields are unavailable. Request protected customer data access in Shopify Partners to show complete addresses.";
+          const message = "Some protected customer fields are unavailable. Request protected customer data access in Shopify Partners to show complete addresses.";
+          pickupOrdersError = message;
+          deliveryOrdersError = message;
         }
       } catch (error) {
-        pickupOrdersError = error instanceof Error ? error.message : "Shopify could not load pickup orders.";
+        const message = error instanceof Error ? error.message : "Shopify could not load recent orders.";
+        pickupOrdersError = message;
+        deliveryOrdersError = message;
       }
     }
   }
@@ -492,10 +540,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : "soft",
     locations,
     targetSuggestions,
+    targetRuleCount,
     locationError,
     orderAccessGranted,
     pickupOrders,
     pickupOrdersError,
+    deliveryOrders,
+    deliveryOrdersError,
   };
 }
 
@@ -833,8 +884,64 @@ function PickupOrdersPanel({ orders, error, orderAccessGranted, shop, shopHandle
   );
 }
 
+function DeliveryOrdersPanel({ orders, error, orderAccessGranted, shop, shopHandle }: {
+  orders: DeliveryOrder[];
+  error: string;
+  orderAccessGranted: boolean;
+  shop: string;
+  shopHandle: string;
+}) {
+  const formatTimestamp = (value: string) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return (
+    <BlockStack gap="400">
+      {!orderAccessGranted ? (
+        <Banner tone="warning" title="Order access required" action={{ content: "Reauthorize app", url: `/auth?shop=${encodeURIComponent(shop)}` }}>{error}</Banner>
+      ) : error ? <Banner tone="warning" title="Some order details are unavailable">{error}</Banner> : null}
+      <Card>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
+            <BlockStack gap="100">
+              <Text as="h2" variant="headingLg">Delivery customer details</Text>
+              <Text as="p" tone="subdued">Local-delivery selections from recent Shopify orders. Customer data is read live and is not copied into the app database.</Text>
+            </BlockStack>
+            <Button url="/app/locations?view=deliveries">Refresh orders</Button>
+          </InlineStack>
+          {orderAccessGranted ? <Text as="p" tone="subdued" variant="bodySm">Showing local-delivery selections found in the latest 100 Shopify orders.</Text> : null}
+        </BlockStack>
+      </Card>
+      {orders.length ? <div className="incode-pickup-orders">
+        {orders.map((order) => {
+          const orderNumber = order.id.replace(/\D/g, "");
+          return <Card key={order.id}>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
+                <BlockStack gap="050">
+                  <Text as="h3" variant="headingMd">{order.name}</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Ordered {formatTimestamp(order.createdAt)}</Text>
+                </BlockStack>
+                <InlineStack gap="200" wrap>
+                  {order.displayFinancialStatus ? <Badge>{order.displayFinancialStatus.replaceAll("_", " ")}</Badge> : null}
+                  {order.displayFulfillmentStatus ? <Badge tone="info">{order.displayFulfillmentStatus.replaceAll("_", " ")}</Badge> : null}
+                  <Button size="slim" url={`https://admin.shopify.com/store/${shopHandle}/orders/${orderNumber}`} external target="_blank">Open order</Button>
+                </InlineStack>
+              </InlineStack>
+              <div className="incode-pickup-order__grid">
+                <div><small>Customer</small><strong>{order.customerName}</strong><span>{order.email || "Email unavailable"}</span><span>{order.phone || "Phone unavailable"}</span></div>
+                <div><small>Delivery</small><strong>{order.deliveryDate || "Date unavailable"}</strong><span>ZIP/PIN: {order.postalCode || "Unavailable"}</span></div>
+                <div><small>Address</small><strong>{order.address || "Protected address unavailable"}</strong><span>Available only when Shopify grants protected customer data access.</span></div>
+              </div>
+            </BlockStack>
+          </Card>;
+        })}
+      </div> : orderAccessGranted && !error ? (
+        <Card><BlockStack gap="200"><Text as="h2" variant="headingMd">No delivery orders yet</Text><Text as="p" tone="subdued">Orders appear here after a customer selects Local delivery, enters their details, and completes checkout.</Text></BlockStack></Card>
+      ) : null}
+    </BlockStack>
+  );
+}
+
 export default function LocationsPage() {
-  const { view, access, apiKey, shop, locations, targetSuggestions, priorityMode, locationError, orderAccessGranted, pickupOrders, pickupOrdersError } = useLoaderData<typeof loader>();
+  const { view, access, apiKey, shop, locations, targetSuggestions, targetRuleCount, priorityMode, locationError, orderAccessGranted, pickupOrders, pickupOrdersError, deliveryOrders, deliveryOrdersError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const isAdvanced = access.active;
   const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
@@ -892,9 +999,12 @@ export default function LocationsPage() {
       <BlockStack gap="400">
         <div className="incode-location-tabs" role="navigation" aria-label="Delivery and pickup views">
           <Button url="/app/locations" variant={view === "setup" ? "primary" : "tertiary"}>Service setup</Button>
+          <Button url="/app/locations?view=deliveries" variant={view === "deliveries" ? "primary" : "tertiary"}>Delivery orders</Button>
           <Button url="/app/locations?view=pickups" variant={view === "pickups" ? "primary" : "tertiary"}>Pickup orders</Button>
         </div>
-        {view === "pickups" ? (
+        {view === "deliveries" ? (
+          <DeliveryOrdersPanel orders={deliveryOrders} error={deliveryOrdersError} orderAccessGranted={orderAccessGranted} shop={shop} shopHandle={shopHandle} />
+        ) : view === "pickups" ? (
           <PickupOrdersPanel orders={pickupOrders} error={pickupOrdersError} orderAccessGranted={orderAccessGranted} shop={shop} shopHandle={shopHandle} />
         ) : <BlockStack gap="400">
         <Card>
@@ -910,6 +1020,21 @@ export default function LocationsPage() {
               </InlineStack>
             </InlineStack>
             <Text as="p" tone="subdued" variant="bodySm">Opens Theme Editor with the block preselected. Use the Theme Editor eye icon to show or hide it anytime without losing settings.</Text>
+          </BlockStack>
+        </Card>
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
+              <BlockStack gap="100">
+                <Text as="h2" variant="headingLg">Product service rules</Text>
+                <Text as="p" tone="subdued">Choose which services are available for specific products, collections, vendors, or tags.</Text>
+              </BlockStack>
+              <Button url="/app/service-rules" variant="primary">Configure rules</Button>
+            </InlineStack>
+            <InlineStack gap="200" wrap>
+              <Badge tone={targetRuleCount ? "success" : "info"}>{targetRuleCount ? `${targetRuleCount} active rule${targetRuleCount === 1 ? "" : "s"}` : "No product rules yet"}</Badge>
+              <Text as="p" tone="subdued" variant="bodySm">Each rule can independently allow or block Shipping, Local delivery, and Store pickup. Location-specific targeting is configured in each location below.</Text>
+            </InlineStack>
           </BlockStack>
         </Card>
         <Card>
@@ -1080,7 +1205,7 @@ export default function LocationsPage() {
                     <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save store pickup</Button></div>
                       </FormLayout>
                     </LocationSettingsSection>
-                    <LocationSettingsSection title="Customer targeting" description="Limit services by product, collection, tag or zone" status={form.serviceTargetMode === "all" ? "Everyone" : SERVICE_TARGET_OPTIONS.find((option) => option.value === form.serviceTargetMode)?.label || "Filtered"}>
+                    <LocationSettingsSection title="Service availability targeting" description="Show this location's services only for selected products, collections, tags or delivery zones" status={form.serviceTargetMode === "all" ? "Everyone" : SERVICE_TARGET_OPTIONS.find((option) => option.value === form.serviceTargetMode)?.label || "Filtered"}>
                       <BlockStack gap="300">
                       <Select
                         label="Show services for"

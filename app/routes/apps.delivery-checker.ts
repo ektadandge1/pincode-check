@@ -257,6 +257,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return billingRequiredResponse();
   }
 
+  if (url.searchParams.get("city_suggestions") === "1") {
+    const city = (url.searchParams.get("city") ?? "").trim().slice(0, 100);
+    if (!country || city.length < 2) return Response.json({ suggestions: [] }, { headers: { "Cache-Control": "no-store" } });
+    const records = await prisma.postalCode.findMany({
+      where: { shop, country, patternType: "exact", city: { contains: city } },
+      orderBy: [{ postalCode: "asc" }, { id: "asc" }],
+      select: { postalCode: true, city: true, state: true },
+    });
+    const seen = new Set<string>();
+    const suggestions = records.flatMap((record) => {
+      const postalCode = String(record.postalCode || "").trim();
+      if (!postalCode || seen.has(postalCode)) return [];
+      seen.add(postalCode);
+      return [{ postal_code: postalCode, city: record.city, state: record.state }];
+    });
+    return Response.json({ suggestions }, { headers: { "Cache-Control": "private, max-age=0, s-maxage=60" } });
+  }
+
   let canonicalCartItems = cart.items;
   const cartRequest = cart.provided || surface === "cart";
   if (cart.error || (cartRequest && (!cart.provided || !cart.items.length || ((isEstimate || isInit || isServiceOptions) && !cart.complete)))) {

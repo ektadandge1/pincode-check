@@ -3,7 +3,7 @@
     window.incodeServiceTabs.initialize();
     return;
   }
-  const keys = ['_incode_service_type', '_incode_pickup_location_id', '_incode_pickup_location_name', '_incode_pickup_date', '_incode_pickup_first_name', '_incode_pickup_last_name', '_incode_pickup_email', '_incode_pickup_phone', '_incode_service_country', '_incode_service_postal_code'];
+  const keys = ['_incode_service_type', '_incode_pickup_location_id', '_incode_pickup_location_name', '_incode_pickup_date', '_incode_pickup_first_name', '_incode_pickup_last_name', '_incode_pickup_email', '_incode_pickup_phone', '_incode_delivery_date', '_incode_delivery_first_name', '_incode_delivery_last_name', '_incode_delivery_email', '_incode_delivery_phone', '_incode_service_country', '_incode_service_postal_code'];
   const empty = () => Object.fromEntries(keys.map((key) => [key, '']));
   let writes = Promise.resolve();
   let intent = 0;
@@ -38,37 +38,47 @@
     return matches.length === 1 ? matches[0] : '';
   };
   const placeAboveCheckout = (root) => {
-    if (root.dataset.surface !== 'cart' || root.dataset.checkoutPlacement === 'true') return;
+    if (root.dataset.surface !== 'cart' || root.dataset.checkoutPlacement === 'true') return true;
     // Only the first cart block relocates; extra blocks stay in place so two
     // blocks can never ping-pong each other above the checkout button.
     const first = document.querySelectorAll('[data-template="service-tabs"][data-surface="cart"]')[0];
-    if (first && first !== root) return;
+    if (first && first !== root) return true;
     const mount = root.closest?.('.shopify-block') || root;
     if (mount.dataset.checkoutPlacement === 'true') {
       root.dataset.checkoutPlacement = 'true';
-      return;
+      return true;
     }
     const controls = [...document.querySelectorAll('button[name="checkout"], input[name="checkout"], [data-cart-checkout], .cart__checkout-button, [href$="/checkout"]')];
     const checkout = controls.find((control) => !root.contains?.(control) && control.offsetParent !== null)
       || controls.find((control) => !root.contains?.(control));
-    if (!checkout) return;
+    if (!checkout) return false;
     const anchor = checkout.closest?.('.cart__ctas, [data-cart-actions]') || checkout;
-    if (!anchor.parentNode || mount === anchor || mount.contains?.(anchor)) return;
+    if (!anchor.parentNode || mount === anchor || mount.contains?.(anchor)) return false;
     if (mount.nextSibling === anchor) {
       root.dataset.checkoutPlacement = 'true';
       mount.dataset.checkoutPlacement = 'true';
-      return;
+      return true;
     }
     anchor.parentNode.insertBefore(mount, anchor);
     root.dataset.checkoutPlacement = 'true';
     mount.dataset.checkoutPlacement = 'true';
+    return true;
+  };
+  const ensureCartPlacement = (root) => {
+    if (placeAboveCheckout(root) || root.dataset.surface !== 'cart') return;
+    let attempts = 0;
+    const retry = () => {
+      if (!root.isConnected || root.dataset.checkoutPlacement === 'true' || placeAboveCheckout(root)) return;
+      if (attempts++ < 8) setTimeout(retry, 100);
+    };
+    setTimeout(retry, 0);
   };
   const initialize = () => {
     const helper = window.incodeThemeContext;
     if (!helper) return;
     document.querySelectorAll('[data-template="service-tabs"]').forEach((root) => {
       if (!root.isConnected) return;
-      placeAboveCheckout(root);
+      ensureCartPlacement(root);
       if (root.dataset.serviceReady === 'true') return;
       root.dataset.serviceReady = 'true';
       const find = (selector) => root.querySelector(selector);
@@ -78,15 +88,20 @@
         const id = root.id;
         const tab = (value, title, svg, checked = '') => `<label><input type="radio" name="${id}-service" value="${value}" ${checked}><span><svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg>${title}</span></label>`;
         const error = (name) => `<small id="${id}-${name}-error" data-error="${name}" class="ist-error" hidden></small>`;
-        const collector = (name, title, autocomplete, type = 'text', max = 100) => `<label><span class="ist-sr">${title}</span><input data-field="${name}" type="${type}" placeholder="${title}" autocomplete="${autocomplete}" maxlength="${max}" aria-describedby="${id}-${name}-error">${error(name)}</label>`;
+         const collector = (name, title, autocomplete, type = 'text', max = 100) => `<label><span class="ist-sr">${title}</span><input data-field="${name}" type="${type}" placeholder="${title}" autocomplete="${autocomplete}" maxlength="${max}" aria-describedby="${id}-${name}-error">${error(name)}</label>`;
+         const deliveryCollector = (...args) => collector(...args).replaceAll('data-field=', 'data-delivery-field=').replaceAll(`data-error="${args[0]}"`, `data-error="delivery_${args[0]}"`).replaceAll(`${args[0]}-error`, `delivery_${args[0]}-error`);
         root.innerHTML = `
           <fieldset class="ist-services"><legend class="ist-sr">Delivery service</legend>
             ${tab('shipping', 'Shipping', '<circle cx="12" cy="12" r="9.5"/><path fill="#000" stroke="none" d="m5 5 4-2 3 2-1 3-3 1-1 3-3-1-1-3zm8 5 4-2 4 3-1 4-3 1-2 4-3-2 1-4-2-2z"/>', 'checked')}
             ${root.dataset.showPickup === 'false' ? '' : tab('pickup', 'Store Pickup', '<path d="M3 10h18v11H3zM2 10l2-7h16l2 7M8 21v-7h8v7M7 3l-1 7M12 3v7M17 3l1 7"/>')}
             ${root.dataset.showLocal === 'false' ? '' : tab('delivery', 'Delivery', '<path fill="#000" d="M2 5h12v12H2zM14 9h4l4 5v3h-8"/><circle fill="#000" cx="6" cy="18" r="2"/><circle fill="#000" cx="18" cy="18" r="2"/><path stroke="#fff" d="M4 11h7m-3-3 3 3-3 3"/>')}
           </fieldset>
-          <p class="ist-helper">Choose how you would like to receive your order.</p>
-          <div data-panel="shipping"></div>
+           <p class="ist-helper">Choose how you would like to receive your order.</p>
+           <div data-panel="shipping">
+             <div class="ist-shipping-check"><label><span class="ist-sr">Shipping postcode</span><input data-shipping-postal placeholder="PIN / ZIP code" autocomplete="postal-code" maxlength="30"></label><button type="button" data-shipping-check>Check shipping</button></div>
+             <p data-shipping-status class="ist-result-status" role="status" aria-live="polite"></p>
+             <div data-shipping-result class="ist-shipping-result" hidden><strong>Shipping available</strong><span data-shipping-date></span></div>
+           </div>
           <div data-panel="pickup" hidden>
             <div data-pickup-filter class="ist-pickup-postal" hidden><label><span class="ist-sr">Pickup ZIP or postcode</span><input data-pickup-postal placeholder="ZIP / postcode" autocomplete="postal-code" maxlength="30" aria-describedby="${id}-pickup_postal-error">${error('pickup_postal')}</label><button type="button" data-filter>Apply</button></div>
             <fieldset class="ist-locations"><legend class="ist-sr">Choose a pickup location</legend><div data-locations></div></fieldset>
@@ -98,12 +113,18 @@
               ${collector('phone', 'Phone No', 'tel', 'tel', 50)}
             </div>
           </div>
-          <div data-panel="delivery" hidden>
+           <div data-panel="delivery" hidden>
             <label class="ist-sr" for="${id}-place">Search for a place or address</label>
             <div class="ist-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg><input id="${id}-place" data-address type="text" autocomplete="street-address" placeholder="Search for a place or address" aria-describedby="${id}-address-error"><button type="button" data-clear aria-label="Clear address">&times;</button></div>${error('address')}
-            <div data-suggestions class="ist-suggestions" hidden></div>
-            <p data-delivery-status class="ist-result-status" role="status" aria-live="polite"></p>
-            <button type="button" data-check hidden>Check local delivery</button>
+             <div data-suggestions class="ist-suggestions" hidden></div>
+             <p data-delivery-status class="ist-result-status" role="status" aria-live="polite"></p>
+             <div data-delivery-details hidden>
+               <label><span class="ist-sr">Delivery date and time</span><input data-delivery-field="date" placeholder="Delivery date and time" readonly aria-describedby="${id}-delivery_date-error">${error('delivery_date')}</label>
+               <div class="ist-columns">${deliveryCollector('first_name', 'First name', 'given-name')}${deliveryCollector('last_name', 'Last name', 'family-name')}</div>
+               ${deliveryCollector('email', 'Email', 'email', 'email', 254)}
+               ${deliveryCollector('phone', 'Phone Number', 'tel', 'tel', 50)}
+             </div>
+             <button type="button" data-check hidden>Check local delivery</button>
           </div>
           <span data-country-slot hidden></span>
           <p data-status role="status" aria-live="polite"></p>
@@ -115,6 +136,11 @@
       const panels = [...root.querySelectorAll('[data-panel]')];
       const status = find('[data-status]');
       const deliveryStatus = find('[data-delivery-status]');
+      const shippingPostal = find('[data-shipping-postal]');
+      const shippingCheck = find('[data-shipping-check]');
+      const shippingStatus = find('[data-shipping-status]');
+      const shippingResult = find('[data-shipping-result]');
+      const shippingDate = find('[data-shipping-date]');
       const retry = find('[data-retry]');
       const check = find('[data-check]');
       const country = find('[data-country]');
@@ -122,13 +148,16 @@
       const pickupPostal = find('[data-pickup-postal]');
       const address = find('[data-address]');
       const suggestions = find('[data-suggestions]');
-      const details = find('[data-pickup-details]');
-      const fields = Object.fromEntries(['date', 'first_name', 'last_name', 'email', 'phone'].map((name) => [name, find(`[data-field="${name}"]`)]));
+       const details = find('[data-pickup-details]');
+       const fields = Object.fromEntries(['date', 'first_name', 'last_name', 'email', 'phone'].map((name) => [name, find(`[data-field="${name}"]`)]));
+       const deliveryDetails = find('[data-delivery-details]');
+       const deliveryFields = Object.fromEntries(['date', 'first_name', 'last_name', 'email', 'phone'].map((name) => [name, find(`[data-delivery-field="${name}"]`)]));
       let service = 'shipping';
       let locations = [];
       let selected = '';
       let version = 0;
-      let active;
+       let active;
+       let suggestionActive;
       let addressTimer;
       let pickupTimer;
       let disposed = false;
@@ -140,7 +169,7 @@
       if (savedPostal && root.dataset.savedAddress) address.value = root.dataset.savedAddress;
       if (savedCountry && [...country.options || []].some((option) => option.value === savedCountry)) country.value = savedCountry;
       if (pickupDisplay === 'customer-postal' && savedPostal) pickupPostal.value = savedPostal;
-      const errorFields = { ...fields, address, pickup_postal: pickupPostal };
+       const errorFields = { ...fields, ...Object.fromEntries(Object.entries(deliveryFields).map(([name, input]) => [`delivery_${name}`, input])), address, pickup_postal: pickupPostal };
       const fieldError = (name, message = '') => {
         const input = errorFields[name];
         const error = find(`[data-error="${name}"]`);
@@ -149,41 +178,57 @@
         error.hidden = !message;
       };
       const clearErrors = () => Object.keys(errorFields).forEach((name) => fieldError(name));
-      const setDeliveryStatus = (text = '', state = '') => {
-        deliveryStatus.textContent = text;
-        deliveryStatus.dataset.state = state;
+       const setDeliveryStatus = (text = '', state = '') => {
+         deliveryStatus.textContent = text;
+         deliveryStatus.dataset.state = state;
+       };
+       const hideDeliveryDetails = () => { deliveryDetails.hidden = true; };
+      const setShippingStatus = (text = '', state = '') => {
+        shippingStatus.textContent = text;
+        shippingStatus.dataset.state = state;
       };
+      const localDeliveryMessage = (data) => ({
+        not_configured: 'Local delivery is not enabled for this location.',
+        not_in_zone: 'This postcode is outside the configured delivery zones.',
+        no_location_stock: 'These items are not in stock at the delivery location.',
+        inventory_unavailable: 'Stock could not be verified right now. Please try again.',
+      }[data.local_delivery_reason] || 'Local delivery is not available for this postcode and these items.');
       const clearSuggestion = () => {
         suggestions.replaceChildren();
         suggestions.hidden = true;
       };
-      const renderSuggestion = (data) => {
+      const renderSuggestions = (data) => {
         clearSuggestion();
-        const postal = String(data.postal_code || '').trim();
-        if (!postal) return;
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = 'ist-suggestion';
-        const pin = document.createElement('span');
-        pin.className = 'ist-suggestion__pin';
-        pin.setAttribute('aria-hidden', 'true');
-        pin.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>';
-        const copy = document.createElement('span');
-        const title = document.createElement('strong');
-        title.textContent = postal;
-        const place = [data.city, data.state || data.province].filter(Boolean).join(', ');
-        const subtitle = document.createElement('small');
+        const entries = Array.isArray(data?.suggestions) ? data.suggestions : data?.postal_code ? [data] : [];
         const countryName = country.selectedOptions?.[0]?.textContent || country.value;
-        subtitle.textContent = [place, countryName].filter(Boolean).join(' · ');
-        copy.append(title, subtitle);
-        row.append(pin, copy);
-        row.addEventListener('click', () => {
-          address.value = postal;
-          row.dataset.selected = 'true';
-          fieldError('address');
-        }, options);
-        suggestions.append(row);
-        suggestions.hidden = false;
+        for (const entry of entries) {
+          const postal = String(entry?.postal_code || '').trim();
+          if (!postal) continue;
+          const row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'ist-suggestion';
+          const pin = document.createElement('span');
+          pin.className = 'ist-suggestion__pin';
+          pin.setAttribute('aria-hidden', 'true');
+          pin.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>';
+          const copy = document.createElement('span');
+          const title = document.createElement('strong');
+          title.textContent = postal;
+          const place = [entry.city, entry.state || entry.province].filter(Boolean).join(', ');
+          const subtitle = document.createElement('small');
+          subtitle.textContent = [place, countryName].filter(Boolean).join(' · ');
+          copy.append(title, subtitle);
+          row.append(pin, copy);
+          row.addEventListener('click', () => {
+            address.value = postal;
+            row.dataset.selected = 'true';
+            fieldError('address');
+            clearSuggestion();
+            void run();
+          }, options);
+          suggestions.append(row);
+        }
+        suggestions.hidden = !suggestions.children.length;
       };
       const setStatus = (text = '', state = '') => {
         status.textContent = state === 'error' || state === 'loading' || state === 'success' ? text : '';
@@ -191,15 +236,17 @@
         retry.hidden = !(service === 'pickup' && state === 'error');
       };
       const busy = (loading) => {
-        [retry, check, find('[data-filter]')].filter(Boolean).forEach((button) => { button.disabled = loading; });
+        [retry, check, shippingCheck, find('[data-filter]')].filter(Boolean).forEach((button) => { button.disabled = loading; });
         root.setAttribute('aria-busy', String(loading));
       };
       const invalidate = (reset = false) => {
         clearTimeout(addressTimer);
         clearTimeout(pickupTimer);
-        version++;
-        active?.abort();
-        active = null;
+         version++;
+         active?.abort();
+         suggestionActive?.abort();
+         active = null;
+         suggestionActive = null;
         busy(false);
         setStatus();
         setDeliveryStatus();
@@ -208,8 +255,10 @@
           locations = [];
           selected = '';
           find('[data-locations]').replaceChildren();
-          details.hidden = true;
-          fields.date.value = '';
+           details.hidden = true;
+           fields.date.value = '';
+           deliveryDetails.hidden = true;
+           Object.values(deliveryFields).forEach((field) => { field.value = ''; });
         }
         if (cart) {
           const token = ++intent;
@@ -219,6 +268,21 @@
         }
       };
       const current = (stamp) => !disposed && root.isConnected && stamp === version;
+      const suggestCities = async (value, stamp) => {
+        suggestionActive?.abort();
+        const controller = new AbortController();
+        suggestionActive = controller;
+        try {
+          const query = new URLSearchParams({ city_suggestions: '1', country: country.value, city: value.trim() });
+          const response = await fetch(`/apps/delivery-checker?${query}`, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+          const data = await response.json();
+          if (current(stamp) && response.ok) renderSuggestions(data);
+        } catch (error) {
+          if (error.name !== 'AbortError') clearSuggestion();
+        } finally {
+          if (suggestionActive === controller) suggestionActive = null;
+        }
+      };
       const options = helper.watch(root, () => {
         invalidate(true);
         if (service === 'pickup' && (pickupDisplay === 'all' || savedPostal || pickupPostal.value.trim())) void run();
@@ -268,6 +332,20 @@
           }
           query.set('country', country.value);
           query.set('postal_code', postal);
+        } else if (service === 'shipping') {
+          const postal = postalFrom(shippingPostal.value, country.value);
+          if (!postal) {
+            const message = 'Enter a valid postcode.';
+            shippingPostal.setAttribute('aria-invalid', 'true');
+            shippingPostal.focus();
+            const error = new Error(message);
+            error.validation = true;
+            throw error;
+          }
+          shippingPostal.removeAttribute('aria-invalid');
+          query.set('country', country.value);
+          query.set('postal_code', postal);
+          query.set('estimate', '1');
         }
         if (cart) await helper.cartParams(query, signal);
         else {
@@ -356,7 +434,7 @@
         }
         setStatus();
       };
-      const pickupValidation = (showErrors = false, only = '') => {
+       const pickupValidation = (showErrors = false, only = '') => {
         const location = locations.find((entry) => String(entry.id) === selected);
         let valid = Boolean(location);
         for (const [name, input] of Object.entries(fields)) {
@@ -372,30 +450,48 @@
             fieldError(name, message);
           }
         }
-        return valid;
-      };
-      const run = async (savePickup = false) => {
-        invalidate();
-        if (savePickup && service === 'pickup' && !pickupValidation()) return;
+         return valid;
+       };
+       const deliveryValidation = (showErrors = false, only = '') => {
+         let valid = true;
+         for (const [name, input] of Object.entries(deliveryFields)) {
+           const value = input.value.trim();
+           const digits = value.replace(/\D/g, '').length;
+           const validPhone = name !== 'phone' || /^\+?[0-9 ().-]+$/.test(value) && digits >= 7 && digits <= 15;
+           const max = name === 'email' ? 254 : name === 'phone' ? 50 : 100;
+           const fieldValid = Boolean(value) && value.length <= max && input.checkValidity() && validPhone;
+           valid = valid && fieldValid;
+           if (showErrors && (!only || only === name)) {
+             const message = fieldValid ? '' : name === 'phone' ? 'Enter a phone number with 7 to 15 digits.' : `Enter a valid ${name.replace('_', ' ')}${value.length > max ? ` (maximum ${max} characters)` : ''}.`;
+             fieldError(`delivery_${name}`, message);
+           }
+         }
+         return valid;
+       };
+       const run = async (saveDetails = false) => {
+         invalidate();
+         if (service === 'delivery' && !saveDetails) hideDeliveryDetails();
+         if (saveDetails && service === 'pickup' && !pickupValidation()) return;
+         if (saveDetails && service === 'delivery' && !deliveryValidation()) return;
         const stamp = version;
         const token = intent;
         const controller = new AbortController();
         active = controller;
         clearErrors();
-        busy(!savePickup);
+         busy(!saveDetails);
         if (service === 'delivery') setDeliveryStatus('Checking local delivery...', 'loading');
-        else if (!savePickup) setStatus('Checking service options...', 'loading');
+        else if (service === 'shipping') { setShippingStatus('Checking shipping...', 'loading'); shippingResult.hidden = true; }
+         else if (!saveDetails) setStatus('Checking service options...', 'loading');
         try {
           let attributes = empty();
           let snapshot = '';
-          if (service !== 'shipping') {
-            const query = await params(controller.signal, savePickup && service === 'pickup');
-            if (!current(stamp)) return;
-            snapshot = query.get('cartItems') || '';
-            const data = await request(query, controller.signal);
-            if (!current(stamp)) return;
-            if (service === 'pickup') {
-              if (!savePickup) { renderLocations(data, query.has('postal_code')); return; }
+           const query = await params(controller.signal, saveDetails && service === 'pickup');
+          if (!current(stamp)) return;
+          snapshot = query.get('cartItems') || '';
+          const data = await request(query, controller.signal);
+          if (!current(stamp)) return;
+          if (service === 'pickup') {
+             if (!saveDetails) { renderLocations(data, query.has('postal_code')); return; }
               const location = Array.isArray(data.pickup_locations) && data.pickup_locations.find((entry) => String(entry.id) === selected);
               if (data.pickup_selection_valid !== true || !location || !location.available_dates?.includes(fields.date.value)) {
                 fieldError('date', 'This location or date is no longer available. Retry pickup locations.');
@@ -405,21 +501,42 @@
               attributes._incode_pickup_location_name = location.name || '';
               attributes._incode_pickup_date = fields.date.value.trim();
               for (const name of ['first_name', 'last_name', 'email', 'phone']) attributes[`_incode_pickup_${name}`] = fields[name].value.trim();
-            } else {
-              renderSuggestion(data);
-              if (data.local_delivery_available !== true) {
-                setDeliveryStatus('Local delivery is not available for this postcode and these items.', 'error');
+            } else if (service === 'shipping') {
+              const shippingAvailable = data.available === true;
+              if (!shippingAvailable) {
+                setShippingStatus('Shipping is not available for this postcode.', 'error');
+                shippingResult.hidden = true;
                 return;
               }
-              attributes._incode_service_country = query.get('country');
-              attributes._incode_service_postal_code = query.get('postal_code');
-            }
+              shippingStatus.textContent = '';
+              shippingStatus.dataset.state = 'success';
+              shippingResult.hidden = false;
+              shippingDate.textContent = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
+          } else {
+              renderSuggestions(data);
+             if (data.local_delivery_available !== true) {
+               hideDeliveryDetails();
+               setDeliveryStatus(localDeliveryMessage(data), 'error');
+               return;
+             }
+             const deliveryDate = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
+             deliveryFields.date.value = deliveryDate;
+             deliveryFields.date.dataset.available = String(Boolean(deliveryDate));
+             deliveryDetails.hidden = false;
+             if (!saveDetails) {
+               setDeliveryStatus('Local delivery is available.', 'success');
+               return;
+             }
+             attributes._incode_service_country = query.get('country');
+             attributes._incode_service_postal_code = query.get('postal_code');
+             attributes._incode_delivery_date = deliveryDate;
+             for (const name of ['first_name', 'last_name', 'email', 'phone']) attributes[`_incode_delivery_${name}`] = deliveryFields[name].value.trim();
           }
           if (!cart) {
             if (service === 'delivery') setDeliveryStatus('Local delivery is available.', 'success');
             return;
           }
-          if (service !== 'shipping') attributes._incode_service_type = service;
+           if (service !== 'shipping') attributes._incode_service_type = service;
           const saved = await queue(token, attributes, () => current(stamp), async () => {
             if (!snapshot) return;
             const fresh = await helper.cartParams(new URLSearchParams(), controller.signal);
@@ -427,13 +544,17 @@
           });
           if (saved && current(stamp)) {
             if (service === 'delivery') setDeliveryStatus('Local delivery is available.', 'success');
+            if (service === 'shipping') setShippingStatus('', '');
             if (service === 'pickup') setStatus('Pickup details saved.', 'success');
           }
         } catch (error) {
           if (current(stamp) && error.name !== 'AbortError') {
-            if (service === 'delivery') {
-              if (error.validation) setDeliveryStatus();
+             if (service === 'delivery') {
+               hideDeliveryDetails();
+               if (error.validation) setDeliveryStatus();
               else setDeliveryStatus(error.message || 'Unable to check delivery. Please retry.', 'error');
+            } else if (service === 'shipping') {
+              setShippingStatus(error.validation ? '' : (error.message || 'Unable to check shipping. Please retry.'), error.validation ? '' : 'error');
             } else setStatus(error.message || 'Unable to check service options. Please retry.', 'error');
           }
         } finally {
@@ -448,28 +569,51 @@
         pickupFilter.hidden = service !== 'pickup' || !requiresPostal || Boolean(savedPostal);
         if (service === 'pickup' && (pickupDisplay === 'all' || savedPostal)) void run();
         if (service === 'delivery' && savedPostal) void run();
+        if (service === 'shipping' && shippingPostal.value.trim()) void run();
       }, options));
       const schedulePickup = () => {
         clearTimeout(pickupTimer);
         if (!cart || service !== 'pickup' || !pickupValidation()) return;
         pickupTimer = setTimeout(() => { if (!disposed && service === 'pickup') void run(true); }, 300);
       };
-      Object.entries(fields).forEach(([name, field]) => {
-        const changed = () => { invalidate(); fieldError(name); schedulePickup(); };
+       Object.entries(fields).forEach(([name, field]) => {
+         const changed = () => { invalidate(); fieldError(name); schedulePickup(); };
         field.addEventListener('input', changed, options);
         field.addEventListener('change', changed, options);
-        field.addEventListener('blur', () => { pickupValidation(true, name); schedulePickup(); }, options);
-      });
+         field.addEventListener('blur', () => { pickupValidation(true, name); schedulePickup(); }, options);
+       });
+       Object.entries(deliveryFields).forEach(([name, field]) => {
+         if (name === 'date') return;
+         const changed = () => { invalidate(); fieldError(`delivery_${name}`); if (cart && service === 'delivery' && deliveryFields.date.value) { clearTimeout(pickupTimer); if (deliveryValidation()) pickupTimer = setTimeout(() => { if (!disposed && service === 'delivery') void run(true); }, 300); } };
+         field.addEventListener('input', changed, options);
+         field.addEventListener('blur', () => { deliveryValidation(true, name); }, options);
+       });
       address.addEventListener('input', () => {
         invalidate();
         clearSuggestion();
         fieldError('address');
-        if (service === 'delivery' && postalFrom(address.value, country.value)) {
-          addressTimer = setTimeout(() => { if (!disposed && service === 'delivery') void run(); }, 350);
+        if (service === 'delivery') {
+          const postal = postalFrom(address.value, country.value);
+          const value = address.value.trim();
+          const stamp = version;
+          if (postal) addressTimer = setTimeout(() => { if (!disposed && service === 'delivery') void run(); }, 350);
+          else if (value.length >= 2) addressTimer = setTimeout(() => { if (!disposed && service === 'delivery') void suggestCities(value, stamp); }, 250);
         }
       }, options);
+      shippingPostal.addEventListener('input', () => {
+        invalidate();
+        shippingPostal.removeAttribute('aria-invalid');
+        setShippingStatus();
+        shippingResult.hidden = true;
+      }, options);
+      shippingPostal.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void run(); } }, options);
       pickupPostal.addEventListener('input', () => { invalidate(true); fieldError('pickup_postal'); }, options);
-      country.addEventListener('change', () => { invalidate(service === 'pickup'); fieldError('address'); fieldError('pickup_postal'); }, options);
+      country.addEventListener('change', () => {
+        invalidate(service === 'pickup');
+        fieldError('address');
+        fieldError('pickup_postal');
+        if (service === 'shipping') shippingResult.hidden = true;
+      }, options);
       find('[data-clear]').addEventListener('click', () => { address.value = ''; invalidate(); clearSuggestion(); fieldError('address'); address.focus(); }, options);
       root.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && event.target?.tagName === 'INPUT') {
@@ -481,8 +625,13 @@
       retry.addEventListener('click', () => run(), options);
       find('[data-filter]').addEventListener('click', () => run(), options);
       check.addEventListener('click', () => run(), options);
+      shippingCheck.addEventListener('click', () => run(), options);
       retry.hidden = true;
       if (cart) invalidate(true);
+       if (savedPostal) {
+        shippingPostal.value = savedPostal;
+        void run();
+      }
     });
   };
   window.incodeServiceTabs = { initialize };

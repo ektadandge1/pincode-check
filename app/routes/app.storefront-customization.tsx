@@ -136,7 +136,6 @@ const TEMPLATE_OPTIONS = [
 
 const STOREFRONT_SURFACES = [
   ["Product page", "product"],
-  ["Collection page", "collection"],
   ["Cart page", "cart"],
 ] as const;
 
@@ -393,7 +392,6 @@ export default function StorefrontCustomizationPage() {
                       <div className="incode-placement-grid">
                         {([
                           ["product", "Product page", "Below product details or near Add to Cart"],
-                          ["collection", "Collection product cards", "Show an ETA on each product card before shoppers open it"],
                           ["cart", "Cart page", "Confirm delivery before checkout"],
                         ] as const).map(([template, label, description]) => (
                           <div key={template} className={`incode-placement-card${previewSurface === template ? " is-selected" : ""}`}>
