@@ -14,7 +14,7 @@ import {
 } from "@shopify/polaris";
 
 export const meta: MetaFunction = () => [
-  { title: "Incode Track | Delivery certainty for Shopify" },
+  { title: "ETADeliverPickup | Shopify" },
   { name: "description", content: "Advanced postal and ZIP code delivery availability, delivery dates, COD rules, and cart protection for Shopify." },
 ];
 
@@ -32,6 +32,10 @@ export default function App() {
           <BlockStack gap="500">
             <div className="incode-hero">
               <BlockStack gap="400">
+                <div className="incode-brand-lockup">
+                  <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width="48" height="48" />
+                  <span>ETADeliverPickup</span>
+                </div>
                 <InlineStack gap="200">
                   <Badge tone="info">Built for Shopify</Badge>
                   <Badge tone="success">Theme app extension</Badge>
@@ -40,7 +44,7 @@ export default function App() {
                   <Text as="h1" variant="heading3xl">Delivery certainty, before shoppers reach checkout.</Text>
                   <div className="incode-hero__copy">
                     <Text as="p" variant="bodyLg">
-                      Incode Track combines postal-code coverage, accurate delivery dates, COD messaging,
+                      ETADeliverPickup combines postal-code coverage, accurate delivery dates, COD messaging,
                       product targeting, and Add-to-Cart protection in one Shopify-native experience.
                     </Text>
                   </div>

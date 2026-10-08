@@ -34,11 +34,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: { shop: session.shop },
     orderBy: [{ priority: "asc" }, { id: "asc" }],
   });
-  const editId = Number(new URL(request.url).searchParams.get("edit") ?? 0);
+  const editParam = new URL(request.url).searchParams.get("edit");
+  const editId = Number(editParam ?? 0);
+  const editingRule = Number.isSafeInteger(editId) && editId > 0 ? rules.find((rule) => rule.id === editId) ?? null : null;
   return {
     access,
     rules,
-    editingRule: rules.find((rule) => rule.id === editId) ?? null,
+    editingRule,
+    editNotFound: editParam !== null && !editingRule,
   };
 }
 
@@ -110,7 +113,7 @@ const EMPTY_FORM = {
 };
 
 export default function ServiceRulesPage() {
-  const { access, rules, editingRule } = useLoaderData<typeof loader>();
+  const { access, rules, editingRule, editNotFound } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
   const [form, setForm] = useState(EMPTY_FORM);
@@ -129,6 +132,11 @@ export default function ServiceRulesPage() {
   const pendingIntent = String(navigation.formData?.get("intent") ?? "");
   const pendingId = Number(navigation.formData?.get("id") ?? 0);
   const savePending = pendingIntent === "save";
+  const enabledRules = rules.filter((rule) => rule.enabled).length;
+  const restrictedServices = rules.reduce((total, rule) => total
+    + Number(!rule.shippingAvailable)
+    + Number(!rule.localDeliveryAvailable)
+    + Number(!rule.pickupAvailable), 0);
   const targetHelp = form.targetKind === "product"
     ? "Enter the numeric Shopify product ID."
     : form.targetKind === "collection"
@@ -146,15 +154,24 @@ export default function ServiceRulesPage() {
     >
       <BlockStack gap="400">
         {actionData ? <Banner tone={actionData.ok ? "success" : "critical"} title={actionData.ok ? "Service rules updated" : "Could not update service rules"}>{actionData.message}</Banner> : null}
+        {editNotFound ? <Banner tone="warning" title="Service rule not found" action={{ content: "Clear edit link", url: "/app/service-rules" }}>The requested rule is unavailable or does not belong to this shop. No changes were made.</Banner> : null}
         <Banner tone="info" title="Independent from delivery-date rules">
           These rules only show or hide fulfillment services. Processing days, transit days, delivery messages, and PIN protection remain under Delivery settings → Product rules.
         </Banner>
-        <Card>
+        <div className="incode-service-rule-metrics" aria-label="Service rule summary">
+          <div><strong>{rules.length}</strong><span>Total rules</span></div>
+          <div><strong>{enabledRules}</strong><span>Enabled rules</span></div>
+          <div><strong>{restrictedServices}</strong><span>Blocked service choices</span></div>
+        </div>
+        <div className="incode-service-rule-editor"><Card>
           <Form method="post">
             <input type="hidden" name="intent" value="save" />
             <input type="hidden" name="id" value={editingRule?.id ?? ""} />
             <BlockStack gap="400">
-              <Text as="h2" variant="headingLg">{editingRule ? `Edit ${editingRule.name}` : "Create service rule"}</Text>
+              <BlockStack gap="100">
+                <Text as="h2" variant="headingLg">{editingRule ? `Edit ${editingRule.name}` : "Create service rule"}</Text>
+                <Text as="p" tone="subdued">Match one catalog group, then choose the fulfillment services shoppers can use.</Text>
+              </BlockStack>
               <FormLayout>
                 <FormLayout.Group>
                   <TextField label="Rule name" name="name" value={form.name} onChange={(name) => setForm((current) => ({ ...current, name }))} maxLength={60} autoComplete="off" />
@@ -177,11 +194,17 @@ export default function ServiceRulesPage() {
               </InlineStack>
             </BlockStack>
           </Form>
-        </Card>
+        </Card></div>
         <BlockStack gap="300">
-          <Text as="h2" variant="headingLg">Configured service rules</Text>
+          <InlineStack align="space-between" blockAlign="end" gap="300" wrap>
+            <BlockStack gap="100">
+              <Text as="h2" variant="headingLg">Configured service rules</Text>
+              <Text as="p" tone="subdued">Lower priority numbers win when more than one rule matches.</Text>
+            </BlockStack>
+            <Badge tone={enabledRules ? "success" : "info"}>{`${enabledRules} enabled`}</Badge>
+          </InlineStack>
           {rules.length ? rules.map((rule) => (
-            <Card key={rule.id}>
+            <div key={rule.id} className={`incode-service-rule-card${rule.enabled ? "" : " is-disabled"}`}><Card>
               <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
                 <BlockStack gap="100">
                   <InlineStack gap="200" blockAlign="center"><Text as="h3" variant="headingMd">{rule.name}</Text>{rule.enabled ? <Badge tone="success">Enabled</Badge> : <Badge>Disabled</Badge>}</InlineStack>
@@ -192,14 +215,14 @@ export default function ServiceRulesPage() {
                     <Badge tone={rule.pickupAvailable ? "success" : undefined}>{`Store pickup ${rule.pickupAvailable ? "available" : "blocked"}`}</Badge>
                   </InlineStack>
                 </BlockStack>
-                <InlineStack gap="200">
+                <InlineStack gap="200" wrap>
                   <Button size="slim" url={`/app/service-rules?edit=${rule.id}`} disabled={saving}>Edit</Button>
                   <Form method="post"><input type="hidden" name="intent" value="toggle" /><input type="hidden" name="id" value={rule.id} /><Button submit size="slim" disabled={saving} loading={pendingIntent === "toggle" && pendingId === rule.id}>{rule.enabled ? "Disable" : "Enable"}</Button></Form>
                   <Form method="post" onSubmit={(event) => { if (!window.confirm(`Delete service rule "${rule.name}"?`)) event.preventDefault(); }}><input type="hidden" name="intent" value="delete" /><input type="hidden" name="id" value={rule.id} /><Button submit size="slim" tone="critical" disabled={saving} loading={pendingIntent === "delete" && pendingId === rule.id}>Delete</Button></Form>
                 </InlineStack>
               </InlineStack>
-            </Card>
-          )) : <Card><Text as="p" tone="subdued">No service availability rules yet. Matching products use the configured global and location defaults.</Text></Card>}
+            </Card></div>
+          )) : <div className="incode-service-rule-empty"><Card><BlockStack gap="200" inlineAlign="center"><Text as="h3" variant="headingMd">No service rules yet</Text><Text as="p" tone="subdued">Matching products currently use the configured global and location defaults.</Text></BlockStack></Card></div>}
         </BlockStack>
       </BlockStack>
     </Page>

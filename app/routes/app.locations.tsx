@@ -21,7 +21,7 @@ import { resolvePlanAccess } from "../services/plan-access.server";
 import { NO_PLAN_ACCESS } from "../services/plans.server";
 import { requireActiveBilling } from "../services/billing.server";
 import { clearDeliveryCheckCaches } from "../services/delivery-checker.server";
-import { matchesPostalPatternsCsv, normalizeCountryCode, normalizePostalCode, validatePostalCode, validatePostalPattern } from "../utils/delivery.server";
+import { validatePostalPattern } from "../utils/delivery.server";
 import { COUNTRY_CODES, COUNTRY_OPTIONS } from "../utils/countries";
 
 type ShopifyLocation = {
@@ -45,9 +45,6 @@ type ShopifyLocation = {
 type ActionData = {
   ok: boolean;
   message: string;
-  previewKey?: string;
-  postalCode?: string;
-  localDelivery?: boolean;
 };
 
 type PickupOrder = {
@@ -101,24 +98,6 @@ type ShopifyOrder = {
   } | null;
   customAttributes?: Array<{ key: string; value?: string | null }>;
 };
-
-const ICON_OPTIONS = [
-  { label: "Standard checkmarks", value: "number" },
-  { label: "Premium delivery icons", value: "delivery" },
-  { label: "Advanced duotone icons", value: "duotone" },
-  { label: "Circular badges", value: "circle" },
-  { label: "Simple minimal dots", value: "minimal" },
-  { label: "Friendly emoji icons", value: "emoji" },
-];
-
-const EFFECT_OPTIONS = [
-  { label: "Soft reveal", value: "soft" },
-  { label: "Route pulse", value: "route" },
-  { label: "Icon heartbeat", value: "pulse" },
-  { label: "Floating icons", value: "float" },
-  { label: "Elegant shimmer", value: "shimmer" },
-  { label: "No effect", value: "none" },
-];
 
 type LocationRow = ShopifyLocation & {
   rule: Awaited<ReturnType<typeof prisma.fulfillmentLocationRule.findMany>>[number] | null;
@@ -315,10 +294,6 @@ function optionalDays(value: FormDataEntryValue | null): number | null {
   return raw ? Number(raw) : null;
 }
 
-function isHex(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value);
-}
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await requireActiveBilling(request);
   const requestedView = new URL(request.url).searchParams.get("view");
@@ -362,6 +337,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               phone
             }
            }
+           pageInfo { hasNextPage endCursor }
          }
           ${view === "setup" ? `
             products(first: 250) { nodes { id title tags } pageInfo { hasNextPage endCursor } }
@@ -371,7 +347,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     `);
     const payload = (await response.json()) as {
       data?: {
-        locations?: { nodes?: ShopifyLocation[] };
+        locations?: { nodes?: ShopifyLocation[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } };
         products?: { nodes?: Array<{ id: string; title: string; tags: string[] }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
         collections?: { nodes?: Array<{ handle: string; title: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
       };
@@ -380,7 +356,55 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (!response.ok || payload.errors?.length) {
       throw new Error(payload.errors?.[0]?.message ?? "Unable to load Shopify locations.");
     }
-    locations = (payload.data?.locations?.nodes ?? []).map((location) => ({
+    const locationNodes = [...(payload.data?.locations?.nodes ?? [])];
+    let locationPageInfo = payload.data?.locations?.pageInfo;
+    let locationPages = 1;
+    while (locationPageInfo?.hasNextPage) {
+      if (!locationPageInfo.endCursor || locationPages >= 10) {
+        locationError = "More than 100 Shopify locations exist. Only the first locations could be loaded. Use search to find a specific location.";
+        break;
+      }
+      const nextResponse = await admin.graphql(`#graphql
+        query DeliveryLocationsNext($after: String!) {
+          locations(first: 100, after: $after, includeInactive: true) {
+            nodes {
+              id
+              name
+              isActive
+              fulfillsOnlineOrders
+              address {
+                address1
+                address2
+                city
+                province
+                provinceCode
+                zip
+                country
+                countryCode
+                phone
+              }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      `, { variables: { after: locationPageInfo.endCursor } });
+      const next = await nextResponse.json() as typeof payload;
+      if (!nextResponse.ok || next.errors?.length) {
+        throw new Error(next.errors?.[0]?.message ?? "Unable to load all Shopify locations.");
+      }
+      locationNodes.push(...(next.data?.locations?.nodes ?? []));
+      const nextPageInfo = next.data?.locations?.pageInfo;
+      if (!nextPageInfo || (nextPageInfo.hasNextPage && nextPageInfo.endCursor === locationPageInfo.endCursor)) {
+        throw new Error("Shopify location pagination could not be completed.");
+      }
+      locationPageInfo = nextPageInfo;
+      locationPages += 1;
+      if (locationPageInfo?.hasNextPage && locationPages >= 10) {
+        locationError = "More than 1,000 Shopify locations exist. Only the first 1,000 are shown.";
+        break;
+      }
+    }
+    locations = locationNodes.map((location) => ({
       ...location,
       rule: ruleByLocation.get(location.id) ?? null,
     }));
@@ -414,15 +438,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       zone: zones.map((zone) => ({ label: `${zone.name} (Zone ${zone.id})`, value: String(zone.id) })),
     };
   } catch (error) {
-    locationError = error instanceof Error ? error.message : "Unable to load Shopify locations.";
-    locations = rules.map((rule) => ({
-      id: rule.shopifyLocationId,
-      name: rule.name,
-      isActive: false,
-      fulfillsOnlineOrders: false,
-      address: null,
-      rule,
-    }));
+    const message = error instanceof Error ? error.message : "Unable to load Shopify locations.";
+    locationError = [locationError, message].filter(Boolean).join(" ");
+    if (locations.length === 0) {
+      locations = rules.map((rule) => ({
+        id: rule.shopifyLocationId,
+        name: rule.name,
+        isActive: false,
+        fulfillsOnlineOrders: false,
+        address: null,
+        rule,
+      }));
+    }
   }
   let access = NO_PLAN_ACCESS;
   try {
@@ -530,14 +557,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     shop: session.shop,
     inventoryAwareEnabled: setting?.inventoryAwareEnabled ?? false,
     priorityMode: setting?.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
-    iconStyle: ICON_OPTIONS.some((option) => option.value === setting?.storefrontIconStyle)
-      ? setting?.storefrontIconStyle ?? "number"
-      : "number",
-    serviceIconColor: setting?.storefrontAccentColor ?? "#2b2640",
-    serviceBackground: setting?.storefrontJourneyBackground ?? "#e6edff",
-    serviceEffect: EFFECT_OPTIONS.some((option) => option.value === setting?.storefrontAnimation)
-      ? setting?.storefrontAnimation ?? "soft"
-      : "soft",
     locations,
     targetSuggestions,
     targetRuleCount,
@@ -555,19 +574,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   const formData = await request.formData();
   const intent = String(formData.get("intent"));
-  if (intent === "simulate_postal") {
-    const previewKey = String(formData.get("previewKey") ?? "");
-    const countryRaw = String(formData.get("country") ?? "").trim().toUpperCase();
-    if (!COUNTRY_CODES.has(countryRaw)) return { ok: false, message: "Choose a valid country.", previewKey } satisfies ActionData;
-    const country = normalizeCountryCode(countryRaw);
-    const postalCode = normalizePostalCode(country, String(formData.get("postalCode") ?? ""));
-    if (!/^[A-Z]{2}$/.test(countryRaw) || !validatePostalCode(country, postalCode)) {
-      return { ok: false, message: "Enter a valid postal code for the selected country.", previewKey } satisfies ActionData;
-    }
-    return { ok: true, message: "Postal pattern simulation only; inventory and delivery coverage are not verified.", previewKey, postalCode,
-      localDelivery: matchesPostalPatternsCsv(country, postalCode, String(formData.get("patterns") ?? "").replace(/\r?\n/g, ",")) } satisfies ActionData;
-  }
-  if (intent !== "save_location" && intent !== "save_priority_mode" && intent !== "save_icon_style" && intent !== "enable_pickup") {
+  if (intent !== "save_location" && intent !== "save_priority_mode" && intent !== "enable_pickup") {
     return { ok: false, message: "Unsupported action." } satisfies ActionData;
   }
   if (!access.features.inventory) {
@@ -617,40 +624,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true, message: "Inventory location priority saved." } satisfies ActionData;
   }
 
-  if (intent === "save_icon_style") {
-    const iconStyle = String(formData.get("iconStyle") ?? "number");
-    const serviceIconColor = String(formData.get("serviceIconColor") ?? "").trim();
-    const serviceBackground = String(formData.get("serviceBackground") ?? "").trim();
-    const serviceEffect = String(formData.get("serviceEffect") ?? "soft");
-    if (!ICON_OPTIONS.some((option) => option.value === iconStyle)) {
-      return { ok: false, message: "Choose a supported storefront icon style." } satisfies ActionData;
-    }
-    if (!isHex(serviceIconColor) || !isHex(serviceBackground)) {
-      return { ok: false, message: "Use six-digit hex colors for the storefront service options." } satisfies ActionData;
-    }
-    if (!EFFECT_OPTIONS.some((option) => option.value === serviceEffect)) {
-      return { ok: false, message: "Choose a supported storefront service effect." } satisfies ActionData;
-    }
-    await prisma.deliverySetting.upsert({
-      where: { shop: session.shop },
-      create: {
-        shop: session.shop,
-        storefrontIconStyle: iconStyle,
-        storefrontAccentColor: serviceIconColor,
-        storefrontJourneyBackground: serviceBackground,
-        storefrontAnimation: serviceEffect,
-      },
-      update: {
-        storefrontIconStyle: iconStyle,
-        storefrontAccentColor: serviceIconColor,
-        storefrontJourneyBackground: serviceBackground,
-        storefrontAnimation: serviceEffect,
-      },
-    });
-    clearDeliveryCheckCaches(session.shop);
-    return { ok: true, message: "Storefront service icon style saved." } satisfies ActionData;
-  }
-
   const shopifyLocationId = String(formData.get("shopifyLocationId") ?? "").trim();
   const priority = Number(formData.get("priority") ?? 100);
   const processingDays = optionalDays(formData.get("processingDays"));
@@ -680,9 +653,292 @@ export async function action({ request }: ActionFunctionArgs) {
     .split(/[\n,]/)
     .map((value) => value.trim())
     .filter(Boolean);
+  const section = String(formData.get("section") ?? "all").trim() || "all";
+  if (!["all", "status", "routing", "delivery", "pickup", "targeting"].includes(section)) {
+    return { ok: false, message: "Unsupported location section." } satisfies ActionData;
+  }
 
   if (!/^gid:\/\/shopify\/Location\/\d+$/.test(shopifyLocationId)) {
     return { ok: false, message: "Invalid Shopify location." } satisfies ActionData;
+  }
+
+  if (section !== "all") {
+    const existingRule = await prisma.fulfillmentLocationRule.findUnique({
+      where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
+    });
+    const submittedEnabled = parseBool(formData.get("enabled"));
+    const baseEnabled = existingRule?.enabled ?? false;
+    const basePickupEnabled = existingRule?.pickupEnabled ?? false;
+    const baseDeliveryEnabled = existingRule?.localDeliveryEnabled ?? false;
+
+    if (section === "status") {
+      const nextEnabled = submittedEnabled || basePickupEnabled || baseDeliveryEnabled;
+      let location: ShopifyLocation | null = null;
+      try {
+        const response = await admin.graphql(`#graphql
+          query VerifyDeliveryLocation($id: ID!) {
+            location(id: $id) { id name isActive fulfillsOnlineOrders }
+          }
+        `, { variables: { id: shopifyLocationId } });
+        const payload = await response.json() as { data?: { location?: ShopifyLocation | null }; errors?: Array<{ message?: string }> };
+        if (!response.ok || payload.errors?.length) throw new Error("Location lookup failed.");
+        location = payload.data?.location ?? null;
+      } catch {
+        return { ok: false, message: "Unable to verify this Shopify location. Refresh and try again." } satisfies ActionData;
+      }
+      if (!location || location.id !== shopifyLocationId || !location.name || location.name.length > 255) {
+        return { ok: false, message: "This location does not belong to your Shopify shop or no longer exists." } satisfies ActionData;
+      }
+      await prisma.fulfillmentLocationRule.upsert({
+        where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
+        create: {
+          shop: session.shop,
+          shopifyLocationId,
+          name: location.name,
+          enabled: nextEnabled,
+          priority: existingRule?.priority ?? 100,
+          processingDays: existingRule?.processingDays ?? null,
+          transitDays: existingRule?.transitDays ?? null,
+        },
+        update: { name: location.name, enabled: nextEnabled },
+      });
+      clearDeliveryCheckCaches(session.shop);
+      return { ok: true, message: `${location.name} status saved.` } satisfies ActionData;
+    }
+
+    if (section === "routing") {
+      if (!Number.isInteger(priority) || priority < 0 || priority > 9999) {
+        return { ok: false, message: "Priority must be an integer from 0 to 9999." } satisfies ActionData;
+      }
+      if ([processingDays, transitDays].some((days) => days !== null && (!Number.isInteger(days) || days < 0 || days > 60))) {
+        return { ok: false, message: "Processing and transit overrides must be integers from 0 to 60." } satisfies ActionData;
+      }
+      let location: ShopifyLocation | null = null;
+      try {
+        const response = await admin.graphql(`#graphql
+          query VerifyDeliveryLocation($id: ID!) {
+            location(id: $id) { id name isActive fulfillsOnlineOrders }
+          }
+        `, { variables: { id: shopifyLocationId } });
+        const payload = await response.json() as { data?: { location?: ShopifyLocation | null }; errors?: Array<{ message?: string }> };
+        if (!response.ok || payload.errors?.length) throw new Error("Location lookup failed.");
+        location = payload.data?.location ?? null;
+      } catch {
+        return { ok: false, message: "Unable to verify this Shopify location. Refresh and try again." } satisfies ActionData;
+      }
+      if (!location || location.id !== shopifyLocationId || !location.name || location.name.length > 255) {
+        return { ok: false, message: "This location does not belong to your Shopify shop or no longer exists." } satisfies ActionData;
+      }
+      await prisma.fulfillmentLocationRule.upsert({
+        where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
+        create: {
+          shop: session.shop,
+          shopifyLocationId,
+          name: location.name,
+          enabled: baseEnabled || basePickupEnabled || baseDeliveryEnabled,
+          priority,
+          processingDays,
+          transitDays,
+        },
+        update: { name: location.name, priority, processingDays, transitDays },
+      });
+      clearDeliveryCheckCaches(session.shop);
+      return { ok: true, message: `${location.name} routing saved.` } satisfies ActionData;
+    }
+
+    if (section === "delivery") {
+      if (patterns.length > 500 || patterns.some((pattern) => pattern.length > 30)) {
+        return { ok: false, message: "Local delivery supports up to 500 postal patterns of 30 characters each." } satisfies ActionData;
+      }
+      if (localDeliveryCountry && !COUNTRY_CODES.has(localDeliveryCountry)) {
+        return { ok: false, message: "Choose a valid local delivery country." } satisfies ActionData;
+      }
+      if (localDeliveryCoverageMode !== "postal" && localDeliveryCoverageMode !== "zone") {
+        return { ok: false, message: "Choose postal patterns or delivery zones for local delivery coverage." } satisfies ActionData;
+      }
+      if (localDeliveryEnabled && localDeliveryCoverageMode === "postal" && (!localDeliveryCountry || !patterns.length)) {
+        return { ok: false, message: "Choose a local delivery country and add at least one postal code or pattern." } satisfies ActionData;
+      }
+      if (localDeliveryCoverageMode === "postal" && localDeliveryCountry && patterns.some((pattern) => !validatePostalPattern(localDeliveryCountry, pattern))) {
+        return { ok: false, message: `A postal pattern is invalid for ${localDeliveryCountry}. Check the codes, ranges or wildcards.` } satisfies ActionData;
+      }
+      if (localDeliveryZoneIds.length > 100 || localDeliveryZoneIds.some((id) => !/^\d+$/.test(id))) {
+        return { ok: false, message: "Choose valid delivery zones." } satisfies ActionData;
+      }
+      if (localDeliveryEnabled && localDeliveryCoverageMode === "zone") {
+        if (!localDeliveryZoneIds.length) return { ok: false, message: "Choose at least one delivery zone." } satisfies ActionData;
+        const ownedZones = await prisma.zone.count({ where: { shop: session.shop, enabled: true, id: { in: localDeliveryZoneIds.map(Number) } } });
+        if (ownedZones !== localDeliveryZoneIds.length) return { ok: false, message: "One or more delivery zones are unavailable. Refresh and choose again." } satisfies ActionData;
+      }
+      const nextEnabled = baseEnabled || localDeliveryEnabled || basePickupEnabled;
+      let location: ShopifyLocation | null = null;
+      try {
+        const response = await admin.graphql(`#graphql
+          query VerifyDeliveryLocation($id: ID!) {
+            location(id: $id) { id name isActive fulfillsOnlineOrders }
+          }
+        `, { variables: { id: shopifyLocationId } });
+        const payload = await response.json() as { data?: { location?: ShopifyLocation | null }; errors?: Array<{ message?: string }> };
+        if (!response.ok || payload.errors?.length) throw new Error("Location lookup failed.");
+        location = payload.data?.location ?? null;
+      } catch {
+        return { ok: false, message: "Unable to verify this Shopify location. Refresh and try again." } satisfies ActionData;
+      }
+      if (!location || location.id !== shopifyLocationId || !location.name || location.name.length > 255) {
+        return { ok: false, message: "This location does not belong to your Shopify shop or no longer exists." } satisfies ActionData;
+      }
+      await prisma.fulfillmentLocationRule.upsert({
+        where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
+        create: {
+          shop: session.shop,
+          shopifyLocationId,
+          name: location.name,
+          enabled: nextEnabled,
+          priority: existingRule?.priority ?? 100,
+          processingDays: existingRule?.processingDays ?? null,
+          transitDays: existingRule?.transitDays ?? null,
+          localDeliveryEnabled,
+          localDeliveryCountry,
+          localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
+          localDeliveryCoverageMode,
+          localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+        },
+        update: {
+          name: location.name,
+          enabled: nextEnabled,
+          localDeliveryEnabled,
+          localDeliveryCountry,
+          localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
+          localDeliveryCoverageMode,
+          localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+        },
+      });
+      clearDeliveryCheckCaches(session.shop);
+      return { ok: true, message: `${location.name} local delivery saved.` } satisfies ActionData;
+    }
+
+    if (section === "pickup") {
+      if (pickupInstructions.length > 500) {
+        return { ok: false, message: "Pickup instructions must be 500 characters or fewer." } satisfies ActionData;
+      }
+      if (pickupPhone.length > 50) {
+        return { ok: false, message: "Pickup phone must be 50 characters or fewer." } satisfies ActionData;
+      }
+      if (!/^\d+$/.test(pickupPreparationRaw) || !Number.isInteger(pickupPreparationDays) || pickupPreparationDays < 0 || pickupPreparationDays > 60) {
+        return { ok: false, message: "Pickup preparation days must be an integer from 0 to 60." } satisfies ActionData;
+      }
+      if (!/^\d+$/.test(pickupAdvanceRaw) || !Number.isInteger(pickupAdvanceDays) || pickupAdvanceDays < 1 || pickupAdvanceDays > 90 || pickupAdvanceDays < pickupPreparationDays) {
+        return { ok: false, message: "Pickup advance horizon must be an integer from 1 to 90 and at least the preparation days." } satisfies ActionData;
+      }
+      if (pickupWeekdaysRaw.length > 13 || pickupWeekdays.some((day) => !/^[0-6]$/.test(day)) || (pickupEnabled && !pickupWeekdays.length)) {
+        return { ok: false, message: "Choose valid pickup weekdays, with at least one day when pickup is enabled." } satisfies ActionData;
+      }
+      if (pickupBlockedDatesRaw.length > 4000 || pickupBlockedDates.length > 365 || pickupBlockedDates.some((date) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith("0000")) return true;
+        const parsed = new Date(`${date}T00:00:00.000Z`);
+        return !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date;
+      })) {
+        return { ok: false, message: "Blocked pickup dates must be real YYYY-MM-DD dates (up to 365 dates and 4000 characters)." } satisfies ActionData;
+      }
+      const nextEnabled = baseEnabled || baseDeliveryEnabled || pickupEnabled;
+      let location: ShopifyLocation | null = null;
+      try {
+        const response = await admin.graphql(`#graphql
+          query VerifyDeliveryLocation($id: ID!) {
+            location(id: $id) { id name isActive fulfillsOnlineOrders }
+          }
+        `, { variables: { id: shopifyLocationId } });
+        const payload = await response.json() as { data?: { location?: ShopifyLocation | null }; errors?: Array<{ message?: string }> };
+        if (!response.ok || payload.errors?.length) throw new Error("Location lookup failed.");
+        location = payload.data?.location ?? null;
+      } catch {
+        return { ok: false, message: "Unable to verify this Shopify location. Refresh and try again." } satisfies ActionData;
+      }
+      if (!location || location.id !== shopifyLocationId || !location.name || location.name.length > 255) {
+        return { ok: false, message: "This location does not belong to your Shopify shop or no longer exists." } satisfies ActionData;
+      }
+      await prisma.fulfillmentLocationRule.upsert({
+        where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
+        create: {
+          shop: session.shop,
+          shopifyLocationId,
+          name: location.name,
+          enabled: nextEnabled,
+          priority: existingRule?.priority ?? 100,
+          processingDays: existingRule?.processingDays ?? null,
+          transitDays: existingRule?.transitDays ?? null,
+          pickupEnabled,
+          pickupInstructions,
+          pickupPhone,
+          pickupPreparationDays,
+          pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
+          pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
+          pickupAdvanceDays,
+        },
+        update: {
+          name: location.name,
+          enabled: nextEnabled,
+          pickupEnabled,
+          pickupInstructions,
+          pickupPhone,
+          pickupPreparationDays,
+          pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
+          pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
+          pickupAdvanceDays,
+        },
+      });
+      clearDeliveryCheckCaches(session.shop);
+      return { ok: true, message: `${location.name} pickup saved.` } satisfies ActionData;
+    }
+
+    if (section === "targeting") {
+      if (!SERVICE_TARGET_OPTIONS.some((option) => option.value === serviceTargetMode)) {
+        return { ok: false, message: "Choose a supported service targeting option." } satisfies ActionData;
+      }
+      if (serviceTargetValues.length > 500 || serviceTargetValues.some((value) => value.length > 100)) {
+        return { ok: false, message: "Service targeting supports up to 500 values of 100 characters each." } satisfies ActionData;
+      }
+      if (serviceTargetMode !== "all" && serviceTargetValues.length === 0) {
+        return { ok: false, message: "Add at least one value for the selected service targeting option." } satisfies ActionData;
+      }
+      let location: ShopifyLocation | null = null;
+      try {
+        const response = await admin.graphql(`#graphql
+          query VerifyDeliveryLocation($id: ID!) {
+            location(id: $id) { id name isActive fulfillsOnlineOrders }
+          }
+        `, { variables: { id: shopifyLocationId } });
+        const payload = await response.json() as { data?: { location?: ShopifyLocation | null }; errors?: Array<{ message?: string }> };
+        if (!response.ok || payload.errors?.length) throw new Error("Location lookup failed.");
+        location = payload.data?.location ?? null;
+      } catch {
+        return { ok: false, message: "Unable to verify this Shopify location. Refresh and try again." } satisfies ActionData;
+      }
+      if (!location || location.id !== shopifyLocationId || !location.name || location.name.length > 255) {
+        return { ok: false, message: "This location does not belong to your Shopify shop or no longer exists." } satisfies ActionData;
+      }
+      await prisma.fulfillmentLocationRule.upsert({
+        where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
+        create: {
+          shop: session.shop,
+          shopifyLocationId,
+          name: location.name,
+          enabled: baseEnabled || basePickupEnabled || baseDeliveryEnabled,
+          priority: existingRule?.priority ?? 100,
+          processingDays: existingRule?.processingDays ?? null,
+          transitDays: existingRule?.transitDays ?? null,
+          serviceTargetMode,
+          serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+        },
+        update: {
+          name: location.name,
+          serviceTargetMode,
+          serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+        },
+      });
+      clearDeliveryCheckCaches(session.shop);
+      return { ok: true, message: `${location.name} targeting saved.` } satisfies ActionData;
+    }
   }
   if (!Number.isInteger(priority) || priority < 0 || priority > 9999) {
     return { ok: false, message: "Priority must be an integer from 0 to 9999." } satisfies ActionData;
@@ -846,7 +1102,7 @@ function PickupOrdersPanel({ orders, error, orderAccessGranted, shop, shopHandle
           <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
             <BlockStack gap="100">
               <Text as="h2" variant="headingLg">Pickup customer details</Text>
-              <Text as="p" tone="subdued">Recent Shopify orders that contain an Incode Track pickup selection. Customer data is read live and is not copied into the app database.</Text>
+              <Text as="p" tone="subdued">Recent Shopify orders that contain an ETADeliverPickup selection. Customer data is read live and is not copied into the app database.</Text>
             </BlockStack>
             <Button url="/app/locations?view=pickups">Refresh orders</Button>
           </InlineStack>
@@ -1106,9 +1362,6 @@ export default function LocationsPage() {
             .join(", ");
           return (
             <div key={location.id} id={`pickup-location-${location.id.replace(/\D/g, "")}`} className="incode-location-anchor"><Card>
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="save_location" />
-                <input type="hidden" name="shopifyLocationId" value={location.id} />
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="start" gap="200" wrap>
                     <BlockStack gap="100">
@@ -1122,23 +1375,40 @@ export default function LocationsPage() {
                       <Badge tone={form.pickupEnabled ? "success" : undefined}>{form.pickupEnabled ? "Pickup on" : "Pickup off"}</Badge>
                     </InlineStack>
                    </InlineStack>
-                   <Text as="p" tone="subdued" variant="bodySm">Each Save location button saves every section for this location, including collapsed sections.</Text>
-                   <div className="incode-location-enable">
-                    <Checkbox label="Location enabled for services" name="enabled" checked={form.enabled} disabled={!isAdvanced || form.localDeliveryEnabled || form.pickupEnabled} onChange={(checked) => updateForm(location.id, "enabled", checked)} helpText={form.localDeliveryEnabled || form.pickupEnabled ? "Automatically enabled while delivery or pickup is on." : "Enable this location for routing."} />
-                    <Button submit disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button>
-                  </div>
+                   <div className="incode-location-save-note">
+                     <span aria-hidden="true">i</span>
+                     <Text as="p" tone="subdued" variant="bodySm">Each section saves independently. Only the fields in that section are updated.</Text>
+                   </div>
+                   <fetcher.Form method="post">
+                     <input type="hidden" name="intent" value="save_location" />
+                     <input type="hidden" name="section" value="status" />
+                     <input type="hidden" name="shopifyLocationId" value={location.id} />
+                     <div className="incode-location-enable">
+                      <Checkbox label="Location enabled for services" name="enabled" checked={form.enabled} disabled={!isAdvanced || form.localDeliveryEnabled || form.pickupEnabled} onChange={(checked) => updateForm(location.id, "enabled", checked)} helpText={form.localDeliveryEnabled || form.pickupEnabled ? "Automatically enabled while delivery or pickup is on." : "Enable this location for routing."} />
+                      <Button submit disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save status</Button>
+                     </div>
+                   </fetcher.Form>
                   <div className="incode-location-sections">
                     <LocationSettingsSection title="Routing & delivery timing" description="Priority and optional delivery-time overrides" status={selectedPriorityMode === "manual" ? `Priority ${form.priority}` : "Stock based"}>
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="save_location" />
+                        <input type="hidden" name="section" value="routing" />
+                        <input type="hidden" name="shopifyLocationId" value={location.id} />
                       <FormLayout>
                       <FormLayout.Group condensed>
                        <TextField label="Priority" name="priority" type="number" min={0} max={9999} value={form.priority} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "priority", value)} autoComplete="off" helpText="Lower priority is selected first." />
                        <TextField label="Processing days override" name="processingDays" type="number" min={0} max={60} value={form.processingDays} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "processingDays", value)} autoComplete="off" />
                        <TextField label="Transit days override" name="transitDays" type="number" min={0} max={60} value={form.transitDays} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "transitDays", value)} autoComplete="off" />
                       </FormLayout.Group>
-                      <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
+                      <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save routing</Button></div>
                       </FormLayout>
+                      </fetcher.Form>
                     </LocationSettingsSection>
                     <LocationSettingsSection title="Local delivery" description="Use existing delivery zones or manual postal coverage" status={form.localDeliveryEnabled ? form.localDeliveryCoverageMode === "zone" ? `${form.localDeliveryZoneIdsCsv.split(",").filter(Boolean).length} zones` : "Postal coverage" : "Off"}>
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="save_location" />
+                        <input type="hidden" name="section" value="delivery" />
+                        <input type="hidden" name="shopifyLocationId" value={location.id} />
                       <FormLayout>
                      <Checkbox label="Offer local delivery from this location" name="localDeliveryEnabled" checked={form.localDeliveryEnabled} disabled={!isAdvanced} onChange={(checked) => updateForm(location.id, "localDeliveryEnabled", checked)} />
                     <div hidden={!form.localDeliveryEnabled} className="incode-service-settings">
@@ -1168,10 +1438,15 @@ export default function LocationsPage() {
                     />
                     </>}
                     </div>
-                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
+                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save delivery</Button></div>
                       </FormLayout>
+                      </fetcher.Form>
                     </LocationSettingsSection>
                     <LocationSettingsSection title="Store pickup" description="Availability, schedule, contact and instructions" status={form.pickupEnabled ? "Enabled" : "Off"}>
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="save_location" />
+                        <input type="hidden" name="section" value="pickup" />
+                        <input type="hidden" name="shopifyLocationId" value={location.id} />
                       <FormLayout>
                      <Checkbox label="Offer in-store pickup from this location" name="pickupEnabled" checked={form.pickupEnabled} disabled={!isAdvanced} onChange={(checked) => updateForm(location.id, "pickupEnabled", checked)} />
                     <div className="incode-pickup-readiness">
@@ -1203,10 +1478,15 @@ export default function LocationsPage() {
                     </BlockStack>
                     <BlockedDatesPicker value={form.pickupBlockedDatesCsv} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "pickupBlockedDatesCsv", value)} />
                     </div>
-                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
+                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save pickup</Button></div>
                       </FormLayout>
+                      </fetcher.Form>
                     </LocationSettingsSection>
                     <LocationSettingsSection title="Service availability targeting" description="Show this location's services only for selected products, collections, tags or delivery zones" status={form.serviceTargetMode === "all" ? "Everyone" : SERVICE_TARGET_OPTIONS.find((option) => option.value === form.serviceTargetMode)?.label || "Filtered"}>
+                      <fetcher.Form method="post">
+                        <input type="hidden" name="intent" value="save_location" />
+                        <input type="hidden" name="section" value="targeting" />
+                        <input type="hidden" name="shopifyLocationId" value={location.id} />
                       <BlockStack gap="300">
                       <Select
                         label="Show services for"
@@ -1233,12 +1513,12 @@ export default function LocationsPage() {
                           />
                           );
                         })() : null}
-                        <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced} loading={fetcher.state !== "idle"}>Save location</Button></div>
+                        <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save targeting</Button></div>
                       </BlockStack>
+                      </fetcher.Form>
                     </LocationSettingsSection>
                   </div>
                 </BlockStack>
-              </fetcher.Form>
             </Card></div>
           );
         })}

@@ -7,10 +7,27 @@ import prisma from "../db.server";
 import { resolvePlanAccess } from "../services/plan-access.server";
 import { authenticate } from "../shopify.server";
 import { NO_PLAN_ACCESS } from "../services/plans.server";
-import { generateHeadlessToken, HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes } from "../utils/headless-tokens";
+import { generateHeadlessToken, HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes, storedAllowedOriginsLabel } from "../utils/headless-tokens";
 
 type ActionData = { ok: boolean; message: string; token?: string };
 const NO_STORE = { "Cache-Control": "no-store" };
+
+async function copyToken(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  const copied = document.execCommand("copy");
+  field.remove();
+  if (!copied) throw new Error("Clipboard unavailable");
+}
 
 export const headers: HeadersFunction = (args) => {
   const headers = new Headers(boundary.headers(args));
@@ -114,6 +131,7 @@ export default function HeadlessApiPage() {
   const [expiresAt, setExpiresAt] = useState("");
   const [selectedScopes, setSelectedScopes] = useState<string[]>(["delivery:check"]);
   const [dismissedToken, setDismissedToken] = useState<string | undefined>();
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const busy = fetcher.state !== "idle";
   const activeCount = tokens.filter((token) => token.enabled && !token.revokedAt && (!token.expiresAt || new Date(token.expiresAt).getTime() > now)).length;
   const date = (value: Date | string | null) => value ? new Date(value).toISOString().replace("T", " ").replace(".000Z", " UTC") : "Never";
@@ -123,7 +141,7 @@ export default function HeadlessApiPage() {
     const status = token.revokedAt ? "Revoked" : expired ? "Expired" : token.enabled ? "Enabled" : "Disabled";
     return [
       token.name, token.tokenType, token.tokenPrefix, token.scopesCsv,
-      JSON.parse(token.allowedOriginsJson).join(", ") || "None (server only)",
+      storedAllowedOriginsLabel(token.allowedOriginsJson),
       <Badge key={`${token.id}-status`} tone={status === "Enabled" ? "success" : undefined}>{status}</Badge>,
       date(token.createdAt), date(token.expiresAt), date(token.lastUsedAt), date(token.revokedAt),
       <InlineStack key={token.id} gap="200">
@@ -155,7 +173,20 @@ export default function HeadlessApiPage() {
             <Text as="h2" variant="headingMd">Copy your token now</Text>
             <Text as="p">Only its hash is stored. After leaving or dismissing this display, the token cannot be retrieved.</Text>
             <TextField label="New token (shown once)" value={fetcher.data.token} readOnly autoComplete="off" />
-            <Button onClick={() => setDismissedToken(fetcher.data?.token)}>I have saved this token</Button>
+            <InlineStack gap="200" blockAlign="center">
+              <Button variant="primary" onClick={async () => {
+                try {
+                  await copyToken(fetcher.data!.token!);
+                  setCopyStatus("copied");
+                } catch {
+                  setCopyStatus("failed");
+                }
+              }}>{copyStatus === "copied" ? "Copied" : "Copy token"}</Button>
+              <Button onClick={() => setDismissedToken(fetcher.data?.token)}>I have saved this token</Button>
+              <Text as="span" tone={copyStatus === "failed" ? "critical" : "subdued"} variant="bodySm" aria-live="polite">
+                {copyStatus === "copied" ? "Token copied to clipboard." : copyStatus === "failed" ? "Copy failed. Select the token and copy it manually." : ""}
+              </Text>
+            </InlineStack>
           </BlockStack></Card>
         ) : null}
         <Card>

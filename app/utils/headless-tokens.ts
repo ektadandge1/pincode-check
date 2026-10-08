@@ -47,6 +47,16 @@ export function normalizeAllowedOrigins(raw: string): string[] {
   return [...new Set(origins)];
 }
 
+export function storedAllowedOriginsLabel(value: string): string {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.some((origin) => typeof origin !== "string")) return "Invalid legacy metadata";
+    return parsed.join(", ") || "None (server only)";
+  } catch {
+    return "Invalid legacy metadata";
+  }
+}
+
 export function parseHeadlessScopes(raw: string | readonly string[]): HeadlessReadScope[] {
   const values = typeof raw === "string" ? raw.split(",") : raw;
   const scopes = values.map((scope) => scope.trim());

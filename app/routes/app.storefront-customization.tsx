@@ -120,7 +120,7 @@ const LINE_OPTIONS = [
   { label: "No connector", value: "none" },
 ];
 
-const ETA_CONTENT_SECTIONS = ["date", "journey", "countdown"] as const;
+const ETA_CONTENT_SECTIONS = ["date", "journey"] as const;
 
 const TEMPLATE_OPTIONS = [
   { label: "ZIP checker + ETA journey", value: "modern-card" },
@@ -155,13 +155,12 @@ function isHex(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value);
 }
 
-function normalizeEtaSections(value: string | undefined, countdownEnabled: boolean): string {
+function normalizeEtaSections(value: string | undefined): string {
   const sections = new Set(
     value === "both"
       ? ["date", "journey"]
       : String(value ?? "").split(",").map((section) => section.trim()).filter(Boolean),
   );
-  if (countdownEnabled) sections.add("countdown");
   const normalized = ETA_CONTENT_SECTIONS.filter((section) => sections.has(section));
   return (normalized.length > 0 ? normalized : ["date", "journey"]).join(",");
 }
@@ -170,9 +169,7 @@ function readCustomization(setting: Partial<Customization> | null): Customizatio
   const customization = { ...DEFAULTS, ...(setting ?? {}) };
   customization.storefrontEtaDisplayMode = normalizeEtaSections(
     customization.storefrontEtaDisplayMode,
-    customization.countdownEnabled,
   );
-  customization.countdownEnabled = customization.storefrontEtaDisplayMode.split(",").includes("countdown");
   return customization;
 }
 
@@ -185,9 +182,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await requireActiveBilling(request);
   const formData = await request.formData();
+  const existing = await prisma.deliverySetting.findUnique({ where: { shop: session.shop } });
   const storefrontEtaDisplayMode = normalizeEtaSections(
     String(formData.get("storefrontEtaDisplayMode") ?? ""),
-    false,
   );
   const customization = {
     storefrontFontFamily: String(formData.get("storefrontFontFamily") ?? "system"),
@@ -216,8 +213,8 @@ export async function action({ request }: ActionFunctionArgs) {
     storefrontCountdownBackground: String(formData.get("storefrontCountdownBackground") ?? "").trim(),
     storefrontCountdownDigitColor: String(formData.get("storefrontCountdownDigitColor") ?? "").trim(),
     storefrontCountdownTextColor: String(formData.get("storefrontCountdownTextColor") ?? "").trim(),
-    storefrontCountdownTitle: String(formData.get("storefrontCountdownTitle") ?? "").trim(),
-    countdownEnabled: storefrontEtaDisplayMode.split(",").includes("countdown"),
+    storefrontCountdownTitle: String(formData.get("storefrontCountdownTitle") ?? existing?.storefrontCountdownTitle ?? DEFAULTS.storefrontCountdownTitle).trim(),
+    countdownEnabled: existing?.countdownEnabled ?? DEFAULTS.countdownEnabled,
     storefrontCustomCss: String(formData.get("storefrontCustomCss") ?? "").trim(),
   } satisfies Customization;
 
@@ -273,15 +270,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!isSafeStorefrontCss(customization.storefrontCustomCss)) {
     return { ok: false, message: "Custom CSS must be 5,000 characters or fewer and cannot load external URLs, imports, or scripts." } satisfies ActionData;
   }
-  if (!customization.storefrontCountdownTitle || customization.storefrontCountdownTitle.length > 80) {
-    return { ok: false, message: "Countdown heading is required and must be 80 characters or fewer." } satisfies ActionData;
+  const countdownEnabledForStyle = existing?.countdownEnabled ?? DEFAULTS.countdownEnabled;
+  if (countdownEnabledForStyle && !customization.storefrontCountdownTitle) {
+    return { ok: false, message: "Countdown heading is required when the countdown is enabled, and must be 80 characters or fewer." } satisfies ActionData;
+  }
+  if (customization.storefrontCountdownTitle.length > 80) {
+    return { ok: false, message: "Countdown heading must be 80 characters or fewer." } satisfies ActionData;
   }
 
   try {
     await prisma.deliverySetting.upsert({
       where: { shop: session.shop },
       create: { shop: session.shop, ...customization },
-      update: customization,
+      update: (({ countdownEnabled: _countdownEnabled, ...storefrontStyle }) => storefrontStyle)(customization),
     });
   } catch (error) {
     console.error("Unable to save storefront customization", error);
@@ -331,7 +332,7 @@ export default function StorefrontCustomizationPage() {
   const [previewChecked, setPreviewChecked] = useState(false);
   const previewSavedPostal = "10001";
   const previewLabel = STOREFRONT_SURFACES.find(([, template]) => template === previewSurface)?.[0] ?? "Product page";
-  const previewExperienceMode = previewSurface === "collection" ? "automatic" : experienceMode;
+  const previewExperienceMode: string = experienceMode;
   const selectedEtaSections = form.storefrontEtaDisplayMode.split(",");
   const update = <K extends keyof Customization>(key: K, value: Customization[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -354,24 +355,16 @@ export default function StorefrontCustomizationPage() {
         ...current,
         storefrontEtaDisplayMode,
         storefrontShowJourney: sections.has("journey"),
-        countdownEnabled: sections.has("countdown"),
       };
     });
   };
   const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
   const themeEditorUrl = (template: string) => {
-    const blockHandle = experienceMode === "checker" && template !== "collection"
-      ? "delivery-checker"
-      : template === "collection"
-        ? "delivery-checker-embed"
-        : "estimated-delivery-date";
+    const blockHandle = "delivery-checker";
     return `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
   };
   const placementEditorUrl = (template: string) => themeEditorUrl(template);
-  const placementButtonLabel = (template: string) =>
-    template === "collection"
-      ? "Add ETA to product cards"
-      : "Add delivery availability";
+  const placementButtonLabel = () => "Add delivery availability";
 
   return (
       <Page title="Storefront style" subtitle="Create a polished delivery availability experience that matches your brand.">
@@ -400,17 +393,13 @@ export default function StorefrontCustomizationPage() {
                               <small>{description}</small>
                             </button>
                             <Button url={placementEditorUrl(template)} target="_blank" variant={previewSurface === template ? "primary" : "secondary"} onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}>
-                              {placementButtonLabel(template)}
+                              {placementButtonLabel()}
                             </Button>
                           </div>
                         ))}
                       </div>
                     </BlockStack>
-                    <Banner tone="info">
-                      {previewSurface === "collection"
-                        ? "Collection cards show delivery estimates before shoppers open a product. Product and cart pages use the unified availability checker."
-                        : "Logged-in customers with a default address are checked automatically. Guests enter a ZIP or PIN manually. No IP location is used."}
-                    </Banner>
+                    <Banner tone="info">Logged-in customers with a default address are checked automatically. Guests enter a ZIP or PIN manually. No IP location is used.</Banner>
                   </BlockStack>
                 </Card>
                 <Card>
@@ -494,11 +483,10 @@ export default function StorefrontCustomizationPage() {
                     </FormLayout.Group>
                     <BlockStack gap="200">
                       <Text as="h3" variant="headingSm">Delivery content to display</Text>
-                      <Text as="p" tone="subdued">Choose one section, multiple sections, or all three. At least one section must remain selected.</Text>
+                       <Text as="p" tone="subdued">Choose the delivery-date content shown after a successful check. At least one section must remain selected.</Text>
                       <InlineStack gap="400" wrap>
                         <Checkbox label="Delivery date" checked={selectedEtaSections.includes("date")} onChange={(checked) => toggleEtaSection("date", checked)} />
                         <Checkbox label="Delivery journey" checked={selectedEtaSections.includes("journey")} onChange={(checked) => toggleEtaSection("journey", checked)} />
-                        <Checkbox label="Countdown timer" checked={selectedEtaSections.includes("countdown")} onChange={(checked) => toggleEtaSection("countdown", checked)} />
                       </InlineStack>
                       <input type="hidden" name="storefrontEtaDisplayMode" value={form.storefrontEtaDisplayMode} readOnly />
                     </BlockStack>
@@ -510,7 +498,8 @@ export default function StorefrontCustomizationPage() {
                       <Text as="h2" variant="headingLg">5. Countdown timer</Text>
                       <Text as="p" tone="subdued">Customize the cutoff timer independently. Enable “Show cutoff countdown” in the theme block to display it.</Text>
                     </BlockStack>
-                    <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="The countdown is controlled by the content choices above and appears only for eligible cutoff and targeting rules." disabled={!selectedEtaSections.includes("countdown")} />
+                     <Banner tone="info" action={{ content: "Manage countdown visibility", url: "/app/delivery-settings?tab=optional#countdown" }}>Countdown visibility, audience, and storefront surfaces are controlled from Delivery settings. This page only controls its appearance.</Banner>
+                     <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="Used whenever the countdown is enabled in Delivery settings." />
                     <div className="incode-color-grid">
                       {([
                         ["storefrontCountdownBackground", "Panel background"],
@@ -583,11 +572,6 @@ export default function StorefrontCustomizationPage() {
                             <div className="incode-product-mock__image">Canvas<br />tote</div>
                             <div className="incode-product-mock__details"><strong>Everyday canvas tote</strong><span>$39.00 · In stock</span><small>{previewExperienceMode === "checker" ? "Delivery check near Add to Cart" : "Automatic ETA below product details"}</small><button type="button">Add to cart</button></div>
                           </div>
-                        </>
-                      ) : previewSurface === "collection" ? (
-                        <>
-                          <div className="incode-storefront-mock__bar"><span>Everyday essentials</span><span>Sort by ▾</span></div>
-                          <div className="incode-preview-surface__products"><span><b>Canvas tote</b><small>$39.00</small><em>Delivery by Oct 8</em></span><span><b>Travel tote</b><small>$49.00</small><em>Delivery by Oct 9</em></span></div>
                         </>
                       ) : previewSurface === "cart" ? (
                         <><div className="incode-storefront-mock__bar"><span>Your cart</span><span>2 items</span></div><div className="incode-cart-mock"><span className="incode-cart-mock__thumb">Tote</span><span><b>Everyday canvas tote × 2</b><small>$78.00</small><em>{previewExperienceMode === "checker" ? "Check delivery before checkout" : "Estimated delivery: Oct 8–10"}</em></span></div><div className="incode-cart-mock__total"><span>Total</span><b>$78.00</b></div></>

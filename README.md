@@ -1,6 +1,6 @@
-# Incode Track
+# ETADeliverPickup
 
-Incode Track is a Shopify public app that adds a country-aware postal and ZIP code delivery checker to product pages through a theme app extension.
+ETADeliverPickup is a Shopify public app that adds a country-aware postal and ZIP code delivery checker to product pages through a theme app extension.
 
 ## Features
 
@@ -22,7 +22,7 @@ Incode Track is a Shopify public app that adds a country-aware postal and ZIP co
 
 ## Plans
 
-Incode Track uses the Shopify Billing API. Shopify approves the subscription and
+ETADeliverPickup uses the Shopify Billing API. Shopify approves the subscription and
 adds all charges to the merchant's Shopify invoice. No external billing provider
 is used.
 

@@ -29,7 +29,7 @@ import {
 import { billingReturnUrl } from "../utils/billing-return-url";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { billing } = await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
   const subscriptions = await getActiveAppSubscriptions(billing);
   const subscription = subscriptions[0] ?? null;
 
@@ -43,6 +43,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     hasActiveSubscription: Boolean(subscription),
     testMode: isBillingTestMode(),
     billingRequired: isBillingRequired(),
+    billingManagementUrl: `https://admin.shopify.com/store/${session.shop.replace(/\.myshopify\.com$/i, "")}/settings/billing/subscriptions`,
   };
 }
 
@@ -93,7 +94,7 @@ export default function PlansPage() {
             All delivery tools are available. Charges are managed through your Shopify invoice.
           </Banner>
         ) : (
-          <Banner title="Activate Incode Track" tone="info">
+          <Banner title="Activate ETADeliverPickup" tone="info">
             Start your 7-day trial, then pay $9 USD every 30 days through Shopify.
           </Banner>
         )}
@@ -140,7 +141,11 @@ export default function PlansPage() {
                   <List.Item>CSV tools, Google Sheets sync, and analytics</List.Item>
                 </List>
                 {data.hasActiveSubscription ? (
-                  <Text as="p" tone="subdued">Subscription status: {data.subscriptionStatus}</Text>
+                  <BlockStack gap="200">
+                    <Text as="p" tone="subdued">Subscription status: {data.subscriptionStatus}</Text>
+                    <Button url={data.billingManagementUrl} external target="_blank" fullWidth>Manage subscription in Shopify</Button>
+                    <Text as="p" tone="subdued" variant="bodySm">Review charges or cancel the subscription securely from Shopify billing.</Text>
+                  </BlockStack>
                 ) : (
                   <Form method="post">
                     <Button submit variant="primary" loading={isSubmitting} disabled={isSubmitting} fullWidth>

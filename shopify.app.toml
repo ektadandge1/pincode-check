@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "819a4f61c71a7a21adf004cda3437867"
-name = "Incode Track"
+name = "ETADeliverPickup"
 application_url = "https://example.com"
 embedded = true
 

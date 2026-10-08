@@ -211,8 +211,13 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   assert.match(source, /Customer data is read live and is not copied into the app database/);
   assert.match(source, /Search pickup locations/);
   assert.match(source, /name, city or postcode/);
-  assert.match(source, />Save location</);
-  assert.match(source, /Each Save location button saves every section for this location/);
+  assert.match(source, />Save status</);
+  assert.match(source, />Save routing</);
+  assert.match(source, />Save delivery</);
+  assert.match(source, />Save pickup</);
+  assert.match(source, />Save targeting</);
+  assert.match(source, /Each section saves independently/);
+  assert.match(source, /name="section"/);
   assert.match(source, /Pickup readiness/);
   assert.match(source, /inventory assigned to this exact Shopify location/);
   assert.match(source, /value="enable_pickup"/);

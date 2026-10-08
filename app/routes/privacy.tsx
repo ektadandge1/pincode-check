@@ -9,20 +9,18 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
+import { privacyContact } from "../utils/public-contact.server";
 
 export const meta: MetaFunction = () => [
-  { title: "Privacy Policy | Incode Track" },
+  { title: "Privacy Policy | ETADeliverPickup" },
   {
     name: "description",
     content:
-      "Privacy policy for Incode Track, a Shopify app for postal code delivery availability checks.",
+      "Privacy policy for ETADeliverPickup, a Shopify app for postal code delivery availability checks.",
   },
 ];
 
-export const loader = async () => ({
-  contactEmail: process.env.PRIVACY_EMAIL || process.env.SUPPORT_EMAIL || "",
-  legalBusinessName: process.env.LEGAL_BUSINESS_NAME || "Incode Track",
-});
+export const loader = async () => privacyContact();
 
 export default function PrivacyPolicy() {
   const { contactEmail, legalBusinessName } = useLoaderData<typeof loader>();
@@ -30,7 +28,7 @@ export default function PrivacyPolicy() {
   return (
     <PolarisProvider i18n={enTranslations}>
       <div className="incode-public">
-       <Page title="Privacy Policy" subtitle="Last updated: October 6, 2026" narrowWidth backAction={{ content: "Incode Track", url: "/" }}>
+       <Page title="Privacy Policy" subtitle="Last updated: October 6, 2026" narrowWidth backAction={{ content: "ETADeliverPickup", url: "/" }}>
         <Layout>
           <Layout.Section>
             <Card>
@@ -40,7 +38,7 @@ export default function PrivacyPolicy() {
                     Data we process
                   </Text>
                   <Text as="p">
-                    Incode Track stores merchant configuration needed to provide
+                     ETADeliverPickup stores merchant configuration needed to provide
                     delivery availability checks, including shop domain, country and postal code
                     coverage, delivery-day rules, COD availability, cutoff time,
                     weekend settings, and holiday dates.
@@ -135,7 +133,7 @@ export default function PrivacyPolicy() {
                   </Text>
                   <Text as="p">Data controller: {legalBusinessName}.</Text>
                   <Text as="p">
-                    {contactEmail ? <>For privacy or support requests, contact <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.</> : "For privacy or support requests, use the support contact listed in the Shopify App Store listing for Incode Track."}
+                     {contactEmail ? <>For privacy or support requests, contact <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.</> : "For privacy or support requests, use the support contact listed in the Shopify App Store listing for ETADeliverPickup."}
                   </Text>
                 </BlockStack>
               </BlockStack>

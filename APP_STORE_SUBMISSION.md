@@ -1,4 +1,4 @@
-# Incode Track App Store Submission Notes
+# ETADeliverPickup App Store Submission Notes
 
 Use these values in the Shopify Partner Dashboard after the production domain is ready.
 
@@ -25,13 +25,13 @@ Temporary `trycloudflare.com` development tunnels are not production URLs and mu
 
 ## App Listing
 
-App name: Incode Track
+App name: ETADeliverPickup
 
 App card subtitle: Show delivery availability by postal or ZIP code on product pages.
 
 App introduction: Help shoppers check delivery availability by country and postal or ZIP code before buying.
 
-App details: Incode Track adds a product-page delivery availability checker through a Shopify theme app extension. Merchants can upload serviceable countries and postal codes, set delivery days, manage holidays and weekends, configure COD availability, target rules by product, collection, vendor, or tag, and optionally use inventory-aware delivery messages for selected variants.
+App details: ETADeliverPickup adds a product-page delivery availability checker through a Shopify theme app extension. Merchants can upload serviceable countries and postal codes, set delivery days, manage holidays and weekends, configure COD availability, target rules by product, collection, vendor, or tag, and optionally use inventory-aware delivery messages for selected variants.
 
 Feature ideas:
 - Add a postal and ZIP code checker to product pages without theme code edits.
@@ -77,6 +77,8 @@ Requested scopes: `read_products,read_inventory,read_locations,read_orders,write
 Scope reasons: `read_products` reads product/variant targeting context; `read_inventory` reads selected-variant/location inventory; `read_locations` reads fulfillment locations; `read_orders` lets merchants review pickup selections and customer fulfillment details on the Delivery & pickup page; `write_app_proxy` enables the storefront app proxy. Shipping methods are app-owned rules and no write-order permission is used. Align TOML and Partner configuration before release; documentation is not the deployed scope configuration.
 
 Protected customer data: The pickup-orders view queries recent Shopify orders live and may display customer name, email, phone and shipping address to an authenticated merchant. The app does not copy those order/customer records into its database. Request the applicable protected customer data fields in Partner Dashboard and confirm the declaration against current Shopify policy. Merchant OAuth sessions can contain staff user IDs, names/emails and credentials. Lookup events retain masked postal regions and product/variant IDs, not customer IDs. See `docs/privacy-data-inventory.md`.
+
+Protected-data declaration details: `read_orders` is used only by the authenticated Delivery & pickup admin view to show live fulfillment information for merchant-selected pickup/delivery orders. The app does not write orders, persist customer records, expose order data to storefront shoppers, or use order data for advertising, profiling, or unrelated analytics. Request and justify only the protected fields required by the current Shopify Partner Dashboard form, and provide the public privacy URL before submission.
 
 Shopify cart/order attributes created by storefront delivery selections remain Shopify-owned. The app privacy webhook does not search, export or erase those Shopify records. Customer data-request/redact topics acknowledge no customer-linked records in the app database; shop redaction deletes app-owned shop data and rate-limit buckets. Verify the live public privacy page matches these boundaries before submission.
 

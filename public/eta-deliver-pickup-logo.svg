@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">ETADeliverPickup logo</title>
+  <desc id="desc">Blue delivery truck, clock and location mark with a parcel</desc>
+  <defs>
+    <linearGradient id="blue" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#2c9bc9"/>
+      <stop offset="1" stop-color="#073d78"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#d8a45d"/>
+      <stop offset="1" stop-color="#94601f"/>
+    </linearGradient>
+  </defs>
+  <path d="M41 151c-19-28-12-66 16-84 30-20 68-14 91 10" fill="none" stroke="url(#blue)" stroke-linecap="round" stroke-width="15"/>
+  <path d="m142 69 12 8-15 8" fill="none" stroke="#e9b65d" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"/>
+  <path d="M215 110c18 28 10 67-18 85-29 19-67 13-88-12" fill="none" stroke="url(#blue)" stroke-linecap="round" stroke-width="15"/>
+  <path d="m113 183-12-8 15-8" fill="none" stroke="#e9b65d" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"/>
+  <path d="M42 112h91c8 0 15 6 15 14v28H42z" fill="url(#blue)"/>
+  <path d="M148 127h27l21 27v20h-48z" fill="url(#blue)"/>
+  <path d="M164 133h12l12 15h-24z" fill="#fff" opacity=".9"/>
+  <circle cx="73" cy="157" r="15" fill="#f5f8fb" stroke="#073d78" stroke-width="7"/>
+  <circle cx="169" cy="157" r="15" fill="#f5f8fb" stroke="#073d78" stroke-width="7"/>
+  <circle cx="116" cy="177" r="45" fill="#fff" stroke="url(#blue)" stroke-width="10"/>
+  <path d="M116 149v29l18 12" fill="none" stroke="#0e4f88" stroke-linecap="round" stroke-linejoin="round" stroke-width="7"/>
+  <path d="m97 180 13 13 30-37" fill="none" stroke="#258ab6" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"/>
+  <path d="M202 70v41l-20-11 20-14 20 14-20 11" fill="#fff" stroke="#124a7d" stroke-linejoin="round" stroke-width="5"/>
+  <path d="M196 70c0-12 17-12 17 0" fill="none" stroke="#124a7d" stroke-width="5"/>
+  <path d="M206 116h32v31h-32z" fill="url(#gold)"/>
+  <path d="m206 116 16 10 16-10M222 126v21" fill="none" stroke="#fff" stroke-width="3"/>
+  <path d="m213 137 7 7 14-17" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+</svg>

@@ -80,7 +80,10 @@ export default function Index() {
       <BlockStack gap="500">
         <div className="incode-hero">
           <BlockStack gap="400">
-            <span className="incode-hero__eyebrow">Incode Track</span>
+            <div className="incode-brand-lockup">
+              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width="48" height="48" />
+              <span className="incode-hero__eyebrow">ETADeliverPickup</span>
+            </div>
             <BlockStack gap="200">
               <Text as="h1" variant="heading2xl">Turn delivery certainty into more completed carts.</Text>
               <div className="incode-hero__copy">

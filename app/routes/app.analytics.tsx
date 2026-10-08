@@ -113,9 +113,9 @@ export default function AnalyticsPage() {
     >
       <BlockStack gap="500">
         {data.total === 0 ? (
-          <Banner title="Analytics will appear after your first delivery check" tone="info">
+          <div className="incode-analytics-empty-callout"><Banner title="Analytics will appear after your first delivery check" tone="info">
             Add the app block to a product page, publish the theme, and run a serviceable and unavailable test lookup.
-          </Banner>
+          </Banner></div>
         ) : null}
 
         <div className="incode-metrics">
@@ -176,6 +176,14 @@ export default function AnalyticsPage() {
                   {data.topUnavailable.length > 0 ? (
                     <DataTable columnContentTypes={["text", "numeric"]} headings={["Region", "Checks"]} rows={data.topUnavailable} increasedTableDensity />
                   ) : <Text as="p" tone="subdued">No unavailable regions in the recent sample.</Text>}
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">Top checked regions</Text>
+                  {data.topPostalCodes.length > 0 ? (
+                    <DataTable columnContentTypes={["text", "numeric"]} headings={["Region", "Checks"]} rows={data.topPostalCodes} increasedTableDensity />
+                  ) : <Text as="p" tone="subdued">No postal-region data yet.</Text>}
                 </BlockStack>
               </Card>
               <Card>

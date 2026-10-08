@@ -12,13 +12,15 @@ import {
   Text,
 } from "@shopify/polaris";
 import { requireActiveBilling } from "../services/billing.server";
+import { supportContact } from "../utils/public-contact.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await requireActiveBilling(request);
+  const { contactEmail: supportEmail } = supportContact();
   return {
     shop: session.shop,
     apiKey: process.env.SHOPIFY_API_KEY || "",
-    supportEmail: process.env.SUPPORT_EMAIL || "",
+    supportEmail,
   };
 };
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { generateHeadlessToken, hashHeadlessToken, HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes } from "../app/utils/headless-tokens.ts";
+import { generateHeadlessToken, hashHeadlessToken, HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes, storedAllowedOriginsLabel } from "../app/utils/headless-tokens.ts";
 
 test("tokens contain 256 random bits, safe prefixes, and only SHA-256 hashes", () => {
   for (const type of ["public", "private"]) {
@@ -46,4 +46,12 @@ test("scope parser permits only the four read scopes and deduplicates", () => {
   for (const raw of ["", [], "delivery:write", "delivery:check,delivery:write", "*", "delivery:check,", ["delivery:check", "admin:read"], "delivery:CHECK"]) {
     assert.throws(() => parseHeadlessScopes(raw));
   }
+});
+
+test("stored origins render safely for malformed legacy metadata", () => {
+  assert.equal(storedAllowedOriginsLabel('["https://shop.example","http://localhost:3000"]'), "https://shop.example, http://localhost:3000");
+  assert.equal(storedAllowedOriginsLabel("[]"), "None (server only)");
+  assert.equal(storedAllowedOriginsLabel("not-json"), "Invalid legacy metadata");
+  assert.equal(storedAllowedOriginsLabel('{"origin":"https://shop.example"}'), "Invalid legacy metadata");
+  assert.equal(storedAllowedOriginsLabel('["https://shop.example",7]'), "Invalid legacy metadata");
 });

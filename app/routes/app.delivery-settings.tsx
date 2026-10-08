@@ -373,6 +373,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   let collections: Array<{ id: string; title: string; handle: string }> = [];
   let products: Array<{ id: string; title: string; handle: string }> = [];
+  let catalogError = "";
   try {
     let collectionCursor: string | null = null;
     let productCursor: string | null = null;
@@ -392,11 +393,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ...(loadCollections ? { collectionCursor } : {}),
         ...(loadProducts ? { productCursor } : {}),
       } });
-      if (!response.ok) break;
+      if (!response.ok) {
+        catalogError = "Shopify could not load the product catalog. Targeting lists may be incomplete. Refresh and try again.";
+        break;
+      }
       const json = await response.json() as { data?: {
         collections?: { nodes?: Array<{ id: string; title: string; handle: string }>; pageInfo?: { hasNextPage?: boolean; endCursor?: string } };
         products?: { nodes?: Array<{ id: string; title: string; handle: string }>; pageInfo?: { hasNextPage?: boolean; endCursor?: string } };
-      } };
+      }; errors?: Array<{ message?: string }> };
+      if (json.errors?.length) {
+        catalogError = json.errors[0]?.message || "Shopify could not load the product catalog. Targeting lists may be incomplete.";
+        break;
+      }
       const collectionPage = json.data?.collections;
       const productPage = json.data?.products;
        if (loadCollections) collections.push(...(collectionPage?.nodes ?? []));
@@ -408,12 +416,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       collectionCursor = nextCollectionCursor;
       productCursor = nextProductCursor;
       if (!loadCollections && !loadProducts) break;
+      if (page === 19 && (loadCollections || loadProducts)) {
+        catalogError = "The catalog has more than 5,000 products or collections. Only the first 5,000 are shown for targeting.";
+      }
     }
     collections = [...new Map(collections.map((collection) => [collection.id, collection])).values()];
     products = [...new Map(products.map((product) => [product.id, product])).values()];
-  } catch {
-    collections = [];
-    products = [];
+  } catch (error) {
+    catalogError = error instanceof Error && error.message ? error.message : "Shopify could not load the product catalog. Targeting lists may be incomplete.";
   }
 
     return {
@@ -462,6 +472,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     patternCount,
     recentImports,
     collections,
+    catalogError,
     access,
   };
 }
@@ -497,13 +508,13 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     if (!["all", "products", "collections", "zones"].includes(countdownTargetMode)) {
       return { ok: false, message: "Choose a valid countdown audience." } satisfies ActionData;
     }
-    if (countdownTargetMode === "products" && !countdownProductIdsCsv) {
+    if (countdownEnabled && countdownTargetMode === "products" && !countdownProductIdsCsv) {
       return { ok: false, message: "Add at least one product for this countdown audience." } satisfies ActionData;
     }
-    if (countdownTargetMode === "collections" && !countdownCollectionHandlesCsv) {
+    if (countdownEnabled && countdownTargetMode === "collections" && !countdownCollectionHandlesCsv) {
       return { ok: false, message: "Add at least one collection for this countdown audience." } satisfies ActionData;
     }
-    if (countdownTargetMode === "zones" && !countdownZoneIdsCsv) {
+    if (countdownEnabled && countdownTargetMode === "zones" && !countdownZoneIdsCsv) {
       return { ok: false, message: "Choose at least one delivery zone for this countdown audience." } satisfies ActionData;
     }
     await prisma.deliverySetting.upsert({
@@ -666,12 +677,29 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
   if (intent === "sync_google_sheet") {
     requireFeature(access, "googleSheets");
     const setting = await prisma.deliverySetting.findUnique({ where: { shop } });
-    if (!setting?.googleSheetCsvUrl) {
-      return { ok: false, message: "Save a Google Sheet CSV URL first." } satisfies ActionData;
+    const submittedSheetUrl = String(formData.get("googleSheetCsvUrl") ?? "").trim();
+    const effectiveSheetUrl = submittedSheetUrl || setting?.googleSheetCsvUrl?.trim() || "";
+    if (!effectiveSheetUrl) {
+      return { ok: false, message: "Enter a Google Sheet CSV URL first." } satisfies ActionData;
+    }
+    try {
+      const url = new URL(effectiveSheetUrl);
+      if (url.protocol !== "https:" || !["docs.google.com", "drive.google.com"].includes(url.hostname)) {
+        return { ok: false, message: "Use a published HTTPS Google Sheets CSV URL." } satisfies ActionData;
+      }
+    } catch {
+      return { ok: false, message: "Enter a valid Google Sheets CSV URL." } satisfies ActionData;
+    }
+    if (effectiveSheetUrl !== (setting?.googleSheetCsvUrl ?? "")) {
+      await prisma.deliverySetting.upsert({
+        where: { shop },
+        update: { googleSheetCsvUrl: effectiveSheetUrl },
+        create: { shop, googleSheetCsvUrl: effectiveSheetUrl },
+      });
     }
 
     try {
-      const csv = await fetchGoogleSheetCsv(setting.googleSheetCsvUrl);
+      const csv = await fetchGoogleSheetCsv(effectiveSheetUrl);
       const result = await importPostalCodesFromCsv(shop, csv, "google_sheet", access.features);
       await prisma.deliverySetting.update({
         where: { shop },
@@ -1620,6 +1648,8 @@ export default function DeliverySettingsPage() {
   const fetcher = useFetcher<ActionData>();
   const countdownFetcher = useFetcher<ActionData>();
   const isSaving = fetcher.state !== "idle";
+  const countdownSaving = countdownFetcher.state !== "idle";
+  const pageBusy = isSaving || countdownSaving;
   const isAdvanced = data.access.active;
   const activeIntent = String(fetcher.formData?.get("intent") ?? "");
   const activeZoneId = Number(fetcher.formData?.get("zoneId") ?? 0);
@@ -1978,11 +2008,11 @@ export default function DeliverySettingsPage() {
     row.city ?? "-",
     row.state ?? "-",
     <InlineStack key={`${row.id}-actions`} gap="100">
-      <Button size="slim" onClick={() => editPostalRule(row)}>Edit</Button>
+      <Button size="slim" onClick={() => editPostalRule(row)} disabled={pageBusy}>Edit</Button>
       <fetcher.Form method="post" onSubmit={(event) => { if (!window.confirm(`Delete postal rule ${row.postalCode}?`)) event.preventDefault(); }}>
         <input type="hidden" name="intent" value="delete_postal_rule" />
         <input type="hidden" name="postalRuleId" value={row.id} />
-        <Button submit size="slim" tone="critical" loading={isPostalActionSaving("delete_postal_rule", row.id)}>Delete</Button>
+        <Button submit size="slim" tone="critical" loading={isPostalActionSaving("delete_postal_rule", row.id)} disabled={pageBusy}>Delete</Button>
       </fetcher.Form>
     </InlineStack>,
   ]);
@@ -1993,11 +2023,11 @@ export default function DeliverySettingsPage() {
     zone._count.postalCodes,
     zone.enabled ? <Badge key={`${zone.id}-on`} tone="success">Enabled</Badge> : <Badge key={`${zone.id}-on`}>Disabled</Badge>,
     <InlineStack key={`${zone.id}-actions`} gap="200">
-      <Button size="slim" onClick={() => setEditingZone(zone)} disabled={!data.access.features.zones || isSaving}>Edit</Button>
+      <Button size="slim" onClick={() => setEditingZone(zone)} disabled={!data.access.features.zones || pageBusy}>Edit</Button>
       <fetcher.Form method="post">
         <input type="hidden" name="intent" value="toggle_zone" />
         <input type="hidden" name="zoneId" value={zone.id} />
-        <Button submit size="slim" loading={isZoneActionSaving("toggle_zone", zone.id)} disabled={!isAdvanced}>
+        <Button submit size="slim" loading={isZoneActionSaving("toggle_zone", zone.id)} disabled={!isAdvanced || pageBusy}>
           {zone.enabled ? "Disable" : "Enable"}
         </Button>
       </fetcher.Form>
@@ -2009,7 +2039,7 @@ export default function DeliverySettingsPage() {
       >
         <input type="hidden" name="intent" value="delete_zone" />
         <input type="hidden" name="zoneId" value={zone.id} />
-        <Button submit size="slim" tone="critical" loading={isZoneActionSaving("delete_zone", zone.id)} disabled={!isAdvanced || (!zone.enabled && zone._count.postalCodes > 0)}>
+        <Button submit size="slim" tone="critical" loading={isZoneActionSaving("delete_zone", zone.id)} disabled={!isAdvanced || pageBusy || (!zone.enabled && zone._count.postalCodes > 0)}>
           Delete
         </Button>
       </fetcher.Form>
@@ -2051,18 +2081,18 @@ export default function DeliverySettingsPage() {
           <div><span>Message</span><strong>{target.customSuccessMessage || "Global message"}</strong></div>
         </div>
         <div className="incode-target-card__actions">
-          <Button size="slim" onClick={() => editTarget(target)} disabled={!isAdvanced}>Edit</Button>
+          <Button size="slim" onClick={() => editTarget(target)} disabled={!isAdvanced || pageBusy}>Edit</Button>
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="toggle_target" />
             <input type="hidden" name="targetId" value={target.id} />
-            <Button submit size="slim" loading={isIntentSaving("toggle_target")} disabled={!isAdvanced}>
+            <Button submit size="slim" loading={isIntentSaving("toggle_target")} disabled={!isAdvanced || pageBusy}>
               {target.enabled ? "Disable" : "Enable"}
             </Button>
           </fetcher.Form>
           <fetcher.Form method="post" onSubmit={(event) => { if (!window.confirm(`Delete targeting rule "${target.name}"?`)) event.preventDefault(); }}>
             <input type="hidden" name="intent" value="delete_target" />
             <input type="hidden" name="targetId" value={target.id} />
-            <Button submit size="slim" tone="critical" loading={isIntentSaving("delete_target")} disabled={!isAdvanced}>Delete</Button>
+            <Button submit size="slim" tone="critical" loading={isIntentSaving("delete_target")} disabled={!isAdvanced || pageBusy}>Delete</Button>
           </fetcher.Form>
         </div>
       </article>
@@ -2162,6 +2192,11 @@ export default function DeliverySettingsPage() {
                 {fetcher.data.message}
               </Banner>
             ) : null}
+            {data.catalogError ? (
+              <Banner title="Product catalog unavailable" tone="warning">
+                {data.catalogError} You can still save targeting rules by ID, but lists may be incomplete.
+              </Banner>
+            ) : null}
             {!isAdvanced ? (
               <Banner title="Standard subscription required" tone="info" action={{ content: "View plan", url: "/app/plans" }}>
                 Activate Standard to use delivery controls and storefront features.
@@ -2217,7 +2252,7 @@ export default function DeliverySettingsPage() {
                         helpText="Lower wins."
                       />
                     </FormLayout.Group>
-                    <Button submit variant="primary" loading={isIntentSaving("create_zone")} disabled={!isAdvanced}>
+                    <Button submit variant="primary" loading={isIntentSaving("create_zone")} disabled={!isAdvanced || pageBusy}>
                       Create zone
                     </Button>
                   </FormLayout>
@@ -2534,7 +2569,7 @@ export default function DeliverySettingsPage() {
                     />
                     </details>
                     <InlineStack gap="200">
-                      <Button submit variant="primary" loading={isIntentSaving(editingTargetId === null ? "create_target" : "update_target")} disabled={!isAdvanced}>
+                      <Button submit variant="primary" loading={isIntentSaving(editingTargetId === null ? "create_target" : "update_target")} disabled={!isAdvanced || pageBusy}>
                         {editingTargetId === null ? "Create targeting rule" : "Save targeting rule"}
                       </Button>
                        {editingTargetId !== null ? <Button onClick={() => { if (JSON.stringify(targetForm) === JSON.stringify(targetBaseline.current) || window.confirm("Discard unsaved targeting changes?")) resetTargetForm(); }}>Cancel edit</Button> : null}
@@ -2687,7 +2722,7 @@ export default function DeliverySettingsPage() {
                     <Checkbox
                       label="Enable inventory-aware delivery estimates"
                       checked={settings.inventoryAwareEnabled}
-                      disabled={!isAdvanced}
+                      disabled={!isAdvanced || pageBusy}
                       helpText="The storefront estimate uses the selected variant only when it is in stock."
                       onChange={(checked) =>
                         setSettings((current) => ({
@@ -2701,7 +2736,7 @@ export default function DeliverySettingsPage() {
                     <Checkbox
                       label="Disable Add to Cart when delivery is unavailable"
                       checked={settings.disableAddToCart}
-                      disabled={!isAdvanced}
+                      disabled={!isAdvanced || pageBusy}
                       helpText="The storefront widget disables common product form buttons after an unavailable lookup."
                       onChange={(checked) =>
                         setSettings((current) => ({ ...current, disableAddToCart: checked }))
@@ -2710,7 +2745,7 @@ export default function DeliverySettingsPage() {
                     <Checkbox
                       label="Require valid PIN before Add to Cart (shop-wide)"
                       checked={settings.requireValidPin}
-                      disabled={!isAdvanced}
+                      disabled={!isAdvanced || pageBusy}
                       helpText="Add to Cart stays locked until a serviceable postal code check succeeds. Targeting rules can override this per product, collection, or tag."
                       onChange={(checked) =>
                         setSettings((current) => ({ ...current, requireValidPin: checked }))
@@ -2733,7 +2768,7 @@ export default function DeliverySettingsPage() {
                             label="Ready template"
                             options={ETA_MESSAGE_TEMPLATES}
                             value={selectedEtaTemplate}
-                            disabled={!isAdvanced}
+                            disabled={!isAdvanced || pageBusy}
                             onChange={(value) => {
                               setSelectedEtaTemplate(value);
                               if (value) setSettings((current) => ({ ...current, successMessage: value }));
@@ -2743,7 +2778,7 @@ export default function DeliverySettingsPage() {
                             label="Insert dynamic value"
                             options={SHORTCODE_OPTIONS}
                             value={selectedShortcode}
-                            disabled={!isAdvanced}
+                            disabled={!isAdvanced || pageBusy}
                             onChange={(value) => {
                               setSelectedShortcode("");
                               if (!value) return;
@@ -2759,7 +2794,7 @@ export default function DeliverySettingsPage() {
                           name="successMessage"
                           value={settings.successMessage}
                           multiline={3}
-                          disabled={!isAdvanced}
+                          disabled={!isAdvanced || pageBusy}
                           onChange={(value) =>
                             setSettings((current) => ({ ...current, successMessage: value }))
                           }
@@ -2783,7 +2818,7 @@ export default function DeliverySettingsPage() {
                       label="Unavailable message"
                       name="unavailableMessage"
                       value={settings.unavailableMessage}
-                      disabled={!isAdvanced}
+                      disabled={!isAdvanced || pageBusy}
                       onChange={(value) =>
                         setSettings((current) => ({ ...current, unavailableMessage: value }))
                       }
@@ -2794,7 +2829,7 @@ export default function DeliverySettingsPage() {
                         label="COD available message"
                         name="codAvailableMessage"
                         value={settings.codAvailableMessage}
-                        disabled={!isAdvanced}
+                        disabled={!isAdvanced || pageBusy}
                         onChange={(value) =>
                           setSettings((current) => ({ ...current, codAvailableMessage: value }))
                         }
@@ -2804,7 +2839,7 @@ export default function DeliverySettingsPage() {
                         label="COD unavailable message"
                         name="codUnavailableMessage"
                         value={settings.codUnavailableMessage}
-                        disabled={!isAdvanced}
+                        disabled={!isAdvanced || pageBusy}
                         onChange={(value) =>
                           setSettings((current) => ({ ...current, codUnavailableMessage: value }))
                         }
@@ -2815,7 +2850,7 @@ export default function DeliverySettingsPage() {
                       label="Delivery charge message"
                       name="deliveryChargeMessage"
                       value={settings.deliveryChargeMessage}
-                      disabled={!isAdvanced}
+                      disabled={!isAdvanced || pageBusy}
                       onChange={(value) =>
                         setSettings((current) => ({ ...current, deliveryChargeMessage: value }))
                       }
@@ -2847,7 +2882,7 @@ export default function DeliverySettingsPage() {
                     </Card>
 
                     </> : null}
-                    <Button submit variant="primary" loading={isIntentSaving("save_settings")}>
+                    <Button submit variant="primary" loading={isIntentSaving("save_settings")} disabled={pageBusy}>
                       Save settings
                     </Button>
                   </FormLayout>
@@ -2900,7 +2935,7 @@ export default function DeliverySettingsPage() {
                 <InlineStack gap="300">
                   <Button
                     variant="primary"
-                    disabled={!csvFile || isSaving}
+                    disabled={!csvFile || pageBusy}
                     loading={isIntentSaving("bulk_import_csv")}
                     onClick={submitCsvImport}
                   >
@@ -2931,13 +2966,14 @@ export default function DeliverySettingsPage() {
                       placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv"
                     />
                     <InlineStack gap="300">
-                      <Button submit loading={isIntentSaving("save_google_sheet")} disabled={!isAdvanced}>Save URL</Button>
+                      <Button submit loading={isIntentSaving("save_google_sheet")} disabled={!isAdvanced || pageBusy}>Save URL</Button>
                     </InlineStack>
                   </FormLayout>
                 </fetcher.Form>
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="sync_google_sheet" />
-                  <Button submit variant="primary" loading={isIntentSaving("sync_google_sheet")} disabled={!isAdvanced}>Sync now</Button>
+                  <input type="hidden" name="googleSheetCsvUrl" value={googleSheetCsvUrl} />
+                  <Button submit variant="primary" loading={isIntentSaving("sync_google_sheet")} disabled={!isAdvanced || pageBusy || !googleSheetCsvUrl.trim()}>Sync now</Button>
                 </fetcher.Form>
                 <Text as="p" tone="subdued">
                   Last sync: {data.setting.lastGoogleSheetSyncAt ? new Date(data.setting.lastGoogleSheetSyncAt).toLocaleString() : "Never"}
@@ -3196,7 +3232,7 @@ export default function DeliverySettingsPage() {
                     <input type="hidden" name="expressAvailable" value={String(postalCodeForm.expressAvailable)} />
                     </details>
 
-                    <Button submit variant="primary" loading={isIntentSaving("upsert_single_postal_code")}>
+                    <Button submit variant="primary" loading={isIntentSaving("upsert_single_postal_code")} disabled={pageBusy}>
                       {editingPostalRule ? "Update postal rule" : "Save postal code"}
                     </Button>
                     {fetcher.state === "idle" && fetcher.data?.intent === "upsert_single_postal_code" ? (
@@ -3241,7 +3277,7 @@ export default function DeliverySettingsPage() {
                       helpText="One row per line: country, postal_code, delivery_days, serviceable, cod_available, city, state, zone, delivery_charge, currency, same_day, next_day, express. postal_code may be exact, a range (10000-10999), or a wildcard (4*). Max 1,000 rows."
                       requiredIndicator
                     />
-                    <Button submit variant="primary" loading={isIntentSaving("bulk_manual_rows")}>
+                    <Button submit variant="primary" loading={isIntentSaving("bulk_manual_rows")} disabled={pageBusy}>
                       Save manual rows
                     </Button>
                   </FormLayout>
@@ -3395,7 +3431,7 @@ export default function DeliverySettingsPage() {
                       autoComplete="off"
                       requiredIndicator
                     />
-                    <Button submit variant="primary" loading={isIntentSaving("add_holiday")}>
+                    <Button submit variant="primary" loading={isIntentSaving("add_holiday")} disabled={pageBusy}>
                   Add holiday
                     </Button>
                   </FormLayout>
@@ -3411,7 +3447,7 @@ export default function DeliverySettingsPage() {
                       <fetcher.Form key={holiday} method="post">
                         <input type="hidden" name="intent" value="remove_holiday" />
                         <input type="hidden" name="holidayDate" value={holiday} />
-                        <Button submit size="slim" tone="critical" accessibilityLabel={`Remove holiday ${holiday}`}>
+                        <Button submit size="slim" tone="critical" accessibilityLabel={`Remove holiday ${holiday}`} disabled={pageBusy}>
                           Remove {holiday}
                         </Button>
                       </fetcher.Form>
@@ -3422,7 +3458,7 @@ export default function DeliverySettingsPage() {
             </Card>
             </> : null}
             {activeTab.id === "optional" ? <>
-            <Card>
+            <div id="countdown" className="incode-section-anchor"><Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">Cutoff countdown display</Text>
                 <Text as="p" tone="subdued">Choose who sees the countdown here. Shopify still requires the app block to be added and published on each storefront surface you select.</Text>
@@ -3454,7 +3490,7 @@ export default function DeliverySettingsPage() {
                         options={countdownProductOptions}
                         selected={selectedCountdownProductIds}
                         onSelect={(selected) => setCountdownProductIds(selected.join(","))}
-                        emptyState={data.products.length > 0 ? "No matching products." : "No products found in this store."}
+                        emptyState={data.catalogError ? data.catalogError : data.products.length > 0 ? "No matching products." : "No products found in this store."}
                         textField={
                           <Autocomplete.TextField
                             label="Choose products"
@@ -3471,7 +3507,7 @@ export default function DeliverySettingsPage() {
                         options={countdownCollectionOptions}
                         selected={selectedCountdownCollections}
                         onSelect={(selected) => setCountdownCollectionHandles(selected.join(","))}
-                        emptyState={data.collections.length > 0 ? "No matching collections." : "No collections found in this store."}
+                        emptyState={data.catalogError ? data.catalogError : data.collections.length > 0 ? "No matching collections." : "No collections found in this store."}
                         textField={
                           <Autocomplete.TextField
                             label="Choose collections"
@@ -3522,7 +3558,7 @@ export default function DeliverySettingsPage() {
                       </InlineStack>
                     </BlockStack>
                     <InlineStack gap="200">
-                      <Button submit variant="primary" loading={countdownFetcher.state !== "idle"}>Save countdown settings</Button>
+                      <Button submit variant="primary" loading={countdownFetcher.state !== "idle"} disabled={pageBusy}>Save countdown settings</Button>
                       <Button url={themeEditorUrl} external target="_blank">Open Theme Editor setup</Button>
                     </InlineStack>
                     {countdownFetcher.data ? <Banner tone={countdownFetcher.data.ok ? "success" : "critical"}>{countdownFetcher.data.message}</Banner> : null}
@@ -3535,7 +3571,7 @@ export default function DeliverySettingsPage() {
                 </div>
                 <Text as="p" tone="subdued" variant="bodySm">Setup: save these settings, open the Theme Editor, add the Check delivery availability block to the selected templates, then publish the theme.</Text>
               </BlockStack>
-            </Card>
+            </Card></div>
             </> : null}
 
             <Card>

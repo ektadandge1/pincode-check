@@ -1,4 +1,4 @@
-name = "Incode Track web"
+name = "ETADeliverPickup web"
 roles = ["frontend", "backend"]
 webhooks_path = "/webhooks/app/uninstalled"
 

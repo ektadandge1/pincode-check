@@ -6,6 +6,7 @@ import appStyles from "./styles.css?url";
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: polarisStyles },
   { rel: "stylesheet", href: appStyles },
+  { rel: "icon", href: "/eta-deliver-pickup-logo.svg", type: "image/svg+xml" },
 ];
 
 export default function App() {

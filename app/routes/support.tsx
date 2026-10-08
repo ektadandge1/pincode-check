@@ -12,19 +12,18 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
+import { supportContact } from "../utils/public-contact.server";
 
 export const meta: MetaFunction = () => [
-  { title: "Support | Incode Track" },
+  { title: "Support | ETADeliverPickup" },
   {
     name: "description",
     content:
-      "Support and setup guide for Incode Track delivery availability checker.",
+      "Support and setup guide for ETADeliverPickup.",
   },
 ];
 
-export const loader = async () => ({
-  contactEmail: process.env.SUPPORT_EMAIL || "",
-});
+export const loader = async () => supportContact();
 
 export default function Support() {
   const { contactEmail } = useLoaderData<typeof loader>();
@@ -32,7 +31,7 @@ export default function Support() {
   return (
     <PolarisProvider i18n={enTranslations}>
       <div className="incode-public">
-      <Page title="Support" subtitle="Setup and troubleshooting for Incode Track" narrowWidth backAction={{ content: "Incode Track", url: "/" }}>
+      <Page title="Support" subtitle="Setup and troubleshooting for ETADeliverPickup" narrowWidth backAction={{ content: "ETADeliverPickup", url: "/" }}>
         <BlockStack gap="500">
           <Banner title="Get useful help faster" tone="info">
             Include your shop domain, product URL, selected variant, and a sample postal code when contacting support.
@@ -99,7 +98,7 @@ export default function Support() {
                   <Text as="h2" variant="headingLg">
                     Contact
                   </Text>
-                  <Text as="p">{contactEmail ? "Our team can help with setup, imports, targeting, and storefront behavior." : "Use the support contact in the Shopify App Store listing for Incode Track."}</Text>
+                  <Text as="p">{contactEmail ? "Our team can help with setup, imports, targeting, and storefront behavior." : "Use the support contact in the Shopify App Store listing for ETADeliverPickup."}</Text>
                   {contactEmail ? <Button url={`mailto:${contactEmail}`} variant="primary">Email {contactEmail}</Button> : null}
                 </BlockStack>
               </BlockStack>
