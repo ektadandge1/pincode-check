@@ -279,10 +279,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
+    const { countdownEnabled: _omitCountdown, ...storefrontStyle } = customization;
+    void _omitCountdown;
     await prisma.deliverySetting.upsert({
       where: { shop: session.shop },
       create: { shop: session.shop, ...customization },
-      update: (({ countdownEnabled: _countdownEnabled, ...storefrontStyle }) => storefrontStyle)(customization),
+      update: storefrontStyle,
     });
   } catch (error) {
     console.error("Unable to save storefront customization", error);

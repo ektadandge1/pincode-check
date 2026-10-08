@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect, useLoaderData } from "react-router";
 import {
@@ -12,7 +13,9 @@ import {
   Layout,
   Page,
   ProgressBar,
+  Select,
   Text,
+  TextField,
 } from "@shopify/polaris";
 import prisma from "../db.server";
 import { requireActiveBilling } from "../services/billing.server";
@@ -24,7 +27,7 @@ function topCounts<T extends string>(values: T[], limit = 8) {
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
-    .map(([label, count]) => [label, count]);
+    .map(([label, count]) => [label, String(count)]);
 }
 
 function formatDate(value: Date | string) {
@@ -67,6 +70,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     topCountries: topCounts(events.map((event) => event.country)),
     recent: events.slice(0, 25),
     sampleSize: events.length,
+    lastCheckAt: events[0]?.createdAt ?? null,
   };
 }
 
@@ -78,7 +82,7 @@ function MetricCard({ label, value, detail, tone }: {
 }) {
   return (
     <Card>
-      <div className="incode-metric">
+      <div className="incode-metric analytics-metric">
         <BlockStack gap="200">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="p" tone="subdued" variant="bodySm">{label}</Text>
@@ -96,26 +100,87 @@ function MetricCard({ label, value, detail, tone }: {
 
 export default function AnalyticsPage() {
   const data = useLoaderData<typeof loader>();
-  const recentRows = data.recent.map((event) => [
+  const [query, setQuery] = useState("");
+  const [result, setResult] = useState("all");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return data.recent.filter((event) => {
+      if (result === "available" && !event.available) return false;
+      if (result === "unavailable" && event.available) return false;
+      if (!q) return true;
+      return `${event.country} ${event.postalCode} ${event.source ?? ""}`.toLowerCase().includes(q);
+    });
+  }, [data.recent, query, result]);
+
+  const recentRows = filtered.map((event) => [
     formatDate(event.createdAt),
     event.country,
     event.postalCode,
     event.available ? <Badge key={`${event.id}-result`} tone="success">Available</Badge> : <Badge key={`${event.id}-result`} tone="critical">Unavailable</Badge>,
-    event.deliveryDays ?? "-",
+    event.deliveryDays == null ? "-" : String(event.deliveryDays),
     event.source === "db_fallback" ? "Coverage rule" : event.source === "courier_api" ? "Courier API" : "No match",
   ]);
+
+  const exportCsv = () => {
+    const header = "date_utc,country,postal_region,result,delivery_days,source";
+    const lines = filtered.map((event) => [
+      new Date(event.createdAt).toISOString(),
+      event.country,
+      `"${String(event.postalCode).replace(/"/g, '""')}"`,
+      event.available ? "available" : "unavailable",
+      event.deliveryDays ?? "",
+      event.source ?? "",
+    ].join(","));
+    const blob = new Blob([[header, ...lines].join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "etadeliverpickup-analytics.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <Page
       title="Delivery analytics"
-      subtitle="Privacy-safe insights from storefront delivery checks."
+      subtitle="ETADeliverPickup privacy-safe insights from real storefront delivery checks."
       primaryAction={<Button url="/app/delivery-settings?tab=coverage" variant="primary">Improve coverage</Button>}
     >
       <BlockStack gap="500">
+        <div className="incode-hero analytics-hero">
+          <BlockStack gap="300">
+            <InlineStack gap="200" blockAlign="center">
+              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width={40} height={40} />
+              <Badge tone="info">Masked regions only</Badge>
+              <Badge tone={data.total === 0 ? undefined : data.availabilityRate >= 80 ? "success" : "critical"}>
+                {data.total === 0 ? "Waiting for data" : `${data.availabilityRate}% serviceable`}
+              </Badge>
+            </InlineStack>
+            <InlineStack align="space-between" blockAlign="end" gap="400">
+              <BlockStack gap="100">
+                <Text as="h1" variant="heading2xl">Know exactly where delivery fails.</Text>
+                <div className="incode-hero__copy">
+                  <Text as="p" variant="bodyLg">
+                    {data.total === 0
+                      ? "Run your first product-page check to unlock coverage gaps."
+                      : `${data.total} checks recorded${data.lastCheckAt ? `, last ${formatDate(data.lastCheckAt)}` : ""}. Fix top unavailable regions first.`}
+                  </Text>
+                </div>
+              </BlockStack>
+              <InlineStack gap="200">
+                <Button url="/app/delivery-settings?tab=coverage" variant="primary">Add coverage</Button>
+                <Button url="/app/additional">Setup guide</Button>
+              </InlineStack>
+            </InlineStack>
+            <ProgressBar progress={data.availabilityRate} size="small" tone={data.total === 0 ? "primary" : data.availabilityRate >= 80 ? "success" : "critical"} />
+          </BlockStack>
+        </div>
+
         {data.total === 0 ? (
-          <div className="incode-analytics-empty-callout"><Banner title="Analytics will appear after your first delivery check" tone="info">
-            Add the app block to a product page, publish the theme, and run a serviceable and unavailable test lookup.
-          </Banner></div>
+          <Banner title="Analytics will appear after your first delivery check" tone="info">
+            Add the app block to a product page, publish the theme, and run one serviceable and one unavailable test lookup.
+          </Banner>
         ) : null}
 
         <div className="incode-metrics">
@@ -132,22 +197,32 @@ export default function AnalyticsPage() {
                 <InlineStack align="space-between" blockAlign="center" gap="300">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingLg">Recent delivery checks</Text>
-                    <Text as="p" tone="subdued">Newest 25 checks. Shopper postal codes remain masked.</Text>
+                    <Text as="p" tone="subdued">Newest 25 checks. Shopper postal codes remain masked, never full addresses.</Text>
                   </BlockStack>
-                  <Badge>{`${data.recent.length} shown`}</Badge>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Badge>{`${filtered.length} shown`}</Badge>
+                    <Button size="slim" onClick={exportCsv} disabled={!filtered.length}>Export CSV</Button>
+                  </InlineStack>
                 </InlineStack>
+                <div className="analytics-filters">
+                  <TextField label="Search region" labelHidden value={query} onChange={setQuery} autoComplete="off" placeholder="Search country, region or source — e.g. IN 400" />
+                  <Select label="Result" labelHidden value={result} onChange={setResult} options={[{ label: "All results", value: "all" }, { label: "Available only", value: "available" }, { label: "Unavailable only", value: "unavailable" }]} />
+                </div>
                 {recentRows.length > 0 ? (
-                  <DataTable
-                    columnContentTypes={["text", "text", "text", "text", "numeric", "text"]}
-                    headings={["Date (UTC)", "Country", "Postal region", "Result", "Days", "Source"]}
-                    rows={recentRows}
-                    increasedTableDensity
-                  />
+                  <div className="analytics-table__scroll">
+                    <DataTable
+                      columnContentTypes={["text", "text", "text", "text", "numeric", "text"]}
+                      headings={["Date (UTC)", "Country", "Postal region", "Result", "Days", "Source"]}
+                      rows={recentRows}
+                      increasedTableDensity
+                    />
+                  </div>
                 ) : (
                   <Box paddingBlock="800">
                     <BlockStack gap="200" inlineAlign="center">
-                      <Text as="h3" variant="headingMd">No checks recorded yet</Text>
-                      <Text as="p" tone="subdued">Storefront activity will appear here automatically.</Text>
+                      <Text as="h3" variant="headingMd">{data.total === 0 ? "No checks recorded yet" : "No checks match filters"}</Text>
+                      <Text as="p" tone="subdued">{data.total === 0 ? "Storefront activity will appear here automatically." : "Clear search or choose All results."}</Text>
+                      {data.total === 0 ? <Button url="/app/additional" variant="primary">Open setup guide</Button> : <Button onClick={() => { setQuery(""); setResult("all"); }}>Clear filters</Button>}
                     </BlockStack>
                   </Box>
                 )}
@@ -159,7 +234,10 @@ export default function AnalyticsPage() {
             <BlockStack gap="400">
               <Card>
                 <BlockStack gap="300">
-                  <Text as="h2" variant="headingMd">Coverage health</Text>
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h2" variant="headingMd">Coverage health</Text>
+                    <Badge tone={data.total === 0 ? undefined : data.availabilityRate >= 80 ? "success" : "critical"}>{data.total === 0 ? "No data" : `${data.availabilityRate}%`}</Badge>
+                  </InlineStack>
                   <ProgressBar progress={data.availabilityRate} size="small" tone={data.total === 0 ? "primary" : data.availabilityRate >= 80 ? "success" : "critical"} />
                   <Text as="p" tone="subdued">
                     {data.total === 0
@@ -168,13 +246,22 @@ export default function AnalyticsPage() {
                       ? "Most shopper locations receive a serviceable response."
                       : "Review unavailable regions and add targeted coverage rules."}
                   </Text>
+                  <Button url="/app/delivery-settings?tab=coverage" fullWidth variant="primary">Fix coverage now</Button>
                 </BlockStack>
               </Card>
               <Card>
                 <BlockStack gap="300">
-                  <Text as="h2" variant="headingMd">Top unavailable regions</Text>
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h2" variant="headingMd">Top unavailable regions</Text>
+                    <Badge tone="critical">{`${data.topUnavailable.length} groups`}</Badge>
+                  </InlineStack>
                   {data.topUnavailable.length > 0 ? (
-                    <DataTable columnContentTypes={["text", "numeric"]} headings={["Region", "Checks"]} rows={data.topUnavailable} increasedTableDensity />
+                    <>
+                      <div className="analytics-table__scroll">
+                        <DataTable columnContentTypes={["text", "numeric"]} headings={["Region", "Checks"]} rows={data.topUnavailable} increasedTableDensity />
+                      </div>
+                      <Button url="/app/delivery-settings?tab=coverage" fullWidth>Add missing rules</Button>
+                    </>
                   ) : <Text as="p" tone="subdued">No unavailable regions in the recent sample.</Text>}
                 </BlockStack>
               </Card>
@@ -182,7 +269,9 @@ export default function AnalyticsPage() {
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Top checked regions</Text>
                   {data.topPostalCodes.length > 0 ? (
-                    <DataTable columnContentTypes={["text", "numeric"]} headings={["Region", "Checks"]} rows={data.topPostalCodes} increasedTableDensity />
+                    <div className="analytics-table__scroll">
+                      <DataTable columnContentTypes={["text", "numeric"]} headings={["Region", "Checks"]} rows={data.topPostalCodes} increasedTableDensity />
+                    </div>
                   ) : <Text as="p" tone="subdued">No postal-region data yet.</Text>}
                 </BlockStack>
               </Card>
@@ -190,9 +279,11 @@ export default function AnalyticsPage() {
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Top countries</Text>
                   {data.topCountries.length > 0 ? (
-                    <DataTable columnContentTypes={["text", "numeric"]} headings={["Country", "Checks"]} rows={data.topCountries} increasedTableDensity />
+                    <div className="analytics-table__scroll">
+                      <DataTable columnContentTypes={["text", "numeric"]} headings={["Country", "Checks"]} rows={data.topCountries} increasedTableDensity />
+                    </div>
                   ) : <Text as="p" tone="subdued">No country data yet.</Text>}
-                  <Text as="p" tone="subdued" variant="bodySm">Rankings use the latest {data.sampleSize} checks.</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Rankings use the latest {data.sampleSize} checks. Regions are masked, e.g. 400***.</Text>
                 </BlockStack>
               </Card>
             </BlockStack>

@@ -1,5 +1,3 @@
-import { createHash, randomBytes } from "node:crypto";
-
 export const HEADLESS_READ_SCOPES = [
   "delivery:check",
   "delivery:estimate",
@@ -10,19 +8,13 @@ export const HEADLESS_READ_SCOPES = [
 export type HeadlessReadScope = (typeof HEADLESS_READ_SCOPES)[number];
 
 export function hashHeadlessToken(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("hex");
-}
-
-export function generateHeadlessToken(type: "public" | "private") {
-  if (type !== "public" && type !== "private") {
-    throw new Error("Token type must be public or private.");
+  // Browser-safe fallback (tests / client). Server uses headless-tokens.server.ts with node:crypto.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < token.length; i++) {
+    hash ^= token.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
-  const token = `hdt_${type}_${randomBytes(32).toString("base64url")}`;
-  return {
-    token,
-    tokenHash: hashHeadlessToken(token),
-    tokenPrefix: token.slice(0, `hdt_${type}_`.length + 8),
-  };
+  return `fallback-${(hash >>> 0).toString(16)}`;
 }
 
 export function normalizeAllowedOrigins(raw: string): string[] {

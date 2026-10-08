@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
-import { hashHeadlessToken, type HeadlessReadScope } from "../utils/headless-tokens";
+import { type HeadlessReadScope } from "../utils/headless-tokens";
+import { hashHeadlessToken } from "../utils/headless-tokens.server";
 import { HeadlessRequestError, parseHeadlessDeliveryInput } from "../utils/headless-request";
 import { validatePostalCode } from "../utils/delivery.server";
 import { parseProductEstimateBatch } from "../utils/targeting.server";

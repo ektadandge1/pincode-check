@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { generateHeadlessToken, hashHeadlessToken, HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes, storedAllowedOriginsLabel } from "../app/utils/headless-tokens.ts";
+import { HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes, storedAllowedOriginsLabel } from "../app/utils/headless-tokens.ts";
+import { generateHeadlessToken, hashHeadlessToken } from "../app/utils/headless-tokens.server.ts";
 
 test("tokens contain 256 random bits, safe prefixes, and only SHA-256 hashes", () => {
   for (const type of ["public", "private"]) {
