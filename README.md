@@ -57,7 +57,7 @@ is used.
 ## Production Setup
 
 1. Use `.env.example` as a development template, not a ready production configuration. Set real deployment values and run `node scripts/check-env.mjs` in the production environment. `npm run env:check` also loads the local `.env` if present; do not use a developer `.env` for release validation.
-2. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_TEST=false`, `SHOPIFY_BILLING_REQUIRED=true`, and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset). Runtime billing rejects unsafe production flags. Use a separate non-production installation with test billing for development/review test charges; never enable a bypass on the public production deployment.
+2. Configure the Standard plan and 7-day trial with Shopify App Pricing in the Partner Dashboard. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true`, and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset). Set the plan welcome link to `/app/plans`; never enable a billing bypass on the public production deployment.
 3. Replace the `https://example.com` application and redirect URLs in `shopify.app.toml` with the production HTTPS domain.
 4. Provision durable database storage. The current Prisma schema requires SQLite: use an absolute `file:` path on a persistent writable volume, one application instance, and tested backups/restore. A passing environment check cannot verify any of these. Relative and temporary/development paths produce warnings, not evidence of durability.
 5. Run `npm run setup` in production to generate Prisma Client and apply migrations.

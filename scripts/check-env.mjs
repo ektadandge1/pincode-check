@@ -4,7 +4,7 @@ const warnings = [];
 const env = process.env;
 const required = [
   "NODE_ENV", "APP_ENV", "DATABASE_URL", "SHOPIFY_API_KEY", "SHOPIFY_API_SECRET",
-  "SHOPIFY_APP_URL", "SHOPIFY_APP_HANDLE", "SHOPIFY_BILLING_TEST",
+  "SHOPIFY_APP_URL", "SHOPIFY_APP_HANDLE",
   "SHOPIFY_BILLING_REQUIRED", "SCOPES", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME",
 ];
 
@@ -14,7 +14,7 @@ for (const name of required) {
 for (const name of ["NODE_ENV", "APP_ENV"]) {
   if (env[name] !== "production") errors.push(`${name} must be production.`);
 }
-for (const [name, expected] of [["SHOPIFY_BILLING_TEST", "false"], ["SHOPIFY_BILLING_REQUIRED", "true"]]) {
+for (const [name, expected] of [["SHOPIFY_BILLING_REQUIRED", "true"]]) {
   if (env[name]?.trim().toLowerCase() !== expected) errors.push(`${name} must be ${expected} in production.`);
 }
 if (env.SHOPIFY_BILLING_DEV_BYPASS !== undefined && env.SHOPIFY_BILLING_DEV_BYPASS.trim().toLowerCase() !== "false") {

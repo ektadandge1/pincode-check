@@ -10,13 +10,13 @@ Do not submit the app while any item below is incomplete:
 
 - Replace every `https://example.com` value in `shopify.app.toml` with the final HTTPS domain.
 - Host the web process and database on durable production infrastructure. The repository defaults to SQLite for local development; a container without a persistent volume will lose sessions and merchant data.
-- Replace development values from `.env.example`, including real support email/legal identity. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_TEST=false`, `SHOPIFY_BILLING_REQUIRED=true` and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset).
+- Replace development values from `.env.example`, including real support email/legal identity. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true` and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset).
 - Run `npm run env:check`, `npm run setup`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `shopify app build` successfully.
 - Verify install, reinstall, and uninstall flows in Chrome incognito mode.
 - Verify all three mandatory privacy webhook topics against the production endpoint.
 - Test Standard plan approval, duplicate-submit protection, cancellation, trial,
   reinstall, and billing return redirects through the Shopify Billing API.
-- Set `SHOPIFY_BILLING_TEST=false` only in the production public or unlisted app
+- Configure the Standard plan, $9 monthly price, 7-day trial, and `/app/plans` welcome link in Shopify App Pricing
   environment. Separate non-production development/review test installations use test billing with no bypass while exercising paid flows; do not change the public production flags for review.
 - Add the theme app block to a test product template and test desktop and mobile storefront behavior.
 - Measure storefront Lighthouse performance before and after enabling the app block. The reduction must remain within Shopify's current App Store requirement.
@@ -121,7 +121,7 @@ Analytics displays shortened postal regions and stores product and variant IDs. 
 - Three to six screenshots uploaded at 1600 x 900.
 - Demo screencast in English or with English subtitles.
 - Standard is configured in the app as $9 USD every 30 days with a 7-day trial.
-- Production uses `SHOPIFY_BILLING_TEST=false`; development uses test billing.
+- Shopify App Pricing hosts plan selection, approval, trial handling, and development-store no-charge testing.
 - Billing is required in production with `SHOPIFY_BILLING_REQUIRED=true`.
 - No screenshot, icon, app details, or feature-list text includes pricing.
 

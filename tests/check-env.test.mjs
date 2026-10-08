@@ -10,7 +10,7 @@ const fixture = {
   DATABASE_URL: "file:/data/incode.sqlite",
   SHOPIFY_API_KEY: "fixture-client-id", SHOPIFY_API_SECRET: "fixture-secret-not-real",
   SHOPIFY_APP_URL: "https://incode.fixture-shop.dev", SHOPIFY_APP_HANDLE: "incode-track",
-  SHOPIFY_BILLING_TEST: "false", SHOPIFY_BILLING_REQUIRED: "true",
+  SHOPIFY_BILLING_REQUIRED: "true",
   SCOPES: "read_products,read_inventory,read_locations,read_orders,write_app_proxy",
   SUPPORT_EMAIL: "support@fixture-shop.dev", LEGAL_BUSINESS_NAME: "Fixture Business",
 };
@@ -41,7 +41,6 @@ test("every required production setting fails when absent", () => {
 test("rejects unsafe billing, environment markers and unused permissions", () => {
   for (const overrides of [
     { NODE_ENV: "development" }, { APP_ENV: "development" },
-    { SHOPIFY_BILLING_TEST: "true" }, { SHOPIFY_BILLING_TEST: "yes" },
     { SHOPIFY_BILLING_REQUIRED: "false" }, { SHOPIFY_BILLING_DEV_BYPASS: "true" },
     { SHOPIFY_BILLING_DEV_BYPASS: "yes" },
     ...["read_shipping", "write_orders"].map((scope) => ({ SCOPES: `${fixture.SCOPES},${scope}` })),

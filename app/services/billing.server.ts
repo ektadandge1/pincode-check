@@ -3,12 +3,11 @@ import {
   authenticate,
   STANDARD_PLAN,
 } from "../shopify.server";
-import { isBillingRequired, isBillingTestMode } from "./billing-config.server";
+import { isBillingRequired } from "./billing-config.server";
 
-export { isBillingRequired, isBillingTestMode } from "./billing-config.server";
+export { isBillingRequired } from "./billing-config.server";
 
 type AdminAuthContext = Awaited<ReturnType<typeof authenticate.admin>>;
-type BillingContext = AdminAuthContext["billing"];
 type AdminClient = AdminAuthContext["admin"];
 
 export type ActiveAppSubscription = {
@@ -21,24 +20,10 @@ export type ActiveAppSubscription = {
   currentPeriodEnd: string;
 };
 
-type BillingSource = BillingContext | AdminClient;
-
-function isBillingContext(source: BillingSource): source is BillingContext {
-  return "check" in source;
-}
-
 export async function getActiveAppSubscriptions(
-  source: BillingSource,
+  admin: AdminClient,
 ): Promise<ActiveAppSubscription[]> {
-  if (isBillingContext(source)) {
-    const { appSubscriptions } = await source.check({
-      plans: [STANDARD_PLAN],
-      isTest: isBillingTestMode(),
-    });
-    return appSubscriptions.filter((subscription) => subscription.status === "ACTIVE");
-  }
-
-  const response = await source.graphql(`#graphql
+  const response = await admin.graphql(`#graphql
     query ActiveAppSubscriptions {
       currentAppInstallation {
         activeSubscriptions {
@@ -64,13 +49,12 @@ export async function getActiveAppSubscriptions(
   return (payload.data?.currentAppInstallation?.activeSubscriptions ?? []).filter(
     (subscription) =>
       subscription.name === STANDARD_PLAN &&
-      subscription.status === "ACTIVE" &&
-      (isBillingTestMode() || !subscription.test),
+      subscription.status === "ACTIVE",
   );
 }
 
-export async function hasActiveBilling(source: BillingSource): Promise<boolean> {
-  return (await getActiveAppSubscriptions(source)).length > 0;
+export async function hasActiveBilling(admin: AdminClient): Promise<boolean> {
+  return (await getActiveAppSubscriptions(admin)).length > 0;
 }
 
 export async function requireActiveBilling(
@@ -78,7 +62,7 @@ export async function requireActiveBilling(
   options: { api?: boolean } = {},
 ): Promise<AdminAuthContext> {
   const context = await authenticate.admin(request);
-  if (!isBillingRequired() || await hasActiveBilling(context.billing)) return context;
+  if (!isBillingRequired() || await hasActiveBilling(context.admin)) return context;
 
   if (options.api) {
     throw context.cors(Response.json(

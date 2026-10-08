@@ -6,12 +6,6 @@ function envFlag(name: string, defaultValue: boolean): boolean {
   throw new Error(`${name} must be either "true" or "false".`);
 }
 
-export function isBillingTestMode(): boolean {
-  assertProductionBilling();
-  // Safe by default: real charges require an explicit opt-in.
-  return envFlag("SHOPIFY_BILLING_TEST", true);
-}
-
 export function isBillingRequired(): boolean {
   assertProductionBilling();
   if (
@@ -26,9 +20,6 @@ export function isBillingRequired(): boolean {
 
 function assertProductionBilling(): void {
   if (process.env.NODE_ENV !== "production" && process.env.APP_ENV !== "production") return;
-  if (process.env.SHOPIFY_BILLING_TEST?.trim().toLowerCase() !== "false") {
-    throw new Error("SHOPIFY_BILLING_TEST must be explicitly false in production.");
-  }
   if (process.env.SHOPIFY_BILLING_REQUIRED?.trim().toLowerCase() !== "true") {
     throw new Error("SHOPIFY_BILLING_REQUIRED must be explicitly true in production.");
   }
