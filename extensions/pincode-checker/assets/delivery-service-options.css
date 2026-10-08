@@ -113,3 +113,73 @@
 .incode-service-card .incode-service-card__location { color: #667085; overflow-wrap: anywhere; }
 .incode-service-card .incode-service-card__pickup-copy { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .incode-service-card .incode-service-card__eta > b { white-space: normal; }
+
+[data-template="service-tabs"] { box-sizing: border-box; width: min(100%, 410px); margin: 18px auto; padding: 16px; border: 1px solid rgba(28, 35, 42, .09); border-radius: 16px; background: #fff; box-shadow: 0 12px 32px rgba(20, 24, 28, .08); color: #17191c; font: inherit; font-size: 14px; line-height: 1.45; letter-spacing: normal; container-type: inline-size; }
+[data-template="service-tabs"] * { box-sizing: border-box; }
+[data-template="service-tabs"] [hidden] { display: none !important; }
+[data-template="service-tabs"] .ist-sr { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+[data-template="service-tabs"] fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+[data-template="service-tabs"] .ist-services { display: flex; gap: 8px; margin: 0 0 14px; }
+[data-template="service-tabs"] .ist-services label { position: relative; flex: 1 1 0; min-width: 0; margin: 0; cursor: pointer; }
+[data-template="service-tabs"] .ist-services input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+[data-template="service-tabs"] .ist-services span { display: flex; height: 100px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 8px 3px; border: 1px solid #d8dadd; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(20, 24, 28, .06); color: #17191c; text-align: center; font-size: 13px; font-weight: 600; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+[data-template="service-tabs"] .ist-services label:hover span { border-color: #b8bdc3; box-shadow: 0 5px 15px rgba(20, 24, 28, .09); transform: translateY(-1px); }
+[data-template="service-tabs"] .ist-services input:checked + span { border-color: #b8c4d2; background: #f1f4f7; box-shadow: 0 3px 10px rgba(31, 48, 68, .09); }
+[data-template="service-tabs"] .ist-services input:focus-visible + span { outline: 2px solid #1d4e73; outline-offset: 2px; }
+[data-template="service-tabs"] svg { width: 26px; height: 26px; flex-shrink: 0; fill: none; stroke: #000; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+[data-template="service-tabs"] .ist-services svg { width: 38px; height: 38px; }
+[data-template="service-tabs"] [data-service-fallback] { display: flex; gap: 8px; margin-bottom: 14px; }
+[data-template="service-tabs"] [data-service-fallback] b { flex: 1; padding: 18px 4px; border: 1px solid #d8dadd; border-radius: 10px; text-align: center; font-size: 13px; }
+[data-template="service-tabs"][data-show-pickup="false"] [data-fallback-pickup], [data-template="service-tabs"][data-show-local="false"] [data-fallback-local] { display: none; }
+[data-template="service-tabs"] .ist-helper { margin: 0 0 16px; color: #59616a; text-align: center; font-size: 13px; }
+[data-template="service-tabs"] label { display: block; margin: 10px 0; }
+[data-template="service-tabs"] input:not([type="radio"]), [data-template="service-tabs"] select { width: 100%; min-width: 0; height: 42px; margin: 0; padding: 8px 11px; border: 1px solid #d3d6da; border-radius: 8px; background: #fff; color: #25282c; font: inherit; }
+[data-template="service-tabs"] button { min-height: 42px; padding: 8px 14px; border: 1px solid #c9cdd2; border-radius: 8px; background: #fff; color: #17191c; font: inherit; cursor: pointer; }
+[data-template="service-tabs"] button:disabled { cursor: wait; opacity: .55; }
+[data-template="service-tabs"] :is(button, input, select):focus-visible { outline: 2px solid #1d4e73; outline-offset: 2px; }
+[data-template="service-tabs"] .ist-locations > div { height: 180px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid #d9dcdf; border-radius: 10px; background: #fff; box-shadow: 0 2px 9px rgba(20, 24, 28, .05); }
+[data-template="service-tabs"] .ist-location { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; margin: 0; padding: 12px; border-bottom: 1px solid #e7e9eb; overflow-wrap: anywhere; color: #59616a; cursor: pointer; }
+[data-template="service-tabs"] .ist-location:last-child { border-bottom: 0; }
+[data-template="service-tabs"] .ist-location:has(input:checked) { background: #f3f6f8; }
+[data-template="service-tabs"] .ist-location input { grid-column: 1; grid-row: 2; align-self: center; width: 16px; height: 16px; margin: 0; accent-color: #1d5f8a; }
+[data-template="service-tabs"] .ist-location > span { display: contents; }
+[data-template="service-tabs"] .ist-location strong, [data-template="service-tabs"] .ist-location small { display: block; grid-column: 2; font-size: 13px; }
+[data-template="service-tabs"] .ist-location strong { grid-row: 1; padding-bottom: 3px; color: #17191c; font-weight: 700; }
+[data-template="service-tabs"] .ist-empty { display: grid; height: 100%; place-items: center; padding: 22px; background: #fafafa; color: #687079; text-align: center; font-size: 13px; }
+[data-template="service-tabs"] .ist-retry { min-height: 0; margin: 7px 2px 0; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: #315f7e; text-decoration: underline; text-underline-offset: 3px; }
+[data-template="service-tabs"] .ist-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+[data-template="service-tabs"] .ist-columns label { margin: 0; }
+[data-template="service-tabs"] .ist-search { display: flex; align-items: center; overflow: hidden; min-height: 44px; border: 1px solid #d4d9df; border-radius: 12px; padding-left: 13px; background: #fff; box-shadow: 0 3px 12px rgba(24, 39, 55, .07); transition: border-color .18s ease, box-shadow .18s ease; }
+[data-template="service-tabs"] .ist-search:focus-within { border-color: #397da8; box-shadow: 0 0 0 3px rgba(57, 125, 168, .13), 0 5px 16px rgba(24, 39, 55, .08); }
+[data-template="service-tabs"] .ist-search svg { width: 18px; height: 18px; stroke: #2875a5; }
+[data-template="service-tabs"] .ist-search input { flex: 1 1 auto; height: 42px; padding: 8px 10px; border: 0 !important; border-radius: 0; outline: 0 !important; background: #fff; box-shadow: none !important; -webkit-appearance: none; appearance: none; }
+[data-template="service-tabs"] .ist-search input:focus-visible { outline: 0; }
+[data-template="service-tabs"] .ist-search input:-webkit-autofill, [data-template="service-tabs"] .ist-search input:-webkit-autofill:hover, [data-template="service-tabs"] .ist-search input:-webkit-autofill:focus { border: 0 !important; -webkit-text-fill-color: #25282c; -webkit-box-shadow: 0 0 0 1000px #fff inset !important; box-shadow: 0 0 0 1000px #fff inset !important; caret-color: #25282c; }
+[data-template="service-tabs"] .ist-search button { display: grid; width: 36px; min-width: 36px; min-height: 36px; margin-right: 4px; place-items: center; padding: 0; border: 0 !important; border-radius: 50%; outline: 0; background: transparent; box-shadow: none !important; color: #69727c; font-size: 20px; line-height: 1; transition: background .16s ease, color .16s ease; }
+[data-template="service-tabs"] .ist-search button:hover { background: #eef3f6; color: #1f2b34; }
+[data-template="service-tabs"] .ist-search button:focus-visible { outline: 2px solid #397da8; outline-offset: -2px; }
+[data-template="service-tabs"] .ist-pickup-postal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; margin-bottom: 10px; }
+[data-template="service-tabs"] .ist-pickup-postal label { margin: 0; }
+[data-template="service-tabs"] .ist-suggestions { margin-top: 8px; overflow: hidden; border: 1px solid #d8dcdf; border-radius: 10px; background: #fff; box-shadow: 0 7px 20px rgba(20, 24, 28, .08); }
+[data-template="service-tabs"] .ist-suggestion { display: grid; width: 100%; min-height: 62px; grid-template-columns: 26px minmax(0, 1fr); gap: 11px; align-items: center; border: 0; border-radius: 0; background: #fff; text-align: left; }
+[data-template="service-tabs"] .ist-suggestion:hover { background: #f6f8f9; }
+[data-template="service-tabs"] .ist-suggestion__pin { color: #1d5f8a; text-align: center; }
+[data-template="service-tabs"] .ist-suggestion__pin svg { width: 22px; height: 22px; stroke: currentColor; }
+[data-template="service-tabs"] .ist-suggestion strong, [data-template="service-tabs"] .ist-suggestion small { display: block; }
+[data-template="service-tabs"] .ist-suggestion small { margin-top: 2px; color: #687079; }
+[data-template="service-tabs"] .ist-result-status, [data-template="service-tabs"] [data-status] { margin: 8px 0 0; padding: 0; border: 0; border-radius: 8px; background: transparent; font-size: 12px; }
+[data-template="service-tabs"] :is(.ist-result-status, [data-status]):empty { display: none; }
+[data-template="service-tabs"] :is(.ist-result-status, [data-status])[data-state="loading"] { color: #59616a; }
+[data-template="service-tabs"] :is(.ist-result-status, [data-status])[data-state="error"] { padding: 9px 11px; background: #fff1f1; color: #9f2020; }
+[data-template="service-tabs"] :is(.ist-result-status, [data-status])[data-state="success"] { padding: 9px 11px; background: #edf8f1; color: #12653b; }
+[data-template="service-tabs"] .ist-error { display: block; margin-top: 4px; color: #a21b1b; font-size: 12px; }
+[data-template="service-tabs"] [aria-invalid="true"] { border-color: #b72d2d; }
+[data-template="service-tabs"] [data-country] { display: none !important; }
+[data-template="service-tabs"] [data-pickup-details] { margin-top: 12px; }
+[data-template="service-tabs"] [data-pickup-details] > label { margin: 10px 0; }
+[data-template="service-tabs"] [data-panel="shipping"] { min-height: 1px; }
+[data-template="service-tabs"][data-surface="cart"][data-checkout-placement="true"] { width: 100%; margin: 0 auto 14px; }
+@container (max-width: 340px) { [data-template="service-tabs"] .ist-columns { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 310px) { [data-template="service-tabs"] .ist-services { gap: 5px; } [data-template="service-tabs"] .ist-services span { height: 90px; font-size: 12px; } [data-template="service-tabs"] .ist-services svg { width: 32px; height: 32px; } }
+@media (max-width: 420px) { [data-template="service-tabs"] { margin: 12px auto; padding: 12px; border-radius: 13px; } }
+@media (prefers-reduced-motion: reduce) { [data-template="service-tabs"] .ist-services span { transition: none; } }

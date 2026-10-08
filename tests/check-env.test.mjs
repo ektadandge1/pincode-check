@@ -11,7 +11,7 @@ const fixture = {
   SHOPIFY_API_KEY: "fixture-client-id", SHOPIFY_API_SECRET: "fixture-secret-not-real",
   SHOPIFY_APP_URL: "https://incode.fixture-shop.dev", SHOPIFY_APP_HANDLE: "incode-track",
   SHOPIFY_BILLING_TEST: "false", SHOPIFY_BILLING_REQUIRED: "true",
-  SCOPES: "read_products,read_inventory,read_locations,write_app_proxy",
+  SCOPES: "read_products,read_inventory,read_locations,read_orders,write_app_proxy",
   SUPPORT_EMAIL: "support@fixture-shop.dev", LEGAL_BUSINESS_NAME: "Fixture Business",
 };
 function check(overrides = {}) {
@@ -44,8 +44,8 @@ test("rejects unsafe billing, environment markers and unused permissions", () =>
     { SHOPIFY_BILLING_TEST: "true" }, { SHOPIFY_BILLING_TEST: "yes" },
     { SHOPIFY_BILLING_REQUIRED: "false" }, { SHOPIFY_BILLING_DEV_BYPASS: "true" },
     { SHOPIFY_BILLING_DEV_BYPASS: "yes" },
-    ...["read_shipping", "read_orders", "write_orders"].map((scope) => ({ SCOPES: `${fixture.SCOPES},${scope}` })),
-    ...["read_products", "read_inventory", "read_locations", "write_app_proxy"].map((scope) => ({ SCOPES: fixture.SCOPES.split(",").filter((value) => value !== scope).join(",") })),
+    ...["read_shipping", "write_orders"].map((scope) => ({ SCOPES: `${fixture.SCOPES},${scope}` })),
+    ...["read_products", "read_inventory", "read_locations", "read_orders", "write_app_proxy"].map((scope) => ({ SCOPES: fixture.SCOPES.split(",").filter((value) => value !== scope).join(",") })),
   ]) assert.equal(check(overrides).status, 1, JSON.stringify(overrides));
   assert.equal(check({ SHOPIFY_BILLING_DEV_BYPASS: "false" }).status, 0);
 });

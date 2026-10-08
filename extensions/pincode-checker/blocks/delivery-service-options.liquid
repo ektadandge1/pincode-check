@@ -1,329 +1,347 @@
 {% liquid
-  assign service_id = block.id | replace: '-', ''
-   assign service_country = localization.country.iso_code | default: 'US'
-   assign service_postal = ''
-    if localization.available_countries.size > 0
-      assign country_available = false
-      for country in localization.available_countries
-        if country.iso_code == service_country
-          assign country_available = true
-        endif
-      endfor
-      unless country_available
-        assign service_country = localization.available_countries.first.iso_code
-      endunless
-    endif
-    if customer and customer.default_address
-      assign saved_country = customer.default_address.country_code
-      for country in localization.available_countries
-        if country.iso_code == saved_country
-          assign service_country = saved_country
-          assign service_postal = customer.default_address.zip | default: ''
-          break
-        endif
-      endfor
-    endif
-  assign service_product_id = product.id | default: ''
-  assign service_cart_items = '[]'
-  if template.name == 'cart' and cart.item_count > 0
-    capture service_cart_items_inner
-      for item in cart.items limit: 20
-        unless forloop.first
-          echo ','
-        endunless
-        assign service_variant_gid = item.variant_id | prepend: 'gid://shopify/ProductVariant/'
-        echo '{"productId":'
-        echo item.product_id | json
-        echo ',"variantId":'
-        echo service_variant_gid | json
-        echo ',"quantity":'
-        echo item.quantity | json
-        echo '}'
-      endfor
-    endcapture
-    assign service_cart_items = service_cart_items_inner | prepend: '[' | append: ']'
-  endif
-  assign service_empty_cart = false
-  if template.name == 'cart' and cart.item_count == 0
-    assign service_empty_cart = true
-  endif
+assign service_id = block.id | replace: '-', ''
+assign service_layout = block.settings.layout | default: 'service-tabs'
+assign service_country = localization.country.iso_code | default: 'US'
+assign service_postal = ''
+assign service_saved_postal = ''
+assign service_saved_country = ''
+assign service_saved_address = ''
+if localization.available_countries.size > 0
+assign country_available = false
+for country in localization.available_countries
+if country.iso_code == service_country
+assign country_available = true
+endif
+endfor
+unless country_available
+assign service_country = localization.available_countries.first.iso_code
+endunless
+endif
+if customer and customer.default_address
+assign saved_country = customer.default_address.country_code
+assign service_saved_country = saved_country | default: ''
+assign service_saved_postal = customer.default_address.zip | default: ''
+assign service_saved_address = customer.default_address | format_address | replace: '<br>', ', ' | replace: '<br/>', ', ' | replace: '<br />', ', ' | strip_html | strip_newlines
+for country in localization.available_countries
+if country.iso_code == saved_country
+assign service_country = saved_country
+assign service_postal = service_saved_postal
+break
+endif
+endfor
+endif
+assign service_product_id = product.id | default: ''
+assign service_cart_items = '[]'
+if template.name == 'cart' and cart.item_count > 0
+capture service_cart_items_inner
+for item in cart.items limit: 20
+unless forloop.first
+echo ','
+endunless
+assign service_variant_gid = item.variant_id | prepend: 'gid://shopify/ProductVariant/'
+echo '{"productId":'
+echo item.product_id | json
+echo ',"variantId":'
+echo service_variant_gid | json
+echo ',"quantity":'
+echo item.quantity | json
+echo '}'
+endfor
+endcapture
+assign service_cart_items = service_cart_items_inner | prepend: '[' | append: ']'
+endif
+assign service_empty_cart = false
+if template.name == 'cart' and cart.item_count == 0
+assign service_empty_cart = true
+endif
 %}
 
 {% if service_empty_cart %}
-  {% if request.design_mode %}
-    <div class="incode-service-card incode-service-card--empty" {{ block.shopify_attributes }}>
-      <div class="incode-service-card__empty-icon" aria-hidden="true">&#128230;</div>
-      <div>
-        <strong>Local delivery & pickup</strong>
-        <span>This block appears when the cart contains a product.</span>
-      </div>
-    </div>
-  {% endif %}
+{% if request.design_mode %}
+<div class="incode-service-card incode-service-card--empty" {{ block.shopify_attributes }}>
+<div class="incode-service-card__empty-icon" aria-hidden="true">&#128230;</div>
+<div>
+<strong>Local delivery & pickup</strong>
+<span>This block appears when the cart contains a product.</span>
+</div>
+</div>
+{% endif %}
+{% elsif service_layout == 'service-tabs' %}
+<div id="incode-service-tabs-{{ service_id }}" data-template="service-tabs" data-surface="{{ template.name | escape }}" data-product-id="{{ service_product_id | escape }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-show-pickup="{{ block.settings.show_store_pickup }}" data-show-local="{{ block.settings.show_local_delivery }}" data-pickup-display="{{ block.settings.pickup_display | default: 'all' | escape }}" data-saved-postal="{{ service_saved_postal | escape }}" data-saved-country="{{ service_saved_country | escape }}" data-saved-address="{{ service_saved_address | escape }}" {{ block.shopify_attributes }}>
+<div data-service-fallback><b>Shipping</b><b data-fallback-pickup>Store Pickup</b><b data-fallback-local>Delivery</b></div>
+<select data-country hidden>{% for country in localization.available_countries %}<option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }}</option>{% else %}<option value="{{ service_country | escape }}">{{ service_country | escape }}</option>{% endfor %}</select>
+</div>
 {% else %}
-  <div
-    id="incode-service-card-{{ service_id }}"
-    class="incode-service-card"
-    data-product-id="{{ service_product_id | escape }}"
-    data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
-    data-country="{{ service_country | escape }}"
-    data-show-local="{{ block.settings.show_local_delivery }}"
-    data-show-pickup="{{ block.settings.show_store_pickup }}"
-    data-show-eta="{{ block.settings.show_estimated_delivery }}"
-    data-icon-style="{{ block.settings.icon_style }}"
-    data-effect="{{ block.settings.effect }}"
-    data-saved-postal="{{ service_postal | escape }}"
-    data-surface="{{ template.name | escape }}"
-    {{ block.shopify_attributes }}
-  >
-    <div class="incode-service-card__intro">
-      <span class="incode-service-card__intro-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-      </span>
-      <div>
-        <h3>{{ block.settings.heading | default: 'Check delivery options' | escape }}</h3>
-        <p>{{ block.settings.supporting_text | default: 'Enter your PIN or ZIP code to check local delivery and store pickup.' | escape }}</p>
-      </div>
-    </div>
+<div
+id="incode-service-card-{{ service_id }}"
+class="incode-service-card"
+data-product-id="{{ service_product_id | escape }}"
+data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
+data-country="{{ service_country | escape }}"
+data-show-local="{{ block.settings.show_local_delivery }}"
+data-show-pickup="{{ block.settings.show_store_pickup }}"
+data-show-eta="{{ block.settings.show_estimated_delivery }}"
+data-icon-style="{{ block.settings.icon_style }}"
+data-effect="{{ block.settings.effect }}"
+data-saved-postal="{{ service_postal | escape }}"
+data-surface="{{ template.name | escape }}"
+{{ block.shopify_attributes }}
+>
+<div class="incode-service-card__intro">
+<span class="incode-service-card__intro-icon" aria-hidden="true">
+<svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+</span>
+<div>
+<h3>{{ block.settings.heading | default: 'Check delivery options' | escape }}</h3>
+<p>{{ block.settings.supporting_text | default: 'Enter your PIN or ZIP code to check local delivery and store pickup.' | escape }}</p>
+</div>
+</div>
 
-    <div class="incode-service-card__form">
-      <div class="incode-service-card__country">
-        <span data-service-flag aria-hidden="true"></span>
-        <label class="incode-service-card__sr-only" for="incode-service-country-{{ service_id }}">Country</label>
-        <select id="incode-service-country-{{ service_id }}" aria-label="Select country">
-          {% for country in localization.available_countries %}
-            <option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }} ({{ country.iso_code | escape }})</option>
-          {% else %}
-            <option value="{{ service_country | escape }}" selected>{{ service_country | escape }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <label class="incode-service-card__sr-only" for="incode-service-postal-{{ service_id }}">PIN or ZIP code</label>
-      <input id="incode-service-postal-{{ service_id }}" type="text" inputmode="text" autocomplete="postal-code" value="{{ service_postal | escape }}" placeholder="Enter PIN / ZIP code" aria-label="Enter PIN or ZIP code">
-      <button type="button">{{ block.settings.button_label | default: 'Check availability' | escape }}</button>
-    </div>
-    {% if service_postal != blank %}
-      <p class="incode-service-card__saved">Using saved address: <strong>{{ service_postal | escape }}</strong></p>
-    {% endif %}
+<div class="incode-service-card__form">
+<div class="incode-service-card__country">
+<span data-service-flag aria-hidden="true"></span>
+<label class="incode-service-card__sr-only" for="incode-service-country-{{ service_id }}">Country</label>
+<select id="incode-service-country-{{ service_id }}" aria-label="Select country">
+{% for country in localization.available_countries %}
+<option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }} ({{ country.iso_code | escape }})</option>
+{% else %}
+<option value="{{ service_country | escape }}" selected>{{ service_country | escape }}</option>
+{% endfor %}
+</select>
+</div>
+<label class="incode-service-card__sr-only" for="incode-service-postal-{{ service_id }}">PIN or ZIP code</label>
+<input id="incode-service-postal-{{ service_id }}" type="text" inputmode="text" autocomplete="postal-code" value="{{ service_postal | escape }}" placeholder="Enter PIN / ZIP code" aria-label="Enter PIN or ZIP code">
+<button type="button">{{ block.settings.button_label | default: 'Check availability' | escape }}</button>
+</div>
+{% if service_postal != blank %}
+<p class="incode-service-card__saved">Using saved address: <strong>{{ service_postal | escape }}</strong></p>
+{% endif %}
 
-    <p class="incode-service-card__status" role="status" aria-live="polite"></p>
-    <div class="incode-service-card__result" hidden>
-      <div class="incode-service-card__result-head">
-        <span data-result-destination></span>
-        <b data-result-availability></b>
-      </div>
-      <div class="incode-service-card__eta" data-service-eta hidden>
-        <span class="incode-service-card__eta-icon" aria-hidden="true">&#8985;</span>
-        <div><strong>Estimated delivery</strong><small data-service-eta-copy></small></div>
-        <b data-service-eta-date></b>
-      </div>
-      <div class="incode-service-card__options">
-        <div data-service-local hidden>
-          <span class="incode-service-card__option-icon" data-service-kind="local" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg></span>
-          <span>Local delivery</span>
-          <b data-service-local-status></b>
-        </div>
-        <div data-service-pickup hidden>
-          <span class="incode-service-card__option-icon" data-service-kind="pickup" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10H3z"/><path d="M8 21v-6h8v6M7 10h10"/></svg></span>
-          <span>Store pickup</span>
-          <b data-service-pickup-status></b>
-        </div>
-      </div>
-      <small class="incode-service-card__location" data-service-location></small>
-      <p class="incode-service-card__pickup-copy" data-service-pickup-copy hidden></p>
-    </div>
-    <script type="application/json" data-service-cart-items>{{ service_cart_items }}</script>
-  </div>
+<p class="incode-service-card__status" role="status" aria-live="polite"></p>
+<div class="incode-service-card__result" hidden>
+<div class="incode-service-card__result-head">
+<span data-result-destination></span>
+<b data-result-availability></b>
+</div>
+<div class="incode-service-card__eta" data-service-eta hidden>
+<span class="incode-service-card__eta-icon" aria-hidden="true">&#8985;</span>
+<div><strong>Estimated delivery</strong><small data-service-eta-copy></small></div>
+<b data-service-eta-date></b>
+</div>
+<div class="incode-service-card__options">
+<div data-service-local hidden>
+<span class="incode-service-card__option-icon" data-service-kind="local" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg></span>
+<span>Local delivery</span>
+<b data-service-local-status></b>
+</div>
+<div data-service-pickup hidden>
+<span class="incode-service-card__option-icon" data-service-kind="pickup" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10H3z"/><path d="M8 21v-6h8v6M7 10h10"/></svg></span>
+<span>Store pickup</span>
+<b data-service-pickup-status></b>
+</div>
+</div>
+<small class="incode-service-card__location" data-service-location></small>
+<p class="incode-service-card__pickup-copy" data-service-pickup-copy hidden></p>
+</div>
+<script type="application/json" data-service-cart-items>{{ service_cart_items }}</script>
+</div>
 {% endif %}
 
 <link rel="stylesheet" href="{{ 'delivery-service-options.css' | asset_url }}">
 <style>
-  .incode-service-card [hidden] { display: none !important; }
-  #incode-service-card-{{ service_id }} {
-    --isc-accent: {{ block.settings.accent_color | default: '#1f4f91' }};
-    --isc-surface: {{ block.settings.background_color | default: '#ffffff' }};
-    --isc-option: {{ block.settings.option_background | default: '#fff8e8' }};
-    --isc-text: {{ block.settings.text_color | default: '#172033' }};
-    --isc-radius: {{ block.settings.corner_radius | default: 16 }}px;
-  }
+.incode-service-card [hidden] { display: none !important; }
+#incode-service-card-{{ service_id }} {
+--isc-accent: {{ block.settings.accent_color | default: '#1f4f91' }};
+--isc-surface: {{ block.settings.background_color | default: '#ffffff' }};
+--isc-option: {{ block.settings.option_background | default: '#fff8e8' }};
+--isc-text: {{ block.settings.text_color | default: '#172033' }};
+--isc-radius: {{ block.settings.corner_radius | default: 16 }}px;
+}
 </style>
 
 {% unless service_empty_cart %}
 <script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
+{% if service_layout == 'service-tabs' %}
+<script src="{{ 'delivery-service-options.js' | asset_url }}" defer></script>
+{% else %}
 <script>
-  (() => {
-    const initialize = () => {
-    const root = document.getElementById('incode-service-card-{{ service_id }}');
-    if (!root || !root.isConnected || root.dataset.initialized === 'true') return;
-    root.dataset.initialized = 'true';
-    const country = root.querySelector('select');
-    const postal = root.querySelector('input');
-    const button = root.querySelector('button');
-    const status = root.querySelector('.incode-service-card__status');
-    const result = root.querySelector('.incode-service-card__result');
-    const local = root.querySelector('[data-service-local]');
-    const pickup = root.querySelector('[data-service-pickup]');
-    const eta = root.querySelector('[data-service-eta]');
-    const cartItems = root.querySelector('[data-service-cart-items]');
-    let version = 0;
-    let active = null;
-    const invalidate = () => {
-      version += 1;
-      active?.abort();
-      active = null;
-      button.disabled = false;
-      result.hidden = true;
-      setStatus('', '');
-    };
-    const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
-    const rememberPostal = window.incodeThemeContext.postalHistory?.(root, postal, country, eventOptions);
+(() => {
+const initialize = () => {
+const root = document.getElementById('incode-service-card-{{ service_id }}');
+if (!root || !root.isConnected || root.dataset.initialized === 'true') return;
+root.dataset.initialized = 'true';
+const country = root.querySelector('select');
+const postal = root.querySelector('input');
+const button = root.querySelector('button');
+const status = root.querySelector('.incode-service-card__status');
+const result = root.querySelector('.incode-service-card__result');
+const local = root.querySelector('[data-service-local]');
+const pickup = root.querySelector('[data-service-pickup]');
+const eta = root.querySelector('[data-service-eta]');
+const cartItems = root.querySelector('[data-service-cart-items]');
+let version = 0;
+let active = null;
+const invalidate = () => {
+version += 1;
+active?.abort();
+active = null;
+button.disabled = false;
+result.hidden = true;
+setStatus('', '');
+};
+const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
+const rememberPostal = window.incodeThemeContext.postalHistory?.(root, postal, country, eventOptions);
 
-    const variantGid = () => {
-      return window.incodeThemeContext.productContext(root).variantId;
-    };
-    const quantity = () => {
-      return window.incodeThemeContext.productContext(root).quantity;
-    };
-    const flag = () => {
-      const code = String(country.value || '').toUpperCase();
-      root.querySelector('[data-service-flag]').textContent = /^[A-Z]{2}$/.test(code)
-        ? String.fromCodePoint(...[...code].map((character) => 127397 + character.charCodeAt(0)))
-        : '';
-    };
-    const params = () => {
-      const values = new URLSearchParams({ country: country.value, postal_code: postal.value.trim(), surface: root.dataset.surface || 'product' });
-      if (root.dataset.productId) values.set('productId', root.dataset.productId);
-      const variant = variantGid();
-      if (variant) values.set('variantId', variant);
-      values.set('qty', String(quantity()));
-      try {
-        const items = JSON.parse(cartItems?.textContent || '[]');
-        if (Array.isArray(items) && items.length) values.set('cartItems', JSON.stringify(items));
-      } catch { /* Invalid cart data is handled by the API. */ }
-      return values;
-    };
-    const setStatus = (copy, state) => {
-      status.textContent = copy;
-      if (state) status.dataset.state = state;
-      else delete status.dataset.state;
-    };
-    const render = (data) => {
-      result.hidden = false;
-      root.querySelector('[data-result-destination]').textContent = `Checked for ${data.postal_code || postal.value.trim()}`;
-      root.querySelector('[data-result-availability]').textContent = data.available ? '✓ Delivery available' : 'Delivery unavailable';
-      root.querySelector('[data-result-availability]').dataset.available = String(Boolean(data.available));
+const variantGid = () => {
+return window.incodeThemeContext.productContext(root).variantId;
+};
+const quantity = () => {
+return window.incodeThemeContext.productContext(root).quantity;
+};
+const flag = () => {
+const code = String(country.value || '').toUpperCase();
+root.querySelector('[data-service-flag]').textContent = /^[A-Z]{2}$/.test(code)
+? String.fromCodePoint(...[...code].map((character) => 127397 + character.charCodeAt(0)))
+: '';
+};
+const params = () => {
+const values = new URLSearchParams({ country: country.value, postal_code: postal.value.trim(), surface: root.dataset.surface || 'product' });
+if (root.dataset.productId) values.set('productId', root.dataset.productId);
+const variant = variantGid();
+if (variant) values.set('variantId', variant);
+values.set('qty', String(quantity()));
+try {
+const items = JSON.parse(cartItems?.textContent || '[]');
+if (Array.isArray(items) && items.length) values.set('cartItems', JSON.stringify(items));
+} catch {}
+return values;
+};
+const setStatus = (copy, state) => {
+status.textContent = copy;
+if (state) status.dataset.state = state;
+else delete status.dataset.state;
+};
+const render = (data) => {
+result.hidden = false;
+root.querySelector('[data-result-destination]').textContent = `Checked for ${data.postal_code || postal.value.trim()}`;
+root.querySelector('[data-result-availability]').textContent = data.available ? '✓ Delivery available' : 'Delivery unavailable';
+root.querySelector('[data-result-availability]').dataset.available = String(Boolean(data.available));
 
-      if (root.dataset.showEta === 'true' && data.available && data.estimated_date) {
-        eta.hidden = false;
-        root.querySelector('[data-service-eta-copy]').textContent = `${data.processing_days ?? 0} processing + ${data.transit_days ?? 0} transit days`;
-        root.querySelector('[data-service-eta-date]').textContent = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
-      } else eta.hidden = true;
+if (root.dataset.showEta === 'true' && data.available && data.estimated_date) {
+eta.hidden = false;
+root.querySelector('[data-service-eta-copy]').textContent = `${data.processing_days ?? 0} processing + ${data.transit_days ?? 0} transit days`;
+root.querySelector('[data-service-eta-date]').textContent = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';
+} else eta.hidden = true;
 
-      if (root.dataset.showLocal === 'true') {
-        local.hidden = false;
-        local.dataset.available = String(data.local_delivery_available === true);
-        root.querySelector('[data-service-local-status]').textContent = data.local_delivery_available === true ? 'Available' : 'Not available';
-      }
-      if (root.dataset.showPickup === 'true') {
-        pickup.hidden = false;
-        pickup.dataset.available = String(data.pickup_available === true);
-        root.querySelector('[data-service-pickup-status]').textContent = data.pickup_available === true ? 'Available' : 'Not available';
-      }
-      const locationCopy = data.fulfillment_location_name ? `Fulfilled from ${data.fulfillment_location_name}` : '';
-      root.querySelector('[data-service-location]').textContent = locationCopy;
-      const pickupCopy = root.querySelector('[data-service-pickup-copy]');
-      pickupCopy.hidden = !data.pickup_instructions;
-      pickupCopy.textContent = data.pickup_instructions || '';
-    };
-    const check = async () => {
-      invalidate();
-      const current = version;
-      const controller = new AbortController();
-      active = controller;
-      if (!postal.value.trim()) {
-        result.hidden = true;
-        setStatus('Enter a valid PIN or ZIP code.', 'error');
-        postal.focus();
-        return;
-      }
-      button.disabled = true;
-      result.hidden = true;
-      setStatus('Checking delivery options...', 'loading');
-      try {
-        const query = params();
-        if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
-        if (current !== version) return;
-        const response = await fetch(`/apps/delivery-checker?${query.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
-        const data = await response.json();
-        if (current !== version || !root.isConnected) return;
-        if (!response.ok) {
-          setStatus(data.message || 'Unable to check this PIN or ZIP code right now.', 'error');
-          return;
-        }
-        setStatus('', '');
-        if (data.available || data.local_delivery_available || data.pickup_available) rememberPostal?.(data.postal_code || postal.value);
-        render(data);
-      } catch (error) {
-        if (current !== version || error.name === 'AbortError') return;
-        setStatus('Network issue while checking delivery options. Please retry.', 'error');
-      } finally {
-        if (current === version) { button.disabled = false; active = null; }
-      }
-    };
-    button.addEventListener('click', check, eventOptions);
-    postal.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); check(); } }, eventOptions);
-    postal.addEventListener('input', invalidate, eventOptions);
-    country.addEventListener('change', () => { invalidate(); flag(); }, eventOptions);
-    flag();
-    if (root.dataset.savedPostal && postal.value.trim() === root.dataset.savedPostal) check();
-    };
-    if (window.incodeThemeContext) initialize();
-    else {
-      const ready = () => {
-        if (!window.incodeThemeContext) return;
-        document.removeEventListener('incode:theme-context-ready', ready);
-        document.removeEventListener('DOMContentLoaded', ready);
-        initialize();
-      };
-      document.addEventListener('incode:theme-context-ready', ready);
-      document.addEventListener('DOMContentLoaded', ready, { once: true });
-    }
-  })();
+if (root.dataset.showLocal === 'true') {
+local.hidden = false;
+local.dataset.available = String(data.local_delivery_available === true);
+root.querySelector('[data-service-local-status]').textContent = data.local_delivery_available === true ? 'Available' : 'Not available';
+}
+if (root.dataset.showPickup === 'true') {
+pickup.hidden = false;
+pickup.dataset.available = String(data.pickup_available === true);
+root.querySelector('[data-service-pickup-status]').textContent = data.pickup_available === true ? 'Available' : 'Not available';
+}
+const locationCopy = data.fulfillment_location_name ? `Fulfilled from ${data.fulfillment_location_name}` : '';
+root.querySelector('[data-service-location]').textContent = locationCopy;
+const pickupCopy = root.querySelector('[data-service-pickup-copy]');
+pickupCopy.hidden = !data.pickup_instructions;
+pickupCopy.textContent = data.pickup_instructions || '';
+};
+const check = async () => {
+invalidate();
+const current = version;
+const controller = new AbortController();
+active = controller;
+if (!postal.value.trim()) {
+result.hidden = true;
+setStatus('Enter a valid PIN or ZIP code.', 'error');
+postal.focus();
+return;
+}
+button.disabled = true;
+result.hidden = true;
+setStatus('Checking delivery options...', 'loading');
+try {
+const query = params();
+if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
+if (current !== version) return;
+const response = await fetch(`/apps/delivery-checker?${query.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+const data = await response.json();
+if (current !== version || !root.isConnected) return;
+if (!response.ok) {
+setStatus(data.message || 'Unable to check this PIN or ZIP code right now.', 'error');
+return;
+}
+setStatus('', '');
+if (data.available || data.local_delivery_available || data.pickup_available) rememberPostal?.(data.postal_code || postal.value);
+render(data);
+} catch (error) {
+if (current !== version || error.name === 'AbortError') return;
+setStatus('Network issue while checking delivery options. Please retry.', 'error');
+} finally {
+if (current === version) { button.disabled = false; active = null; }
+}
+};
+button.addEventListener('click', check, eventOptions);
+postal.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); check(); } }, eventOptions);
+postal.addEventListener('input', invalidate, eventOptions);
+country.addEventListener('change', () => { invalidate(); flag(); }, eventOptions);
+flag();
+if (root.dataset.savedPostal && postal.value.trim() === root.dataset.savedPostal) check();
+};
+if (window.incodeThemeContext) initialize();
+else {
+const ready = () => {
+if (!window.incodeThemeContext) return;
+document.removeEventListener('incode:theme-context-ready', ready);
+document.removeEventListener('DOMContentLoaded', ready);
+initialize();
+};
+document.addEventListener('incode:theme-context-ready', ready);
+document.addEventListener('DOMContentLoaded', ready, { once: true });
+}
+})();
 </script>
+{% endif %}
 {% endunless %}
 
 {% schema %}
 {
-  "name": "Local delivery & pickup",
-  "target": "section",
-  "enabled_on": { "templates": ["product", "cart"] },
-  "settings": [
-    { "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery options" },
-    { "type": "text", "id": "supporting_text", "label": "Supporting text", "default": "Enter your PIN or ZIP code to check local delivery and store pickup." },
-    { "type": "text", "id": "button_label", "label": "Button label", "default": "Check availability" },
-    { "type": "checkbox", "id": "show_estimated_delivery", "label": "Show estimated delivery", "default": true },
-    { "type": "checkbox", "id": "show_local_delivery", "label": "Show local delivery", "default": true },
-    { "type": "checkbox", "id": "show_store_pickup", "label": "Show store pickup", "default": true },
-    { "type": "header", "content": "Appearance" },
-    { "type": "color", "id": "accent_color", "label": "Accent and icon color", "default": "#1f4f91" },
-    { "type": "color", "id": "background_color", "label": "Card background", "default": "#ffffff" },
-    { "type": "color", "id": "option_background", "label": "Service option background", "default": "#fff8e8" },
-    { "type": "color", "id": "text_color", "label": "Text color", "default": "#172033" },
-    { "type": "select", "id": "icon_style", "label": "Service icons", "default": "delivery", "options": [
-      { "value": "delivery", "label": "Premium outline" },
-      { "value": "duotone", "label": "Advanced duotone" },
-      { "value": "number", "label": "Standard checkmark" },
-      { "value": "circle", "label": "Circular badge" },
-      { "value": "minimal", "label": "Minimal dot" },
-      { "value": "emoji", "label": "Friendly emoji" }
-    ] },
-    { "type": "select", "id": "effect", "label": "Icon effect", "default": "soft", "options": [
-      { "value": "soft", "label": "Soft reveal" },
-      { "value": "pulse", "label": "Heartbeat" },
-      { "value": "float", "label": "Floating" },
-      { "value": "shimmer", "label": "Shimmer" },
-      { "value": "none", "label": "No effect" }
-    ] },
-    { "type": "range", "id": "corner_radius", "label": "Corner radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 16 }
-  ]
+"name": "Local delivery & pickup",
+"target": "section",
+"enabled_on": { "templates": ["product", "cart"] },
+"settings": [
+{ "type": "select", "id": "layout", "label": "Layout", "default": "service-tabs", "options": [{ "value": "service-tabs", "label": "Delivery & pickup tabs" }, { "value": "standard", "label": "Previous card" }] },
+{ "type": "checkbox", "id": "show_local_delivery", "label": "Local delivery", "default": true },
+{ "type": "checkbox", "id": "show_store_pickup", "label": "Store pickup", "default": true },
+{ "type": "select", "id": "pickup_display", "label": "Pickup locations", "default": "all", "options": [{ "value": "all", "label": "All locations" }, { "value": "customer-postal", "label": "By customer ZIP" }] },
+{ "type": "header", "content": "Previous card settings" },
+{ "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery options" },
+{ "type": "text", "id": "supporting_text", "label": "Supporting text", "default": "Check local delivery and store pickup." },
+{ "type": "text", "id": "button_label", "label": "Button label", "default": "Check availability" },
+{ "type": "checkbox", "id": "show_estimated_delivery", "label": "Delivery estimate", "default": true },
+{ "type": "color", "id": "accent_color", "label": "Accent color", "default": "#1f4f91" },
+{ "type": "color", "id": "background_color", "label": "Background", "default": "#ffffff" },
+{ "type": "color", "id": "option_background", "label": "Option background", "default": "#fff8e8" },
+{ "type": "color", "id": "text_color", "label": "Text color", "default": "#172033" },
+{ "type": "select", "id": "icon_style", "label": "Service icons", "default": "delivery", "options": [
+{ "value": "delivery", "label": "Outline" },
+{ "value": "duotone", "label": "Duotone" },
+{ "value": "number", "label": "Checkmark" },
+{ "value": "circle", "label": "Circle" },
+{ "value": "minimal", "label": "Minimal" },
+{ "value": "emoji", "label": "Emoji" }
+] },
+{ "type": "select", "id": "effect", "label": "Icon effect", "default": "soft", "options": [
+{ "value": "soft", "label": "Soft" },
+{ "value": "pulse", "label": "Pulse" },
+{ "value": "float", "label": "Float" },
+{ "value": "shimmer", "label": "Shimmer" },
+{ "value": "none", "label": "None" }
+] },
+{ "type": "range", "id": "corner_radius", "label": "Radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 16 }
+]
 }
 {% endschema %}

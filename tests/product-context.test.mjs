@@ -99,6 +99,7 @@ test("tags beyond the first 100 enforce exclusions and PIN policy for direct pro
         findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 2, codAvailable: false }),
         findMany: async () => [],
       },
+      fulfillmentLocationRule: { findMany: async () => [] },
     },
   });
   const service = load("app/services/delivery-checker.server.ts");

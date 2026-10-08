@@ -37,7 +37,7 @@ function fixture(targets = [rule()], { inventoryFailure = false, contextFailure 
     deliveryTarget: { findMany: async () => targets },
     postalCode: { findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 4, codAvailable: false }), findMany: async () => [] },
     shippingMethodRule: { findMany: async () => [] },
-    fulfillmentLocationRule: { findMany: async () => { throw new Error("General estimates must not route locations"); } },
+    fulfillmentLocationRule: { findMany: async () => [] },
   };
   const load = injectedServer({
     "app/db.server.ts": prisma,

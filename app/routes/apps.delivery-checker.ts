@@ -22,6 +22,7 @@ import { billingRequiredResponse } from "../services/billing.server";
 import prisma from "../db.server";
 import { countdownVisible } from "../utils/countdown-visibility";
 import { COUNTRY_CODES } from "../utils/countries";
+import { getPickupOptions } from "../services/pickup-options.server";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_REQUESTS = 120;
@@ -207,6 +208,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const surface = url.searchParams.get("surface") ?? "product";
   const isInit = url.searchParams.get("init") === "1";
   const isEstimate = url.searchParams.get("estimate") === "1";
+  const isServiceOptions = url.searchParams.get("service_options") === "1";
   const countdownOverride = url.searchParams.get("countdown") === "1" ? true
     : url.searchParams.get("countdown") === "0" ? false : undefined;
   const requireTarget = url.searchParams.get("targeted") === "1";
@@ -257,7 +259,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   let canonicalCartItems = cart.items;
   const cartRequest = cart.provided || surface === "cart";
-  if (cart.error || (cartRequest && (!cart.provided || !cart.items.length || ((isEstimate || isInit) && !cart.complete)))) {
+  if (cart.error || (cartRequest && (!cart.provided || !cart.items.length || ((isEstimate || isInit || isServiceOptions) && !cart.complete)))) {
     return Response.json({
       enabled: false,
       available: false,
@@ -322,6 +324,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const setting = await prisma.deliverySetting.findUnique({ where: { shop } });
+  if (isServiceOptions) {
+    try {
+      const options = await getPickupOptions({
+        shop, admin: proxyContext.admin, country, postalCode,
+        items: cartRequest ? canonicalCartItems : [{ ...context, quantity: quantityRaw }],
+        complete: cartRequest ? cart.complete : true, timeZone: setting?.timeZone ?? "UTC",
+        pickupLocationId: url.searchParams.get("pickup_location_id"), pickupDate: url.searchParams.get("pickup_date"),
+      });
+      return Response.json(options, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      return Response.json({ pickup_locations: [], message: "Pickup details could not be verified.",
+        ...(url.searchParams.has("pickup_location_id") || url.searchParams.has("pickup_date") ? { pickup_selection_valid: false } : {}),
+      }, { status: error instanceof RangeError ? 400 : 503, headers: { "Cache-Control": "no-store" } });
+    }
+  }
   const style = storefrontStyle(setting);
 
   if (isEstimate) {

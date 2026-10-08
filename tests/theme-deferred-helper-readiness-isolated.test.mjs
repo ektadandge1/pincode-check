@@ -33,6 +33,8 @@ const fixture = (name) => {
     return nodes.get(id);
   };
   document.querySelectorAll = () => [];
+  document.createElement = () => element();
+  document.createDocumentFragment = () => element();
   document.documentElement = element();
   const window = {};
   const context = vm.createContext({

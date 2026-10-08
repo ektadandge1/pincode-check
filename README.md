@@ -43,7 +43,7 @@ is used.
 ## Shopify Requirements Covered Locally
 
 - Public app distribution configured with `AppDistribution.AppStore`.
-- Required scopes: `read_products,read_inventory,read_locations,write_app_proxy`.
+- Required scopes: `read_products,read_inventory,read_locations,read_orders,write_app_proxy`.
 - GraphQL Admin API only.
 - Latest supported local API version configured as `2026-04`.
 - OAuth/session-token embedded app flow through Shopify app tooling.
@@ -65,7 +65,7 @@ is used.
 7. Deploy the app and release the Shopify app configuration and theme extension.
 8. Configure and verify the Shopify App Store listing using `APP_STORE_SUBMISSION.md` and complete `LAUNCH_CHECKLIST.md`. No local command establishes Shopify approval or live readiness.
 
-The release owner must align the Shopify TOML/Partner configuration scopes with the environment above. `read_products` reads product/variant context; `read_inventory` and `read_locations` support location-aware inventory; `write_app_proxy` supports storefront proxy requests. Shipping options are app-owned rules, not Shopify shipping/order API reads. Do not request unused `read_shipping`, `read_orders`, or `write_orders` permissions. Configuration changes are a separate release prerequisite.
+The release owner must align the Shopify TOML/Partner configuration scopes with the environment above. `read_products` reads product/variant context; `read_inventory` and `read_locations` support location-aware inventory; `read_orders` lets authenticated merchants view recent pickup selections and customer details directly from Shopify; `write_app_proxy` supports storefront proxy requests. Shipping options remain app-owned rules. Do not request unused `read_shipping` or `write_orders` permissions. Configuration changes are a separate release prerequisite.
 
 ## Privacy Boundaries
 

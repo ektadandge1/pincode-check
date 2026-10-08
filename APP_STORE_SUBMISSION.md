@@ -72,11 +72,11 @@ app details, or feature text. Pricing belongs only in Shopify's designated
 Pricing details section. Keep the in-app plan page and Partner Dashboard values
 identical.
 
-Requested scopes: `read_products,read_inventory,read_locations,write_app_proxy`.
+Requested scopes: `read_products,read_inventory,read_locations,read_orders,write_app_proxy`.
 
-Scope reasons: `read_products` reads product/variant targeting context; `read_inventory` reads selected-variant/location inventory; `read_locations` reads fulfillment locations; `write_app_proxy` enables the storefront app proxy. Shipping methods are app-owned rules. No Shopify shipping/order API permissions are needed. Align TOML and Partner configuration before release; documentation is not the deployed scope configuration.
+Scope reasons: `read_products` reads product/variant targeting context; `read_inventory` reads selected-variant/location inventory; `read_locations` reads fulfillment locations; `read_orders` lets merchants review pickup selections and customer fulfillment details on the Delivery & pickup page; `write_app_proxy` enables the storefront app proxy. Shipping methods are app-owned rules and no write-order permission is used. Align TOML and Partner configuration before release; documentation is not the deployed scope configuration.
 
-Protected customer data: The current implementation does not query customer/order APIs or store customer-linked identity, address, payment or checkout records. Confirm the Partner Dashboard declaration against the final implementation and current Shopify policy rather than treating this note as approval. Merchant OAuth sessions can contain staff user IDs, names/emails and credentials. Lookup events retain masked postal regions and product/variant IDs, not customer IDs. Raw import error rows/free-text merchant configuration may contain whatever a merchant supplied. See `docs/privacy-data-inventory.md`.
+Protected customer data: The pickup-orders view queries recent Shopify orders live and may display customer name, email, phone and shipping address to an authenticated merchant. The app does not copy those order/customer records into its database. Request the applicable protected customer data fields in Partner Dashboard and confirm the declaration against current Shopify policy. Merchant OAuth sessions can contain staff user IDs, names/emails and credentials. Lookup events retain masked postal regions and product/variant IDs, not customer IDs. See `docs/privacy-data-inventory.md`.
 
 Shopify cart/order attributes created by storefront delivery selections remain Shopify-owned. The app privacy webhook does not search, export or erase those Shopify records. Customer data-request/redact topics acknowledge no customer-linked records in the app database; shop redaction deletes app-owned shop data and rate-limit buckets. Verify the live public privacy page matches these boundaries before submission.
 

@@ -3,9 +3,9 @@ import test from "node:test";
 import { injectedServer } from "./helpers/injected-server.mjs";
 import { STANDARD_FEATURES } from "../app/services/plans.server.ts";
 
-function fixture(rules, records = []) {
+function fixture(rules, records = [], inventoryAwareEnabled = true) {
   const prisma = {
-    deliverySetting: { findUnique: async () => ({ inventoryAwareEnabled: true, cutoffHour24: 14, processingDays: 0, deliveryWindowDays: 2, dateFormat: "weekday_day_month", timeZone: "UTC", locale: "en", fallbackDays: 5, courierTimeoutMs: 2000, retryCount: 1, courierEnabled: false, dbFallbackEnabled: true, holidaysCsv: "", weekendDaysCsv: "0", disableAddToCart: false, requireValidPin: false, successMessage: "Available", unavailableMessage: "Unavailable", codAvailableMessage: "COD", codUnavailableMessage: "Prepaid", deliveryChargeMessage: "" }) },
+    deliverySetting: { findUnique: async () => ({ inventoryAwareEnabled, cutoffHour24: 14, processingDays: 0, deliveryWindowDays: 2, dateFormat: "weekday_day_month", timeZone: "UTC", locale: "en", fallbackDays: 5, courierTimeoutMs: 2000, retryCount: 1, courierEnabled: false, dbFallbackEnabled: true, holidaysCsv: "", weekendDaysCsv: "0", disableAddToCart: false, requireValidPin: false, successMessage: "Available", unavailableMessage: "Unavailable", codAvailableMessage: "COD", codUnavailableMessage: "Prepaid", deliveryChargeMessage: "" }) },
     deliveryTarget: { findMany: async () => [] },
     fulfillmentLocationRule: { findMany: async () => rules },
     shippingMethodRule: { findMany: async () => [] },
@@ -50,4 +50,22 @@ test("legacy compact exact coverage works with canonical international input", a
   const check = fixture([], [{ country: "CA", postalCode: "K1A0B1", zoneId: null, serviceable: true, deliveryDays: 2 }]);
   assert.equal((await check("CA", "K1A 0B1")).available, true);
   assert.equal((await check("US", "10001")).available, false);
+});
+
+test("local delivery can reuse an existing enabled delivery zone", async () => {
+  const zoneRule = { ...rule(1, "", ""), localDeliveryCoverageMode: "zone", localDeliveryZoneIdsCsv: "27,28" };
+  const check = fixture([zoneRule], [
+    { country: "IN", postalCode: "400001", zoneId: 27, zoneGroup: { enabled: true }, serviceable: true, deliveryDays: 2 },
+    { country: "IN", postalCode: "500001", zoneId: 29, zoneGroup: { enabled: true }, serviceable: true, deliveryDays: 2 },
+  ]);
+  assert.equal((await check("IN", "400001")).local_delivery_available, true);
+  assert.equal((await check("IN", "500001")).local_delivery_available, false);
+});
+
+test("local delivery works when general inventory-aware estimates are disabled", async () => {
+  const zoneRule = { ...rule(1, "", ""), localDeliveryCoverageMode: "zone", localDeliveryZoneIdsCsv: "27" };
+  const check = fixture([zoneRule], [
+    { country: "IN", postalCode: "400001", zoneId: 27, zoneGroup: { enabled: true }, serviceable: true, deliveryDays: 2 },
+  ], false);
+  assert.equal((await check("IN", "400001")).local_delivery_available, true);
 });

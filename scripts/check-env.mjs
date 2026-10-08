@@ -41,10 +41,10 @@ for (const name of ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_APP_HANDLE
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.SUPPORT_EMAIL || "")) errors.push("SUPPORT_EMAIL must be a valid email address.");
 
 const scopes = new Set((env.SCOPES || "").split(",").map((scope) => scope.trim()));
-for (const scope of ["read_products", "read_inventory", "read_locations", "write_app_proxy"]) {
+for (const scope of ["read_products", "read_inventory", "read_locations", "read_orders", "write_app_proxy"]) {
   if (!scopes.has(scope)) errors.push(`SCOPES must include ${scope}.`);
 }
-if (["read_shipping", "read_orders", "write_orders"].some((scope) => scopes.has(scope))) {
+if (["read_shipping", "write_orders"].some((scope) => scopes.has(scope))) {
   errors.push("SCOPES includes unused shipping/order permissions; align environment and Shopify configuration before launch.");
 }
 

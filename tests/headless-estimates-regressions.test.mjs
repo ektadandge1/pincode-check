@@ -58,6 +58,16 @@ function fixture(targets = [], targeting = true) {
 const target = { id: 1, name: "Specific", targetKind: "product", targetValue: "1", enabled: true,
   inventoryMode: "any", processingDays: 2, transitDays: 8, priority: 1 };
 
+function withoutLiveCountdown(estimate) {
+  const { seconds_until_cutoff: _secondsUntilCutoff, ...stable } = estimate;
+  return stable;
+}
+
+function assertCloseCountdown(actual, expected, tolerance) {
+  if (actual === undefined || expected === undefined) assert.equal(actual, expected);
+  else assert.ok(Math.abs(actual - expected) <= tolerance);
+}
+
 for (const [label, targets, targeting] of [
   ["no targets", [], true],
   ["unmatched product", [target], true],
@@ -73,7 +83,8 @@ for (const [label, targets, targeting] of [
       { key: "first", product_id: "1" }, { key: "second", product_id: "2" },
     ] });
     assert.deepEqual(batch.map((row) => row.key), ["first", "second"]);
-    assert.deepEqual(batch.map((row) => row.estimate), singles);
+    assert.deepEqual(batch.map((row) => withoutLiveCountdown(row.estimate)), singles.map(withoutLiveCountdown));
+    batch.forEach((row, index) => assertCloseCountdown(row.estimate.seconds_until_cutoff, singles[index].seconds_until_cutoff, 1));
     assert.equal(singles[1].enabled, true);
     // One shared shop/default lookup pair, not one pair per batch item.
     assert.equal(calls.settings - settingsBefore, 2);
@@ -87,6 +98,11 @@ for (const [label, targets, targeting] of [
     }
     const cards = await themeBatch();
     assert.deepEqual(cards[1].estimate, { enabled: false });
-    assert.deepEqual(cards[0].estimate, targeting && targets.length ? singles[0] : { enabled: false });
+    if (targeting && targets.length) {
+      assert.deepEqual(withoutLiveCountdown(cards[0].estimate), withoutLiveCountdown(singles[0]));
+      assertCloseCountdown(cards[0].estimate.seconds_until_cutoff, singles[0].seconds_until_cutoff, 2);
+    } else {
+      assert.deepEqual(cards[0].estimate, { enabled: false });
+    }
   });
 }

@@ -51,6 +51,7 @@ export type CheckDeliveryInput = {
   features?: PlanFeatures;
   requireTarget?: boolean;
   trackAnalytics?: boolean;
+  includeLocationServices?: boolean;
   admin?: {
     graphql: (query: string, options?: { variables?: Record<string, unknown> }) => Promise<Response>;
   };
@@ -60,6 +61,8 @@ export type DeliveryResult = {
   available: boolean;
   country: string;
   postal_code: string;
+  city?: string | null;
+  state?: string | null;
   zone_id?: number | null;
   zone_name?: string | null;
   source: "courier_api" | "db_fallback" | "none";
@@ -173,6 +176,7 @@ const patternCache = new Map<
       sameDayAvailable: boolean;
       nextDayAvailable: boolean;
        expressAvailable: boolean;
+       city: string | null;
        state: string | null;
     }>;
   }
@@ -268,6 +272,7 @@ async function loadPostalPatterns(shopKey: string, country: string, generation: 
     sameDayAvailable: record.sameDayAvailable,
     nextDayAvailable: record.nextDayAvailable,
     expressAvailable: record.expressAvailable,
+    city: record.city,
     state: record.state,
   }));
 
@@ -429,10 +434,13 @@ async function loadShippingMethodRules(shop: string) {
   });
 }
 
-function matchesLocalDelivery(rule: FulfillmentLocationRule, country: string, postalCode: string): boolean {
-  return rule.localDeliveryEnabled
-    && rule.localDeliveryCountry === country
-    && matchesPostalPatternsCsv(country, postalCode, rule.localDeliveryPostalCodesCsv);
+function matchesLocalDelivery(rule: FulfillmentLocationRule, country: string, postalCode: string, zoneId: number | null): boolean {
+  if (!rule.localDeliveryEnabled) return false;
+  if (rule.localDeliveryCoverageMode === "zone") {
+    const zones = new Set(rule.localDeliveryZoneIdsCsv.split(",").map((value) => value.trim()).filter(Boolean));
+    return zoneId !== null && zones.has(String(zoneId));
+  }
+  return rule.localDeliveryCountry === country && matchesPostalPatternsCsv(country, postalCode, rule.localDeliveryPostalCodesCsv);
 }
 
 function matchesServiceTarget(rule: FulfillmentLocationRule, input: CheckDeliveryInput, zoneId: number | null): boolean {
@@ -622,6 +630,7 @@ export async function getGeneralDeliveryEstimate(input: CheckDeliveryInput) {
       country,
       postalCode,
       trackAnalytics: false,
+      includeLocationServices: false,
     });
     return {
       ...personalized,
@@ -839,6 +848,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
   const inventoryAware = features.inventory && settings.inventoryAwareEnabled;
   const inventoryTargeting = targets.some((target) => target.inventoryMode && target.inventoryMode !== "any");
+  const locationRules = features.inventory && input.includeLocationServices !== false ? await loadLocationRules(shopKey) : [];
   const requestedQuantity = Math.max(1, Math.floor(input.quantity ?? 1));
   const exactRecord = await prisma.postalCode.findFirst({
     where: {
@@ -861,10 +871,13 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const matchedPostalRecord = exactMatch ?? (features.patterns
     ? await findPatternMatch(shopKey, country, normalizedPostalCode, generation)
     : null);
+  const localDeliveryRules = locationRules.filter((rule) => matchesLocalDelivery(rule, country, normalizedPostalCode, matchedPostalRecord?.zoneId ?? null)
+    && matchesServiceTarget(rule, input, matchedPostalRecord?.zoneId ?? null));
+  const localDeliveryInventory = localDeliveryRules.length > 0;
 
   let inventory: VariantInventoryResult | null = null;
   let inventoryStatus: InventoryStatus | null = null;
-  if ((inventoryAware || inventoryTargeting) && input.variantId && input.admin) {
+  if ((inventoryAware || inventoryTargeting || localDeliveryInventory) && input.variantId && input.admin) {
     inventory = await checkVariantInventory(input.admin, input.variantId);
     inventoryStatus = inventory ? inventoryStatusFor(inventory, requestedQuantity) : null;
   }
@@ -877,6 +890,8 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       available: false,
       country,
       postal_code: normalizedPostalCode,
+      city: matchedPostalRecord?.city ?? null,
+      state: matchedPostalRecord?.state ?? null,
       source: "none",
       reason: input.variantId ? "inventory_unavailable" : "variant_required",
       disable_add_to_cart: true,
@@ -923,7 +938,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     pinPolicy.matchedTarget?.name ?? "",
   ].join("|");
   const disableAddToCart = features.cartProtection && settings.disableAddToCart;
-  const cached = cacheGenerations.get(shopKey) === generation && !inventoryAware && !inventoryTargeting ? checkCache.get(cacheKey) : undefined;
+  const cached = cacheGenerations.get(shopKey) === generation && !inventoryAware && !inventoryTargeting && !localDeliveryInventory ? checkCache.get(cacheKey) : undefined;
   const cachedResult = cached ? readDeliveryCache(cached, Date.now()) : null;
   if (cachedResult) {
     if (features.analytics && input.trackAnalytics !== false) await trackSearchEvent(input, cachedResult);
@@ -934,7 +949,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const weekendDays = parseWeekendDays(settings.weekendDaysCsv);
   let selectedLocation: FulfillmentLocationRule | null = null;
 
-  if (inventoryAware) {
+  if (inventoryAware || localDeliveryInventory) {
     if (!input.variantId) {
       return withPinPolicy(
         {
@@ -951,7 +966,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       );
     }
 
-    if (inventory === null) {
+    if (inventoryAware && inventory === null) {
       return withPinPolicy(
         {
           available: false,
@@ -967,24 +982,22 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       );
     }
 
-    const locationRules = await loadLocationRules(shopKey);
-    if (locationRules.length > 0) {
+    if (inventory) {
       selectedLocation = selectFulfillmentLocation(
-        locationRules.filter((rule) => matchesLocalDelivery(rule, country, normalizedPostalCode)
-          && matchesServiceTarget(rule, input, matchedPostalRecord?.zoneId ?? null)),
+        localDeliveryRules,
         inventory.levels,
         requestedQuantity,
         inventory.continueSelling,
         settings.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
       );
-      selectedLocation ??= selectFulfillmentLocation(
+      if (inventoryAware) selectedLocation ??= selectFulfillmentLocation(
         locationRules, inventory.levels, requestedQuantity, inventory.continueSelling,
         settings.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
       );
     }
 
-    if ((locationRules.length > 0 && !selectedLocation)
-      || inventoryStatus === "out_of_stock") {
+    if (inventoryAware && ((locationRules.length > 0 && !selectedLocation)
+      || inventoryStatus === "out_of_stock")) {
       return withPinPolicy(
         {
           available: false,
@@ -1004,7 +1017,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
 
   const locationOptions = selectedLocationOptions(
     selectedLocation,
-    selectedLocation ? matchesLocalDelivery(selectedLocation, country, normalizedPostalCode) && matchesServiceTarget(selectedLocation, input, matchedPostalRecord?.zoneId ?? null) : false,
+    selectedLocation ? matchesLocalDelivery(selectedLocation, country, normalizedPostalCode, matchedPostalRecord?.zoneId ?? null) && matchesServiceTarget(selectedLocation, input, matchedPostalRecord?.zoneId ?? null) : false,
     selectedLocation ? selectedLocation.pickupEnabled && matchesServiceTarget(selectedLocation, input, matchedPostalRecord?.zoneId ?? null) : false,
   );
   let source: DeliveryResult["source"] = "none";
@@ -1068,7 +1081,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       }),
     } satisfies DeliveryResult;
     const result = withPinPolicy(baseResult, pinPolicy.requireValidPin, pinPolicy.matchedTarget?.name ?? null);
-    if (!inventoryAware && !inventoryTargeting) {
+    if (!inventoryAware && !inventoryTargeting && !localDeliveryInventory) {
       setCachedResult(shopKey, generation, cacheKey, result);
     }
     if (features.analytics && input.trackAnalytics !== false) await trackSearchEvent(input, result);
@@ -1179,6 +1192,8 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     available: true,
     country,
     postal_code: normalizedPostalCode,
+    city: matchedPostalRecord?.city ?? null,
+    state: matchedPostalRecord?.state ?? null,
     zone_id: matchedPostalRecord?.zoneId ?? null,
     zone_name: matchedPostalRecord && "zoneName" in matchedPostalRecord ? matchedPostalRecord.zoneName : matchedPostalRecord?.zone ?? null,
     source,
@@ -1211,7 +1226,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
 
   const successResult = withPinPolicy(result, pinPolicy.requireValidPin, pinPolicy.matchedTarget?.name ?? null);
 
-  if (!inventoryAware && !inventoryTargeting) {
+  if (!inventoryAware && !inventoryTargeting && !localDeliveryInventory) {
     setCachedResult(shopKey, generation, cacheKey, successResult, calculatedAt);
   }
 

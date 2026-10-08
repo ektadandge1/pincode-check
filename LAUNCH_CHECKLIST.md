@@ -5,12 +5,12 @@ Status: **Not approved for launch by this document.** All items start unverified
 ## Known Blockers
 
 - The public privacy page now describes opportunistic retention, merchant sessions, product/variant analytics context, and Shopify-owned cart/order attributes. The release owner must verify it against the production host's actual logging and backup policies.
-- TOML scopes now match the implemented product/inventory/location/proxy features. Production domains and released Partner configuration still require verification; local configuration changes do not grant scopes to installed shops.
+- TOML scopes now match the implemented product/inventory/location/order/proxy features. Protected customer data approval, production domains and released Partner configuration still require verification; local configuration changes do not grant scopes to installed shops.
 - Live install/billing/webhook tests, durable storage/restore verification, performance evidence and Shopify review/approval remain unverified by this implementation task.
 
 ## Prerequisites
 
-- [ ] Release owner releases the narrowed TOML scopes `read_products,read_inventory,read_locations,write_app_proxy` and verifies reauthorization on an existing install.
+- [ ] Release owner releases TOML scopes `read_products,read_inventory,read_locations,read_orders,write_app_proxy`, obtains applicable protected customer data approval, and verifies reauthorization on an existing install.
 - [ ] Final HTTPS domain, OAuth redirects, app proxy, app handle, compliance topics and uninstall webhook match the released Shopify configuration. No example URLs or temporary tunnels remain.
 - [ ] Production secrets are supplied through the host's secret manager. Support email and legal business identity are real; public support/privacy pages are reachable and match the data inventory.
 - [ ] Production environment has `NODE_ENV=production`, `APP_ENV=production`, billing test `false`, billing required `true`, dev bypass `false` or unset. Run `node scripts/check-env.mjs` against deployment-injected values without loading a developer `.env`. Resolve warnings with infrastructure evidence.
