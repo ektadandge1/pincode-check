@@ -16,7 +16,7 @@ import {
   canonicalProductFor,
   canonicalBatchItems,
 } from "../services/product-context.server";
-import { parseCartDeliveryItems } from "../utils/delivery.server";
+import { MAX_CART_DELIVERY_BYTES, parseCartDeliveryItems } from "../utils/delivery.server";
 import { resolvePlanAccess } from "../services/plan-access.server";
 import { billingRequiredResponse } from "../services/billing.server";
 import prisma from "../db.server";
@@ -84,6 +84,11 @@ function isRateLimited(key: string): boolean {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const requestUrl = new URL(request.url);
+  if (request.method === "POST" && requestUrl.searchParams.get("surface") === "cart"
+    && requestUrl.searchParams.get("batch") !== "1") {
+    return storefrontDelivery(request);
+  }
   const proxyContext = await authenticate.public.appProxy(request);
   const url = new URL(request.url);
   const shop = proxyContext.session?.shop ?? (url.searchParams.get("shop") ?? undefined);
@@ -185,9 +190,70 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  return storefrontDelivery(request);
+}
+
+async function storefrontDelivery(request: Request) {
   const proxyContext = await authenticate.public.appProxy(request);
 
   const url = new URL(request.url);
+  const shop = proxyContext.session?.shop ?? (url.searchParams.get("shop") ?? undefined);
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (isRateLimited(`${shop ?? "unknown"}|${forwardedFor}`)) {
+    return Response.json(
+      { available: false, message: "Too many delivery checks. Please wait a minute and try again." },
+      { status: 429, headers: { "Retry-After": "60", "Cache-Control": "no-store" } },
+    );
+  }
+
+  let cartItems = url.searchParams.get("cartItems");
+  if (request.method === "POST") {
+    let status = 400;
+    try {
+      if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+        status = 415;
+        throw new Error("JSON required");
+      }
+      if (Number(request.headers.get("content-length")) > MAX_CART_DELIVERY_BYTES) {
+        status = 413;
+        throw new Error("Cart body too large");
+      }
+      const reader = request.body?.getReader();
+      if (!reader) throw new Error("Cart body required");
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        let finished = false;
+        while (!finished) {
+          const { done, value } = await reader.read();
+          finished = done;
+          if (done) continue;
+          size += value.byteLength;
+          if (size > MAX_CART_DELIVERY_BYTES) {
+            status = 413;
+            await reader.cancel();
+            throw new Error("Cart body too large");
+          }
+          chunks.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+      if (!body || typeof body !== "object" || Array.isArray(body)
+        || Object.keys(body).some((key) => key !== "cartItems") || cartItems !== null
+        || !Array.isArray((body as { cartItems?: unknown }).cartItems)) {
+        throw new Error("Invalid cart body");
+      }
+      cartItems = JSON.stringify((body as { cartItems: unknown[] }).cartItems);
+    } catch {
+      return Response.json({ enabled: false, available: false, source: "none",
+        reason: status === 413 ? "cart_too_large" : "invalid_cart", cart_complete: false,
+        cart_items_checked: 0, disable_add_to_cart: true, require_valid_pin: true,
+        message: "Full cart delivery context could not be verified.",
+      }, { status, headers: { "Cache-Control": "no-store" } });
+    }
+  }
   const country = url.searchParams.get("country") ?? undefined;
   if (country !== undefined && !COUNTRY_CODES.has(country.trim().toUpperCase() === "UK" ? "GB" : country.trim().toUpperCase())) {
     return Response.json({ enabled: false, available: false, reason: "invalid_country", message: "Choose a valid country." }, { status: 400, headers: { "Cache-Control": "no-store" } });
@@ -212,16 +278,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const countdownOverride = url.searchParams.get("countdown") === "1" ? true
     : url.searchParams.get("countdown") === "0" ? false : undefined;
   const requireTarget = url.searchParams.get("targeted") === "1";
-  const cart = parseCartDeliveryItems(url.searchParams.get("cartItems"));
-  const shop = proxyContext.session?.shop ?? (url.searchParams.get("shop") ?? undefined);
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-
-  if (isRateLimited(`${shop ?? "unknown"}|${forwardedFor}`)) {
-    return Response.json(
-      { available: false, message: "Too many delivery checks. Please wait a minute and try again." },
-      { status: 429, headers: { "Retry-After": "60", "Cache-Control": "no-store" } },
-    );
-  }
+  const cart = parseCartDeliveryItems(cartItems);
 
   let context = {
     shop,
@@ -282,7 +339,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       enabled: false,
       available: false,
       source: "none",
-      reason: cart.error || !cart.provided || !cart.items.length ? "invalid_cart" : "cart_incomplete",
+      reason: cart.error ?? (!cart.provided || !cart.items.length ? "invalid_cart" : "cart_incomplete"),
       cart_complete: false,
       cart_items_checked: 0,
       disable_add_to_cart: true,
@@ -297,7 +354,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (contextInputs.length) {
     let resolved: Awaited<ReturnType<typeof resolveShopifyProductContexts>>;
     try {
-      resolved = await resolveShopifyProductContexts(proxyContext.admin, contextInputs);
+      resolved = await resolveShopifyProductContexts(proxyContext.admin, contextInputs, { cart: cartRequest });
     } catch {
       return Response.json(
         { enabled: false, available: false, source: "none", reason: "product_context_unavailable", ...(cartRequest ? { cart_complete: false } : {}), disable_add_to_cart: true, require_valid_pin: true, message: "Delivery details are temporarily unavailable." },

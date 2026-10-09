@@ -53,7 +53,7 @@ test("rejects malformed, non-string, and wrong-resource IDs even with a valid pa
 });
 
 test("accepts integer quantity boundaries and defaults missing quantity to one", () => {
-  for (const quantity of [1, 2, 999]) {
+  for (const quantity of [1, 2, 999, 1000, 2147483647]) {
     assert.equal(parseHeadlessDeliveryInput({ ...valid, quantity }).quantity, quantity);
   }
   for (const quantity of [undefined]) {
@@ -62,7 +62,7 @@ test("accepts integer quantity boundaries and defaults missing quantity to one",
 });
 
 test("rejects invalid quantities without coercion or rounding", () => {
-  for (const quantity of [null, 0, -1, 1000, 1.5, NaN, Infinity, -Infinity, "1", "", true, false, [], {}]) {
+  for (const quantity of [null, 0, -1, 2147483648, 1.5, NaN, Infinity, -Infinity, "1", "", true, false, [], {}]) {
     rejects({ ...valid, quantity }, "invalid_quantity");
   }
 });

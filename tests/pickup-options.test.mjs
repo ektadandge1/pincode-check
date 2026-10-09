@@ -166,7 +166,7 @@ test("selection is rechecked against stock, target and schedule and malformed pa
 test("missing admin, incomplete/oversized carts, truncated inventory/rules and GraphQL errors fail closed", async () => {
   const { get } = fixture();
   await assert.rejects(get({ admin: undefined }), /unavailable/);
-  for (const extra of [{ complete: false }, { items: [] }, { items: Array(21).fill(item(1)) }, { items: [item(1, 0)] }]) await assert.rejects(get(extra), RangeError);
+  for (const extra of [{ complete: false }, { items: [] }, { items: Array(251).fill(item(1)) }, { items: [item(1, 0)] }, { items: [item(1, 2147483648)] }]) await assert.rejects(get(extra), RangeError);
   await assert.rejects(fixture({ rules: Array(101).fill(rule(1)) }).get(), /exceed limit/);
   await assert.rejects(fixture({ truncated: true }).get(), /inventory unavailable/);
   await assert.rejects(fixture({ locationErrors: true }).get(), /locations unavailable/);
@@ -181,7 +181,9 @@ test("signed proxy branch follows billing and canonical targeting, requires comp
   assert.equal((await fixture({ access: false }).proxy()).response.status, 402);
   const completeCart = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(20).fill(item(1))) });
   assert.equal(completeCart.response.status, 200);
-  const oversizedCart = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(21).fill(item(1))) });
+  const atLimitCart = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(250).fill(item(1))) });
+  assert.equal(atLimitCart.response.status, 200);
+  const oversizedCart = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(251).fill(item(1))) });
   assert.equal(oversizedCart.response.status, 400);
   assert.equal(oversizedCart.body.cart_complete, false);
   assert.equal((await proxy({ pickup_location_id: "2", pickup_date: "invalid" })).response.status, 400);

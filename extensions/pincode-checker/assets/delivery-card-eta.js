@@ -83,7 +83,7 @@
       if (current !== state.version || !root.isConnected) return;
       state.items = items;
       for (let offset = 0; offset < items.length; offset += 24) {
-        const response = await fetch('/apps/delivery-checker?batch=1', {
+        const response = await window.incodeThemeContext.request(root, new URLSearchParams({ batch: '1' }), {
           method: 'POST', signal: controller.signal,
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({ country: root.dataset.country || 'US', postal_code: root.dataset.savedPostal || '', items: items.slice(offset, offset + 24).map(({ key, productId }) => ({ key, productId })) })

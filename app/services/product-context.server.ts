@@ -1,4 +1,5 @@
 import type { ProductEstimateBatchItem } from "../utils/targeting.server";
+import { MAX_CART_DELIVERY_ITEMS } from "../utils/delivery.server.ts";
 
 type ProxyAdmin = {
   graphql: (query: string, options?: { variables?: Record<string, unknown> }) => Promise<Response>;
@@ -20,71 +21,80 @@ function shopifyGid(kind: "Product" | "ProductVariant", value: string | null | u
 export async function resolveShopifyProductContexts(
   admin: ProxyAdmin | undefined,
   inputs: Array<{ productId?: string | null; variantId?: string | null }>,
+  options: { cart?: boolean } = {},
 ) {
   if (!admin) throw new Error("Shopify product context is unavailable.");
+  if (options.cart && inputs.length > MAX_CART_DELIVERY_ITEMS + 1) {
+    throw new RangeError("Too many Shopify cart product contexts.");
+  }
   const ids = [...new Set(inputs.flatMap((input) => [
-    shopifyGid("Product", input.productId),
+    // A resolved variant also verifies its product, including paired-ID mismatches.
+    options.cart && input.variantId ? null : shopifyGid("Product", input.productId),
     shopifyGid("ProductVariant", input.variantId),
   ]).filter((value): value is string => Boolean(value)))];
   if (!ids.length) return { products: new Map<string, CanonicalProduct>(), variants: new Map<string, CanonicalProduct>() };
-  if (ids.length > 50) throw new RangeError("Too many Shopify product contexts.");
+  if (ids.length > (options.cart ? MAX_CART_DELIVERY_ITEMS + 1 : 50)) throw new RangeError("Too many Shopify product contexts.");
 
-  const response = await admin.graphql(`#graphql
-    query DeliveryCheckerProductContexts($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on Product {
-          id vendor tags
-          collections(first: 100) { nodes { handle } pageInfo { hasNextPage } }
-        }
-        ... on ProductVariant {
-          id
-          product {
+  const products = new Map<string, CanonicalProduct>();
+  const variants = new Map<string, CanonicalProduct>();
+  // collections(first: 100) makes a large nodes query exceed Shopify's 1,000-point
+  // requested-cost ceiling. Small sequential batches also avoid an alias fan-out.
+  for (let offset = 0; offset < ids.length; offset += 5) {
+    const response = await admin.graphql(`#graphql
+      query DeliveryCheckerProductContexts($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Product {
             id vendor tags
             collections(first: 100) { nodes { handle } pageInfo { hasNextPage } }
           }
+          ... on ProductVariant {
+            id
+            product {
+              id vendor tags
+              collections(first: 100) { nodes { handle } pageInfo { hasNextPage } }
+            }
+          }
         }
       }
-    }
-  `, { variables: { ids } });
-  if (!response.ok) throw new Error(`Shopify returned HTTP ${response.status} while resolving product context.`);
-  const json = await response.json() as {
-    data?: { nodes?: Array<null | {
-      id: string;
-      vendor?: string;
-      tags?: string[];
-      collections?: { nodes?: Array<{ handle?: string }>; pageInfo?: { hasNextPage: boolean } };
-      product?: {
+    `, { variables: { ids: ids.slice(offset, offset + 5) } });
+    if (!response.ok) throw new Error(`Shopify returned HTTP ${response.status} while resolving product context.`);
+    const json = await response.json() as {
+      data?: { nodes?: Array<null | {
         id: string;
         vendor?: string;
         tags?: string[];
         collections?: { nodes?: Array<{ handle?: string }>; pageInfo?: { hasNextPage: boolean } };
-      };
-    }> };
-    errors?: Array<{ message?: string }>;
-  };
-  if (json.errors?.length) throw new Error(json.errors.map((error) => error.message).filter(Boolean).join(" "));
-
-  const products = new Map<string, CanonicalProduct>();
-  const variants = new Map<string, CanonicalProduct>();
-  const normalize = (product: NonNullable<NonNullable<NonNullable<typeof json.data>["nodes"]>[number]>) => {
-    if (product.collections?.pageInfo?.hasNextPage) {
-      throw new Error("Shopify product collection context exceeds 100 collections.");
-    }
-    return {
-      id: product.id,
-      vendor: String(product.vendor ?? "").slice(0, 100),
-      tags: (product.tags ?? []).map(String),
-      collectionHandles: (product.collections?.nodes ?? []).flatMap((collection) => collection.handle ? [collection.handle] : []),
+        product?: {
+          id: string;
+          vendor?: string;
+          tags?: string[];
+          collections?: { nodes?: Array<{ handle?: string }>; pageInfo?: { hasNextPage: boolean } };
+        };
+      }> };
+      errors?: Array<{ message?: string }>;
     };
-  };
-  for (const node of json.data?.nodes ?? []) {
-    if (!node) continue;
-    if (node.product) {
-      const product = normalize(node.product);
-      variants.set(node.id, product);
-      products.set(product.id, product);
-    } else {
-      products.set(node.id, normalize(node));
+    if (json.errors?.length) throw new Error(json.errors.map((error) => error.message).filter(Boolean).join(" "));
+
+    const normalize = (product: NonNullable<NonNullable<NonNullable<typeof json.data>["nodes"]>[number]>) => {
+      if (product.collections?.pageInfo?.hasNextPage) {
+        throw new Error("Shopify product collection context exceeds 100 collections.");
+      }
+      return {
+        id: product.id,
+        vendor: String(product.vendor ?? "").slice(0, 100),
+        tags: (product.tags ?? []).map(String),
+        collectionHandles: (product.collections?.nodes ?? []).flatMap((collection) => collection.handle ? [collection.handle] : []),
+      };
+    };
+    for (const node of json.data?.nodes ?? []) {
+      if (!node) continue;
+      if (node.product) {
+        const product = normalize(node.product);
+        variants.set(node.id, product);
+        products.set(product.id, product);
+      } else {
+        products.set(node.id, normalize(node));
+      }
     }
   }
   return { products, variants };

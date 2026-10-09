@@ -7,6 +7,8 @@
   const empty = () => Object.fromEntries(keys.map((key) => [key, '']));
   let writes = Promise.resolve();
   let intent = 0;
+  // AJAX clones can inherit data-service-ready without inheriting event listeners.
+  const initialized = new WeakSet();
   // Writes are never aborted: an invalidation must clear after any in-flight write.
   const queue = (token, attributes, valid, beforeWrite = async () => {}) => {
     writes = writes.catch(() => {}).then(async () => {
@@ -42,7 +44,8 @@
     if (!helper) return;
     document.querySelectorAll('[data-template="service-tabs"]').forEach((root) => {
       if (!root.isConnected) return;
-      if (root.dataset.serviceReady === 'true') return;
+      if (initialized.has(root)) return;
+      initialized.add(root);
       root.dataset.serviceReady = 'true';
       const find = (selector) => root.querySelector(selector);
       const cart = root.dataset.surface === 'cart';
@@ -147,7 +150,8 @@
        const fieldError = (name, message = '') => {
          const input = errorFields[name];
          const error = find(`[data-error="${name}"]`);
-         input.setAttribute('aria-invalid', String(Boolean(message)));
+          input.setAttribute('aria-invalid', String(Boolean(message)));
+          if (name === 'date') dateTrigger?.setAttribute('aria-invalid', String(Boolean(message)));
          error.textContent = message;
          error.hidden = !message;
        };
@@ -164,12 +168,13 @@
            return value;
          }
        };
-       const closeDatePicker = () => {
-         if (!datePopover) return;
-         datePopover.hidden = true;
-         dateTrigger?.setAttribute('aria-expanded', 'false');
-       };
-       const renderDateCalendar = () => {
+        const closeDatePicker = (restoreFocus = false) => {
+          if (!datePopover) return;
+          datePopover.hidden = true;
+          dateTrigger?.setAttribute('aria-expanded', 'false');
+          if (restoreFocus) dateTrigger?.focus();
+        };
+        const renderDateCalendar = (focusValue = '') => {
          if (!dateGrid || !calendarMonth) return;
          dateGrid.replaceChildren();
          const first = new Date(Date.UTC(calendarMonth.year, calendarMonth.month - 1, 1));
@@ -178,28 +183,49 @@
          if (dateMonth) {
            dateMonth.textContent = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(first);
          }
-         for (let index = 0; index < startDay; index++) {
-           const empty = document.createElement('span');
-           empty.className = 'ist-date-empty';
-           empty.setAttribute('aria-hidden', 'true');
-           dateGrid.append(empty);
-         }
-         for (let day = 1; day <= daysInMonth; day++) {
-           const value = `${calendarMonth.year}-${String(calendarMonth.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const monthDates = availablePickupDates.filter((value) => {
+            const parts = dateParts(value);
+            return parts.year === calendarMonth.year && parts.month === calendarMonth.month;
+          });
+          const focused = monthDates.includes(focusValue) ? focusValue : monthDates.includes(fields.date.value) ? fields.date.value : monthDates[0];
+          let row;
+          for (let index = 0; index < Math.ceil((startDay + daysInMonth) / 7) * 7; index++) {
+            if (index % 7 === 0) {
+              row = document.createElement('div');
+              row.className = 'ist-date-row';
+              row.setAttribute('role', 'row');
+              dateGrid.append(row);
+            }
+            const cell = document.createElement('span');
+            cell.setAttribute('role', 'gridcell');
+            row.append(cell);
+            const day = index - startDay + 1;
+            if (day < 1 || day > daysInMonth) {
+              cell.className = 'ist-date-empty';
+              continue;
+            }
+            const value = `${calendarMonth.year}-${String(calendarMonth.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
            const button = document.createElement('button');
            button.type = 'button';
            button.className = 'ist-date-day';
            button.textContent = String(day);
-           button.setAttribute('role', 'gridcell');
-           button.setAttribute('aria-label', dateText(value));
-           button.disabled = !availablePickupDates.includes(value);
-           if (value === fields.date.value) button.dataset.selected = 'true';
-           button.addEventListener('click', () => {
-             fields.date.value = value;
-             fields.date.dispatchEvent(new Event('change', { bubbles: true }));
-             closeDatePicker();
-           }, options);
-           dateGrid.append(button);
+            button.setAttribute('aria-label', dateText(value));
+            button.disabled = !availablePickupDates.includes(value);
+            button.dataset.date = value;
+            button.tabIndex = value === focused ? 0 : -1;
+            cell.setAttribute('aria-selected', String(value === fields.date.value));
+            cell.setAttribute('aria-disabled', String(button.disabled));
+            if (value === fields.date.value) button.dataset.selected = 'true';
+            button.addEventListener('focus', () => {
+              dateGrid.querySelectorAll('button').forEach((entry) => { entry.tabIndex = entry === button ? 0 : -1; });
+            }, options);
+            button.addEventListener('click', () => {
+              fields.date.value = value;
+              fields.date.dispatchEvent(new Event('change', { bubbles: true }));
+              closeDatePicker(true);
+            }, options);
+            cell.append(button);
+            if (focusValue && value === focused) button.focus();
          }
          const firstMonth = dateParts(availablePickupDates[0]);
          const lastMonth = dateParts(availablePickupDates[availablePickupDates.length - 1]);
@@ -286,6 +312,10 @@
         busy(false);
         setStatus();
         setDeliveryStatus();
+        setShippingStatus();
+        shippingResult.hidden = true;
+        shippingDate.textContent = '';
+        shippingPostal.removeAttribute('aria-invalid');
         if (reset) {
           clearErrors();
             locations = [];
@@ -311,7 +341,7 @@
         suggestionActive = controller;
         try {
           const query = new URLSearchParams({ city_suggestions: '1', country: country.value, city: value.trim() });
-          const response = await fetch(`/apps/delivery-checker?${query}`, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+          const response = await window.incodeThemeContext.request(root, query, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
           const data = await response.json();
           if (current(stamp) && response.ok) renderSuggestions(data);
         } catch (error) {
@@ -327,22 +357,82 @@
        }, () => {
          disposed = true;
          policyActive?.abort();
-         invalidate(true);
-         delete root.dataset.serviceReady;
-       });
-       dateTrigger?.addEventListener('click', () => {
-         if (!availablePickupDates.length || !datePopover) return;
-         datePopover.hidden = !datePopover.hidden;
-         dateTrigger.setAttribute('aria-expanded', String(!datePopover.hidden));
+          invalidate(true);
+          initialized.delete(root);
+          delete root.dataset.serviceReady;
+        });
+        if (dateTrigger && datePopover && dateGrid) {
+          datePopover.id = `${root.id}-date-dialog`;
+          dateMonth.id = `${root.id}-date-month`;
+          dateMonth.setAttribute('aria-live', 'polite');
+          dateGrid.setAttribute('aria-labelledby', dateMonth.id);
+          dateLabel.id = `${root.id}-date-label`;
+          dateTrigger.setAttribute('aria-labelledby', dateLabel.id);
+          dateTrigger.setAttribute('aria-describedby', `${root.id}-date-error`);
+          dateTrigger.setAttribute('aria-controls', datePopover.id);
+        }
+        dateTrigger?.addEventListener('click', () => {
+          if (!availablePickupDates.length || !datePopover) return;
+          if (!datePopover.hidden) { closeDatePicker(); return; }
+          const value = fields.date.value || availablePickupDates[0];
+          calendarMonth = dateParts(value);
+          datePopover.hidden = false;
+          dateTrigger.setAttribute('aria-expanded', 'true');
+          renderDateCalendar(value);
        }, options);
-       const shiftCalendar = (amount) => {
-         if (!calendarMonth) return;
-         const next = new Date(Date.UTC(calendarMonth.year, calendarMonth.month - 1 + amount, 1));
-         calendarMonth = { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1 };
-         renderDateCalendar();
-       };
+        const shiftCalendar = (amount) => {
+          if (!calendarMonth) return;
+          const focused = document.activeElement;
+          const next = new Date(Date.UTC(calendarMonth.year, calendarMonth.month - 1 + amount, 1));
+          calendarMonth = { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1 };
+          renderDateCalendar();
+          if (focused?.disabled) dateGrid.querySelector('button:not(:disabled)')?.focus();
+        };
        datePrev?.addEventListener('click', () => shiftCalendar(-1), options);
-       dateNext?.addEventListener('click', () => shiftCalendar(1), options);
+        dateNext?.addEventListener('click', () => shiftCalendar(1), options);
+        datePicker?.addEventListener('keydown', (event) => {
+          if (datePopover.hidden) return;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeDatePicker(true);
+            return;
+          }
+          const value = event.target.dataset.date;
+          if (!value) return;
+          const offsets = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+          const date = new Date(`${value}T00:00:00Z`);
+          let candidates = availablePickupDates;
+          let direction = 1;
+          if (event.key in offsets) {
+            direction = Math.sign(offsets[event.key]);
+            date.setUTCDate(date.getUTCDate() + offsets[event.key]);
+          } else if (event.key === 'Home' || event.key === 'End') {
+            const start = new Date(date);
+            start.setUTCDate(start.getUTCDate() - start.getUTCDay());
+            const end = new Date(start);
+            end.setUTCDate(end.getUTCDate() + 6);
+            candidates = candidates.filter((entry) => entry >= start.toISOString().slice(0, 10) && entry <= end.toISOString().slice(0, 10));
+            direction = event.key === 'Home' ? 1 : -1;
+            date.setTime((direction === 1 ? start : end).getTime());
+          } else if (event.key === 'PageUp' || event.key === 'PageDown') {
+            const parts = dateParts(value);
+            const month = new Date(Date.UTC(parts.year, parts.month - 1 + (event.key === 'PageUp' ? -1 : 1), 1));
+            const prefix = month.toISOString().slice(0, 7);
+            candidates = candidates.filter((entry) => entry.startsWith(prefix));
+            date.setTime(month.getTime());
+          } else return;
+          event.preventDefault();
+          const target = date.toISOString().slice(0, 10);
+          const next = direction === 1 ? candidates.find((entry) => entry >= target) : [...candidates].reverse().find((entry) => entry <= target);
+          if (next) { calendarMonth = dateParts(next); renderDateCalendar(next); }
+        }, options);
+        datePicker?.addEventListener('focusout', (event) => {
+          if (!datePicker.contains(event.relatedTarget)) closeDatePicker();
+        }, options);
+        if (datePicker) document.addEventListener('click', (event) => {
+          if (!datePicker.contains(event.target)) closeDatePicker();
+        }, options);
        const params = async (signal, pickupSelection = false) => {
         const query = new URLSearchParams({ surface: root.dataset.surface || 'product' });
         if (service === 'pickup') {
@@ -409,7 +499,7 @@
         return query;
       };
        const request = async (query, signal) => {
-         const response = await fetch(`/apps/delivery-checker?${query}`, { signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+         const response = await window.incodeThemeContext.request(root, query, { signal, cache: 'no-store', headers: { Accept: 'application/json' } });
          const data = await response.json();
          if (!response.ok || !data || typeof data !== 'object') throw new Error(data?.message || 'Unable to check service options. Please retry.');
          return data;
@@ -480,7 +570,12 @@
          select.dataset.availableDates = dates.join(',');
          availablePickupDates = [...new Set(dates)].sort();
          calendarMonth = dateParts(availablePickupDates[0]);
-         if (datePicker) datePicker.dataset.enhanced = 'true';
+          if (datePicker) {
+            datePicker.dataset.enhanced = 'true';
+            select.hidden = true;
+            select.tabIndex = -1;
+            select.setAttribute('aria-hidden', 'true');
+          }
          if (dateTrigger) dateTrigger.disabled = !availablePickupDates.length;
          if (dateLabel) dateLabel.textContent = availablePickupDates.length ? 'Choose pickup date' : 'No pickup dates available';
          renderDateCalendar();
@@ -703,9 +798,6 @@
       }, options);
       shippingPostal.addEventListener('input', () => {
         invalidate();
-        shippingPostal.removeAttribute('aria-invalid');
-        setShippingStatus();
-        shippingResult.hidden = true;
       }, options);
       shippingPostal.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void run(); } }, options);
       pickupPostal.addEventListener('input', () => { invalidate(true); fieldError('pickup_postal'); }, options);
@@ -713,7 +805,6 @@
         invalidate(service === 'pickup');
         fieldError('address');
         fieldError('pickup_postal');
-        if (service === 'shipping') shippingResult.hidden = true;
       }, options);
       find('[data-clear]').addEventListener('click', () => { address.value = ''; invalidate(); clearSuggestion(); fieldError('address'); address.focus(); }, options);
       root.addEventListener('keydown', (event) => {
@@ -741,5 +832,16 @@
   document.addEventListener('DOMContentLoaded', initialize, { once: true });
   document.addEventListener('shopify:section:load', initialize);
   document.addEventListener('shopify:block:select', initialize);
+  if (typeof MutationObserver !== 'undefined' && document.documentElement) {
+    let scheduled = false;
+    const observer = new MutationObserver((records) => {
+      const inserted = records.some((record) => [...record.addedNodes].some((node) =>
+        node.matches?.('[data-template="service-tabs"]') || node.querySelector?.('[data-template="service-tabs"]')));
+      if (!inserted || scheduled) return;
+      scheduled = true;
+      Promise.resolve().then(() => { scheduled = false; initialize(); });
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
   initialize();
 })();

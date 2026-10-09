@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { proxyRequest } from './helpers/theme-proxy-request.mjs';
 
 const base = new URL('../extensions/pincode-checker/', import.meta.url);
 const source = (path) => readFileSync(new URL(path, base), 'utf8');
@@ -51,9 +52,11 @@ test('executed checker cancels queued policy refresh and rejects an in-flight po
       clearTimeout(id) { timers.delete(id); },
       window: { incodeThemeContext: {
         productForm: () => form, productContext: () => ({ variantId: 'gid://shopify/ProductVariant/84', quantity: 3 }),
+        productForms: () => [form], purchaseButtons: () => [submit],
+        contextKey: () => 'gid://shopify/ProductVariant/84:3', formContextKey: () => 'gid://shopify/ProductVariant/84:3',
         cartUrl: (path) => `/${path}`,
-        lockButtons: (_owner, buttons, disabled) => buttons.forEach((button) => {
-          if (disabled) button.dataset.pincodeAtcDisabled = 'true';
+        lockButtons: (_owner, buttons, disabled) => [submit].forEach((button) => {
+          if (disabled && buttons.includes(button)) button.dataset.pincodeAtcDisabled = 'true';
           else delete button.dataset.pincodeAtcDisabled;
         }),
         watch: (_root, callback) => { invalidate = callback; }
@@ -63,6 +66,7 @@ test('executed checker cancels queued policy refresh and rejects an in-flight po
         return new Promise((resolve) => requests.push({ url, options, resolve }));
       }
     };
+    context.window.incodeThemeContext.request = proxyRequest(context.fetch);
     vm.runInNewContext(script('delivery-checker'), context);
     requests[0].resolve({ ok: true, json: async () => ({ require_valid_pin: true }) });
     await settle();
@@ -140,7 +144,7 @@ test('executed ETA uses the general fallback on every automatic ETA surface', as
     root.querySelector = (selector) => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); };
     nodes.set('.incode-eta__status', { hidden: false, querySelector: () => node() });
     const requests = [];
-    vm.runInNewContext(script('estimated-delivery-date'), {
+    const context = {
       document: { getElementById: () => root }, URLSearchParams, AbortController,
       window: { incodeThemeContext: {
         productContext: () => ({ variantId: 'gid://shopify/ProductVariant/84', quantity: 4 }), watch() {},
@@ -148,7 +152,9 @@ test('executed ETA uses the general fallback on every automatic ETA surface', as
       } },
       clearTimeout() {},
       fetch: async (url) => { requests.push(url); return { ok: true, json: async () => ({ enabled: true }) }; }
-    });
+    };
+    context.window.incodeThemeContext.request = proxyRequest(context.fetch);
+    vm.runInNewContext(script('estimated-delivery-date'), context);
     await settle();
     const params = new URL(requests[0], 'https://shop.test').searchParams;
     assert.equal(params.get('targeted'), null);
@@ -164,7 +170,7 @@ test('product resolver uses verified main form outside app section and watches t
   main.id = 'main-product-form';
   const quantity = { value: '4', name: 'quantity', matches: () => true, form: main };
   const variant = { value: '84', name: 'id' };
-  main.elements = { namedItem: (name) => name === 'id' ? variant : quantity };
+  main.elements = Object.assign([variant, quantity], { namedItem: (name) => name === 'id' ? variant : quantity });
   main.querySelector = () => null;
   main.closest = () => null;
   main.contains = (target) => target === quantity;

@@ -205,13 +205,15 @@
 [data-template="service-tabs"] .ist-date-nav button:hover { background: #e4eff5; transform: none; }
 [data-template="service-tabs"] .ist-date-nav button:disabled { visibility: hidden; }
 [data-template="service-tabs"] .ist-date-weekdays, [data-template="service-tabs"] .ist-date-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+[data-template="service-tabs"] .ist-date-row { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+[data-template="service-tabs"] .ist-date-row > [role="gridcell"] { display: grid; min-width: 0; }
 [data-template="service-tabs"] .ist-date-weekdays { margin-bottom: 4px; color: #75808b; font-size: 10px; font-weight: 700; text-align: center; text-transform: uppercase; }
 [data-template="service-tabs"] .ist-date-day, [data-template="service-tabs"] .ist-date-empty { min-height: 34px; }
 [data-template="service-tabs"] .ist-date-day { min-width: 0; padding: 0; border: 1px solid transparent; border-radius: 8px; background: #fff; color: #27333e; font-size: 12px; }
 [data-template="service-tabs"] .ist-date-day:not(:disabled):hover { border-color: #397da8; background: #edf6fa; color: #174c6d; transform: none; }
 [data-template="service-tabs"] .ist-date-day:disabled { background: #f7f8fa; color: #c2c8ce; cursor: not-allowed; }
 [data-template="service-tabs"] .ist-date-day[data-selected="true"] { border-color: #1d5f8a; background: #1d5f8a; color: #fff; font-weight: 700; }
-[data-template="service-tabs"] .ist-date-picker[data-enhanced="true"] .ist-date-native { position: absolute; width: 1px !important; height: 1px !important; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+[data-template="service-tabs"] .ist-date-picker[data-enhanced="true"] .ist-date-native { display: none !important; }
 [data-template="service-tabs"] [data-delivery-details] { margin-top: 12px; }
 [data-template="service-tabs"] [data-delivery-details] > label { margin: 10px 0; }
 [data-template="service-tabs"] [data-delivery-field="date"] { background: #f7f9fb; color: #59616a; }

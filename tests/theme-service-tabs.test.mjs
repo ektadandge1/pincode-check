@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { setMaxListeners } from 'node:events';
+import { proxyRequest } from './helpers/theme-proxy-request.mjs';
 
 const base = new URL('../extensions/pincode-checker/', import.meta.url);
 const source = (path) => readFileSync(new URL(path, base), 'utf8');
@@ -105,6 +106,7 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
       return new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
     }
   });
+  helper.request = proxyRequest(context.fetch);
   vm.runInContext(code, context);
   const api = () => requests.filter((request) => request.url.startsWith('/apps/') && !request.url.includes('init=1'));
   const policyApi = () => requests.filter((request) => request.url.startsWith('/apps/') && request.url.includes('init=1'));
@@ -193,8 +195,9 @@ test('every cart service block initializes without suppressing duplicate blocks'
 test('cart placement exposes alignment, width, margin, and padding controls in the Theme Editor', () => {
   const liquid = source('blocks/delivery-service-options.liquid');
   assert.match(liquid, /data-cart-align=/);
+  const schema = JSON.parse(liquid.match(/{% schema %}([\s\S]*?){% endschema %}/)[1]);
   for (const setting of ['cart_alignment', 'cart_width', 'cart_margin', 'cart_padding']) {
-    assert.match(liquid, new RegExp(`"id": "${setting}"`));
+    assert.ok(schema.settings.some((item) => item.id === setting), setting);
   }
   assert.match(liquid, /--ist-width:/);
   assert.match(liquid, /--ist-padding:/);
@@ -251,6 +254,10 @@ test('shipping uses the estimate enabled flag and displays its delivery date', a
   assert.equal(query.get('country'), 'CA');
   assert.equal(query.get('postal_code'), 'K1A 0B1');
   assert.equal(query.get('estimate'), '1');
+  assert.equal(query.has('cartItems'), false);
+  assert.equal(data.api()[0].options.method, 'POST');
+  assert.equal(data.api()[0].options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(data.api()[0].options.body).cartItems, [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 3 }]);
   data.respond(data.api()[0], { enabled: true, delivery_date_range: 'Oct 12 to Oct 14, 2026' });
   await pending;
   assert.equal(data.nodes.get('[data-shipping-status]').textContent, '');
@@ -276,7 +283,10 @@ test('cart delivery automatically verifies a fresh snapshot and persists deliver
   const query = new URL(data.api()[0].url, 'https://shop.test').searchParams;
   assert.equal(query.get('country'), 'CA');
   assert.equal(query.get('postal_code'), 'K1A 0B1');
-  assert.ok(query.has('cartItems'));
+  assert.equal(query.has('cartItems'), false);
+  assert.equal(data.api()[0].options.method, 'POST');
+  assert.equal(data.api()[0].options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(data.api()[0].options.body).cartItems, [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 3 }]);
   data.respond(data.api()[0], { local_delivery_available: true, postal_code: 'K1A 0B1' });
   await pending;
   await settle();
@@ -389,7 +399,10 @@ test('complete pickup details debounce, revalidate on the server, verify the car
   assert.equal(validation.get('service_options'), '1');
   assert.equal(validation.get('pickup_location_id'), 'loc-1');
   assert.equal(validation.get('pickup_date'), '2026-10-09');
-  assert.ok(validation.has('cartItems'));
+  assert.equal(validation.has('cartItems'), false);
+  assert.equal(data.api()[1].options.method, 'POST');
+  assert.equal(data.api()[1].options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(data.api()[1].options.body).cartItems, [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 3 }]);
   data.respond(data.api()[1], { pickup_locations: locations, pickup_selection_valid: true });
   await settle();
   const attributes = JSON.parse(data.writes().at(-1).options.body).attributes;

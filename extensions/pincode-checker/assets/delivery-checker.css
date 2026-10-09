@@ -958,3 +958,6 @@ padding-inline: 4px;
 @container (max-width: 600px) {
   .pin-checker .pin-checker__journey-title { flex-wrap: wrap; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .pin-checker__option-mark { animation: none !important; transition: none !important; }
+}

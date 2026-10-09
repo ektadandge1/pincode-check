@@ -1,8 +1,13 @@
 (() => {
-  const initialize = () => {
+  if (window.incodeProductServiceInit) { window.incodeProductServiceInit(); return; }
+  const instances = new Map();
+  const unloaded = new WeakSet();
+  const initialize = (event) => {
+    if (!window.incodeThemeContext) return;
+    for (const [root, cleanup] of instances) if (!root.isConnected) cleanup();
     document.querySelectorAll('[data-product-service]').forEach((root) => {
-      if (!root.isConnected || root.dataset.productServiceReady === 'true') return;
-      root.dataset.productServiceReady = 'true';
+      if (event?.type === 'shopify:section:load' && event.target?.contains?.(root)) unloaded.delete(root);
+      if (!root.isConnected || instances.has(root) || unloaded.has(root)) return;
       const find = (selector) => root.querySelector(selector);
       const country = find('[data-product-country]');
       const postal = find('[data-product-postal]');
@@ -13,6 +18,10 @@
       const availability = find('[data-product-availability]');
       const local = find('[data-product-local]');
       const pickup = find('[data-product-pickup]');
+      if (!country || !postal || !button || !status || !result || !local || !pickup) return;
+      root.dataset.productServiceReady = 'true';
+      const events = new AbortController();
+      const options = { signal: events.signal };
       let active;
       let version = 0;
       let disposed = false;
@@ -34,15 +43,21 @@
         setStatus();
       };
       const current = (stamp) => !disposed && root.isConnected && stamp === version;
-      const options = window.incodeThemeContext.watch(root, () => {
+      const cleanup = () => {
+        if (disposed) return;
+        disposed = true;
+        invalidate();
+        events.abort();
+        instances.delete(root);
+        delete root.dataset.productServiceReady;
+      };
+      instances.set(root, cleanup);
+      window.incodeThemeContext.watch(root, () => {
+        if (disposed) return;
         const shouldCheck = Boolean(postal.value.trim());
         invalidate();
         if (shouldCheck) void check();
-      }, () => {
-        disposed = true;
-        invalidate();
-        delete root.dataset.productServiceReady;
-      });
+      }, cleanup);
       const render = (data) => {
         const available = data.available === true;
         result.hidden = false;
@@ -71,6 +86,7 @@
         copy.textContent = data.pickup_instructions || '';
       };
       async function check() {
+        if (disposed || !root.isConnected) return;
         invalidate();
         const stamp = version;
         if (!postal.value.trim()) {
@@ -89,10 +105,10 @@
             postal_code: postal.value.trim(),
             surface: 'product',
             productId: root.dataset.productId || '',
-            variantId: context.variantId || root.dataset.initialVariant || '',
+            variantId: context.variantId || '',
             qty: String(context.quantity || 1),
           });
-          const response = await fetch(`/apps/delivery-checker?${query}`, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+          const response = await window.incodeThemeContext.request(root, query, { signal: controller.signal, cache: 'no-store', headers: { Accept: 'application/json' } });
           const data = await response.json();
           if (!current(stamp)) return;
           if (!response.ok) throw new Error(data.message || 'Unable to check delivery options right now.');
@@ -114,15 +130,11 @@
       if (savedPostal && postal.value.trim() === savedPostal) void check();
     });
   };
-  if (window.incodeThemeContext) initialize();
-  else {
-    const ready = () => {
-      if (!window.incodeThemeContext) return;
-      document.removeEventListener('incode:theme-context-ready', ready);
-      document.removeEventListener('DOMContentLoaded', ready);
-      initialize();
-    };
-    document.addEventListener('incode:theme-context-ready', ready);
-    document.addEventListener('DOMContentLoaded', ready, { once: true });
-  }
+  window.incodeProductServiceInit = initialize;
+  ['incode:theme-context-ready', 'DOMContentLoaded', 'shopify:section:load'].forEach((name) => document.addEventListener(name, initialize));
+  document.addEventListener('shopify:section:unload', (event) => {
+    for (const [root, cleanup] of instances) if (event.target?.contains?.(root)) { unloaded.add(root); cleanup(); }
+  });
+  if (typeof MutationObserver !== 'undefined' && document.documentElement) new MutationObserver(initialize).observe(document.documentElement, { childList: true, subtree: true });
+  initialize();
 })();

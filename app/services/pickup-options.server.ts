@@ -1,7 +1,8 @@
 import prisma from "../db.server";
 import { checkVariantInventory } from "../utils/variant-inventory";
 import {
-  aggregateCartDeliveryItems, matchesPostalPattern, normalizeCountryCode, normalizePostalCode,
+  mapCartDeliveryItems, MAX_CART_DELIVERY_ITEMS, validDeliveryQuantity,
+  matchesPostalPattern, normalizeCountryCode, normalizePostalCode,
   parsePostalPattern, postalPatternSpecificity, postalCodeLookupValues, validatePostalCode, type CartDeliveryItemInput,
 } from "../utils/delivery.server";
 import { isPickupDate, pickupAvailableDates, type PickupSchedule } from "../utils/pickup-schedule";
@@ -34,9 +35,9 @@ export async function getPickupOptions(input: {
   if (selection && (!/^(?:gid:\/\/shopify\/Location\/)?[0-9]+$/.test(input.pickupLocationId ?? "")
     || !isPickupDate(input.pickupDate ?? ""))) throw new RangeError("Invalid pickup selection");
   if (!input.shop || !input.admin) throw new Error("Pickup context unavailable");
-  if (!input.complete || !input.items.length || input.items.length > 20
+  if (!input.complete || !input.items.length || input.items.length > MAX_CART_DELIVERY_ITEMS
     || input.items.some((item) => !/^(?:gid:\/\/shopify\/ProductVariant\/)?[0-9]+$/.test(item.variantId ?? "")
-      || !Number.isInteger(item.quantity) || item.quantity! < 1 || item.quantity! > 999)) {
+      || !validDeliveryQuantity(item.quantity))) {
     throw new RangeError("Invalid pickup items");
   }
   const rules = await prisma.fulfillmentLocationRule.findMany({
@@ -118,11 +119,11 @@ export async function getPickupOptions(input: {
     if (!pickupAllowed(item)) return false;
     return matchesLocationTarget(rule, "pickup", { ...item, zoneId });
   }));
-  const inventories = eligibleRules.length ? await Promise.all(aggregateCartDeliveryItems(input.items).map(async ({ item }) => {
+  const inventories = eligibleRules.length ? await mapCartDeliveryItems(input.items, async ({ item }) => {
     const inventory = await checkVariantInventory(input.admin, item.variantId!);
     if (!inventory) throw new Error("Pickup inventory unavailable");
     return { inventory, quantity: item.quantity! };
-  })) : [];
+  }) : [];
   const stocked = eligibleRules.filter((rule) => inventories.every(({ inventory, quantity }) =>
     inventory.levels.some((level) => level.locationId === rule.shopifyLocationId && level.active
       && level.fulfillsOnlineOrders && level.available >= quantity)));

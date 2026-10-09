@@ -1,60 +1,60 @@
 {% liquid
-  assign inline_items = ''
-  if template.name == 'collection'
-    for inline_product in collection.products limit: 50
-      unless forloop.first
-        assign inline_items = inline_items | append: ','
-      endunless
-      capture inline_item
-        echo '{"key":'
-        echo inline_product.handle | json
-        echo ',"productId":'
-        echo inline_product.id | json
-        echo '}'
-      endcapture
-      assign inline_items = inline_items | append: inline_item
-    endfor
-  elsif template.name == 'search'
-    for inline_result in search.results limit: 50
-      if inline_result.object_type == 'product'
-        if inline_items != ''
-          assign inline_items = inline_items | append: ','
-        endif
-        capture inline_item
-          echo '{"key":'
-          echo inline_result.handle | json
-          echo ',"productId":'
-          echo inline_result.id | json
-          echo '}'
-        endcapture
-        assign inline_items = inline_items | append: inline_item
-      endif
-    endfor
-  elsif template.name == 'cart'
-    for inline_item in cart.items limit: 50
-      unless forloop.first
-        assign inline_items = inline_items | append: ','
-      endunless
-      capture cart_item_json
-        echo '{"key":'
-        echo inline_item.key | json
-        echo ',"productId":'
-        echo inline_item.product_id | json
-        echo '}'
-      endcapture
-      assign inline_items = inline_items | append: cart_item_json
-    endfor
-  endif
-  assign inline_items = inline_items | prepend: '[' | append: ']'
-  assign inline_country = localization.country.iso_code | default: 'US'
-  assign inline_saved_postal = ''
-  if customer and customer.default_address
-    assign inline_country = customer.default_address.country_code | default: inline_country
-    assign inline_saved_postal = customer.default_address.zip | default: ''
-  endif
+assign inline_items = ''
+if template.name == 'collection'
+for inline_product in collection.products limit: 50
+unless forloop.first
+assign inline_items = inline_items | append: ','
+endunless
+capture inline_item
+echo '{"key":'
+echo inline_product.handle | json
+echo ',"productId":'
+echo inline_product.id | json
+echo '}'
+endcapture
+assign inline_items = inline_items | append: inline_item
+endfor
+elsif template.name == 'search'
+for inline_result in search.results limit: 50
+if inline_result.object_type == 'product'
+if inline_items != ''
+assign inline_items = inline_items | append: ','
+endif
+capture inline_item
+echo '{"key":'
+echo inline_result.handle | json
+echo ',"productId":'
+echo inline_result.id | json
+echo '}'
+endcapture
+assign inline_items = inline_items | append: inline_item
+endif
+endfor
+elsif template.name == 'cart'
+for inline_item in cart.items limit: 50
+unless forloop.first
+assign inline_items = inline_items | append: ','
+endunless
+capture cart_item_json
+echo '{"key":'
+echo inline_item.key | json
+echo ',"productId":'
+echo inline_item.product_id | json
+echo '}'
+endcapture
+assign inline_items = inline_items | append: cart_item_json
+endfor
+endif
+assign inline_items = inline_items | prepend: '[' | append: ']'
+assign inline_country = localization.country.iso_code | default: 'US'
+assign inline_saved_postal = ''
+if customer and customer.default_address
+assign inline_country = customer.default_address.country_code | default: inline_country
+assign inline_saved_postal = customer.default_address.zip | default: ''
+endif
 %}
 
-<div class="incode-inline-delivery" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ inline_country }}" data-saved-postal="{{ inline_saved_postal | escape }}">
+<div class="incode-inline-delivery" data-proxy-path="{{ block.settings.proxy_path | escape }}" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ inline_country }}" data-saved-postal="{{ inline_saved_postal | escape }}">
   <script type="application/json" data-inline-items>{{ inline_items }}</script>
 </div>
 
@@ -73,9 +73,5 @@
 </style>
 
 {% schema %}
-{
-  "name": "ETADeliverPickup",
-  "target": "body",
-  "settings": []
-}
+{"name":"ETADeliverPickup","target":"body","settings":[{"type":"text","id":"proxy_path","label":"App proxy path","default":"/apps/delivery-checker","info":"Match the customized Shopify app proxy path, including its prefix (for example /apps/delivery-checker)."}]}
 {% endschema %}

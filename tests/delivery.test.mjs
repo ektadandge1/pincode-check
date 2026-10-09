@@ -204,19 +204,19 @@ test("delivery calculations reject a schedule with all seven weekdays closed", (
   }), /cannot close all seven weekdays/);
 });
 
-test("cart parsing accepts 20 complete lines and rejects oversized input", () => {
+test("cart parsing accepts 250 complete lines and rejects oversized input", () => {
   const malformed = parseCartDeliveryItems('[{"variantId":"gid://variant/1","quantity":"many"}]');
   assert.equal(malformed.error, "invalid_cart");
   assert.equal(malformed.complete, false);
 
-  const limitPayload = Array.from({ length: 20 }, (_, index) => ({
+  const limitPayload = Array.from({ length: 250 }, (_, index) => ({
     productId: index + 1,
     variantId: `gid://shopify/ProductVariant/${index + 1}`,
     quantity: 1,
   }));
   const atLimit = parseCartDeliveryItems(JSON.stringify(limitPayload));
   assert.equal(atLimit.error, undefined);
-  assert.equal(atLimit.items.length, 20);
+  assert.equal(atLimit.items.length, 250);
   assert.equal(atLimit.complete, true);
 
   const oversized = parseCartDeliveryItems(JSON.stringify([...limitPayload, limitPayload[0]]));

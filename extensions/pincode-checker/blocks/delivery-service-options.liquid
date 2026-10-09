@@ -53,7 +53,7 @@ endif
 %}
 
 {% if service_layout == 'service-tabs' %}
-<div id="incode-service-tabs-{{ service_id }}" data-template="service-tabs" data-surface="{{ template.name | escape }}" data-cart-align="{{ block.settings.cart_alignment | default: 'center' | escape }}" style="--ist-width:{{ block.settings.cart_width | default: 410 }}px;--ist-margin:{{ block.settings.cart_margin | default: 16 }}px;--ist-padding:{{ block.settings.cart_padding | default: 16 }}px" data-product-id="{{ service_product_id | escape }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-show-pickup="{{ block.settings.show_store_pickup }}" data-show-local="{{ block.settings.show_local_delivery }}" data-pickup-display="{{ block.settings.pickup_display | default: 'all' | escape }}" data-saved-postal="{{ service_saved_postal | escape }}" data-saved-country="{{ service_saved_country | escape }}" data-saved-address="{{ service_saved_address | escape }}" {{ block.shopify_attributes }}>
+<div id="incode-service-tabs-{{ service_id }}" data-proxy-path="{{ block.settings.proxy_path | escape }}" data-template="service-tabs" data-surface="{{ template.name | escape }}" data-cart-align="{{ block.settings.cart_alignment | default: 'center' | escape }}" style="--ist-width:{{ block.settings.cart_width | default: 410 }}px;--ist-margin:{{ block.settings.cart_margin | default: 16 }}px;--ist-padding:{{ block.settings.cart_padding | default: 16 }}px" data-product-id="{{ service_product_id | escape }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-show-pickup="{{ block.settings.show_store_pickup }}" data-show-local="{{ block.settings.show_local_delivery }}" data-pickup-display="{{ block.settings.pickup_display | default: 'all' | escape }}" data-saved-postal="{{ service_saved_postal | escape }}" data-saved-country="{{ service_saved_country | escape }}" data-saved-address="{{ service_saved_address | escape }}" {{ block.shopify_attributes }}>
 <div data-service-fallback><b>Shipping</b><b data-fallback-pickup>Store Pickup</b><b data-fallback-local>Delivery</b></div>
 <select data-country hidden>{% for country in localization.available_countries %}<option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }}</option>{% else %}<option value="{{ service_country | escape }}">{{ service_country | escape }}</option>{% endfor %}</select>
 </div>
@@ -61,6 +61,7 @@ endif
 <div
 id="incode-service-card-{{ service_id }}"
 class="incode-service-card"
+data-proxy-path="{{ block.settings.proxy_path | escape }}"
 data-product-id="{{ service_product_id | escape }}"
 data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
 data-country="{{ service_country | escape }}"
@@ -104,7 +105,7 @@ data-surface="{{ template.name | escape }}"
 {% endif %}
 
 <p class="incode-service-card__status" role="status" aria-live="polite"></p>
-<div class="incode-service-card__result" hidden>
+<div class="incode-service-card__result" hidden role="status">
 <div class="incode-service-card__result-head">
 <span data-result-destination></span>
 <b data-result-availability></b>
@@ -153,44 +154,5 @@ data-surface="{{ template.name | escape }}"
 {% endif %}
 
 {% schema %}
-{
-"name": "Local delivery & pickup",
-"target": "section",
-"enabled_on": { "templates": ["product", "cart"] },
-"settings": [
-{ "type": "select", "id": "layout", "label": "Layout", "default": "service-tabs", "options": [{ "value": "service-tabs", "label": "Delivery & pickup tabs" }, { "value": "standard", "label": "Previous card" }] },
-{ "type": "checkbox", "id": "show_local_delivery", "label": "Local delivery", "default": true },
-{ "type": "checkbox", "id": "show_store_pickup", "label": "Store pickup", "default": true },
-{ "type": "select", "id": "pickup_display", "label": "Pickup locations", "default": "all", "options": [{ "value": "all", "label": "All locations" }, { "value": "customer-postal", "label": "By customer ZIP" }] },
-{ "type": "select", "id": "cart_alignment", "label": "Cart alignment", "default": "center", "options": [{ "value": "left", "label": "Left" }, { "value": "center", "label": "Center" }, { "value": "right", "label": "Right" }] },
-{ "type": "range", "id": "cart_width", "label": "Cart width", "min": 280, "max": 1000, "step": 10, "unit": "px", "default": 410 },
-{ "type": "range", "id": "cart_margin", "label": "Cart margin", "min": 0, "max": 80, "step": 2, "unit": "px", "default": 16 },
-{ "type": "range", "id": "cart_padding", "label": "Cart padding", "min": 0, "max": 40, "step": 2, "unit": "px", "default": 16 },
-{ "type": "header", "content": "Previous card settings" },
-{ "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery options" },
-{ "type": "text", "id": "supporting_text", "label": "Supporting text", "default": "Check local delivery and store pickup." },
-{ "type": "text", "id": "button_label", "label": "Button label", "default": "Check availability" },
-{ "type": "checkbox", "id": "show_estimated_delivery", "label": "Delivery estimate", "default": true },
-{ "type": "color", "id": "accent_color", "label": "Accent color", "default": "#1f4f91" },
-{ "type": "color", "id": "background_color", "label": "Background", "default": "#ffffff" },
-{ "type": "color", "id": "option_background", "label": "Option background", "default": "#fff8e8" },
-{ "type": "color", "id": "text_color", "label": "Text color", "default": "#172033" },
-{ "type": "select", "id": "icon_style", "label": "Service icons", "default": "delivery", "options": [
-{ "value": "delivery", "label": "Outline" },
-{ "value": "duotone", "label": "Duotone" },
-{ "value": "number", "label": "Checkmark" },
-{ "value": "circle", "label": "Circle" },
-{ "value": "minimal", "label": "Minimal" },
-{ "value": "emoji", "label": "Emoji" }
-] },
-{ "type": "select", "id": "effect", "label": "Icon effect", "default": "soft", "options": [
-{ "value": "soft", "label": "Soft" },
-{ "value": "pulse", "label": "Pulse" },
-{ "value": "float", "label": "Float" },
-{ "value": "shimmer", "label": "Shimmer" },
-{ "value": "none", "label": "None" }
-] },
-{ "type": "range", "id": "corner_radius", "label": "Radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 16 }
-]
-}
+{"name":"Local delivery & pickup","target":"section","enabled_on":{"templates":["product","cart"]},"settings":[{"type":"text","id":"proxy_path","label":"App proxy path","default":"/apps/delivery-checker","info":"Match the customized Shopify app proxy path, including its prefix (for example /apps/delivery-checker)."},{"type":"select","id":"layout","label":"Layout","default":"service-tabs","options":[{"value":"service-tabs","label":"Delivery & pickup tabs"},{"value":"standard","label":"Previous card"}]},{"type":"checkbox","id":"show_local_delivery","label":"Local delivery","default":true},{"type":"checkbox","id":"show_store_pickup","label":"Store pickup","default":true},{"type":"select","id":"pickup_display","label":"Pickup locations","default":"all","options":[{"value":"all","label":"All locations"},{"value":"customer-postal","label":"By customer ZIP"}]},{"type":"select","id":"cart_alignment","label":"Cart alignment","default":"center","options":[{"value":"left","label":"Left"},{"value":"center","label":"Center"},{"value":"right","label":"Right"}]},{"type":"range","id":"cart_width","label":"Cart width","min":280,"max":1000,"step":10,"unit":"px","default":410},{"type":"range","id":"cart_margin","label":"Cart margin","min":0,"max":80,"step":2,"unit":"px","default":16},{"type":"range","id":"cart_padding","label":"Cart padding","min":0,"max":40,"step":2,"unit":"px","default":16},{"type":"header","content":"Previous card settings"},{"type":"text","id":"heading","label":"Heading","default":"Check delivery options"},{"type":"text","id":"supporting_text","label":"Supporting text","default":"Check local delivery and store pickup."},{"type":"text","id":"button_label","label":"Button label","default":"Check availability"},{"type":"checkbox","id":"show_estimated_delivery","label":"Delivery estimate","default":true},{"type":"color","id":"accent_color","label":"Accent color","default":"#1f4f91"},{"type":"color","id":"background_color","label":"Background","default":"#ffffff"},{"type":"color","id":"option_background","label":"Option background","default":"#fff8e8"},{"type":"color","id":"text_color","label":"Text color","default":"#172033"},{"type":"select","id":"icon_style","label":"Service icons","default":"delivery","options":[{"value":"delivery","label":"Outline"},{"value":"duotone","label":"Duotone"},{"value":"number","label":"Checkmark"},{"value":"circle","label":"Circle"},{"value":"minimal","label":"Minimal"},{"value":"emoji","label":"Emoji"}]},{"type":"select","id":"effect","label":"Icon effect","default":"soft","options":[{"value":"soft","label":"Soft"},{"value":"pulse","label":"Pulse"},{"value":"float","label":"Float"},{"value":"shimmer","label":"Shimmer"},{"value":"none","label":"None"}]},{"type":"range","id":"corner_radius","label":"Radius","min":0,"max":24,"step":2,"unit":"px","default":16}]}
 {% endschema %}

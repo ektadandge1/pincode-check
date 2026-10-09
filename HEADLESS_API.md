@@ -49,7 +49,7 @@ For `check`, `methods`, and `estimate`, send a JSON object with only these field
 | `postal_code` | For `check` and `methods`, required nonblank string with at most 30 characters before trimming. The service additionally validates the country-specific postal format. For `estimate`, optional; if provided must be a string of at most 30 characters. |
 | `product_id` | Optional numeric ID **string** or `gid://shopify/Product/<digits>`. |
 | `variant_id` | Optional numeric ID **string** or `gid://shopify/ProductVariant/<digits>`. |
-| `quantity` | Integer number from 1 through 999. Missing defaults to 1. Null, strings and booleans are rejected. |
+| `quantity` | Integer number from 1 through 2147483647 (Shopify GraphQL `Int` maximum). Missing defaults to 1. Null, strings and booleans are rejected. |
 | `cod_requested` | Optional boolean. Missing defaults to false; `null`, numbers, and strings are rejected. |
 
 Arrays, null, primitives, and unknown fields are rejected. IDs are not trimmed or coerced; wrong-resource GIDs, signs, decimals, and suffixes are rejected. Syntax alone does not prove an ID exists: supplied products and variants must be verified against Shopify, and a supplied product/variant pair must match. Product vendor, tags, and collection context are resolved server-side, not accepted from the caller.
@@ -112,7 +112,7 @@ Successful operations return HTTP 200:
 ```json
 {
   "success": false,
-  "error": { "code": "invalid_quantity", "message": "quantity must be an integer between 1 and 999." },
+  "error": { "code": "invalid_quantity", "message": "quantity must be an integer between 1 and 2147483647." },
   "request_id": "<UUID>"
 }
 ```

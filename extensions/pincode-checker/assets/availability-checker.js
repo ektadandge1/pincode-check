@@ -1,9 +1,11 @@
 (() => {
   if (window.incodeAvailabilityChecker) return;
+  const instances = new WeakSet();
   const initialize = () => {
     if (!window.incodeThemeContext) return;
-    document.querySelectorAll('.incode-availability:not([data-ready])').forEach((root) => {
-      if (!root.isConnected) return;
+    document.querySelectorAll('.incode-availability').forEach((root) => {
+      if (!root.isConnected || instances.has(root)) return;
+      instances.add(root);
       root.dataset.ready = 'true';
       const country = root.querySelector('select');
       const postal = root.querySelector('input');
@@ -19,7 +21,12 @@
         delete status.dataset.state;
         status.textContent = '';
       };
-      const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
+      const eventOptions = window.incodeThemeContext.watch(root, invalidate, () => {
+        invalidate();
+        instances.delete(root);
+        delete root.dataset.ready;
+        root.querySelector('[data-incode-postal-history]')?.remove();
+      });
       const rememberPostal = window.incodeThemeContext.postalHistory?.(root, postal, country, eventOptions);
       const check = async () => {
         invalidate();
@@ -41,7 +48,7 @@
             params.set('qty', String(quantity));
           }
           if (current !== version || !root.isConnected) return;
-          const response = await fetch(`/apps/delivery-checker?${params}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+          const response = await window.incodeThemeContext.request(root, params, { signal: controller.signal, headers: { Accept: 'application/json' } });
           const data = await response.json();
           if (current !== version || !root.isConnected) return;
           if (!response.ok || typeof data?.available !== 'boolean') {

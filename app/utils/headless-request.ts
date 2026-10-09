@@ -1,4 +1,5 @@
 import { COUNTRY_CODES } from "./countries.ts";
+import { MAX_DELIVERY_QUANTITY, validDeliveryQuantity } from "./delivery.server.ts";
 
 export class HeadlessRequestError extends Error {
   code: string;
@@ -35,8 +36,8 @@ export function parseHeadlessDeliveryInput(body: unknown, estimate = false) {
     }
   }
   const quantity = value.quantity === undefined ? 1 : value.quantity;
-  if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
-    throw new HeadlessRequestError("invalid_quantity", "quantity must be an integer between 1 and 999.");
+  if (!validDeliveryQuantity(quantity)) {
+    throw new HeadlessRequestError("invalid_quantity", `quantity must be an integer between 1 and ${MAX_DELIVERY_QUANTITY}.`);
   }
   if (value.cod_requested !== undefined && typeof value.cod_requested !== "boolean") {
     throw new HeadlessRequestError("invalid_request", "cod_requested must be boolean.");

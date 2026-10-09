@@ -5,7 +5,9 @@ import { checkVariantInventory, type VariantInventoryResult } from "../utils/var
 import { deliveryCacheEntry, readDeliveryCache, type DeliveryCacheEntry } from "../utils/delivery-check-cache";
 import { cartLocationOptions, commonCartShippingMethods } from "../utils/cart-location-options";
 import {
-  aggregateCartDeliveryItems,
+  mapCartDeliveryItems,
+  MAX_CART_DELIVERY_ITEMS,
+  validDeliveryQuantity,
   aggregateDeliveryDateWindow,
   computeDeliveryDetails,
   formatReadableDate,
@@ -1352,10 +1354,10 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
 export type CartDeliveryItem = CartDeliveryItemInput;
 
 function validGeneralCart(items: CartDeliveryItem[], complete: boolean): boolean {
-  return complete && items.length > 0 && items.length <= 20 && items.every((item) =>
+  return complete && items.length > 0 && items.length <= MAX_CART_DELIVERY_ITEMS && items.every((item) =>
     /^(?:gid:\/\/shopify\/ProductVariant\/)?[0-9]+$/.test(item.variantId ?? "")
     && /^(?:gid:\/\/shopify\/Product\/)?[0-9]+$/.test(item.productId ?? "")
-    && Number.isInteger(item.quantity) && item.quantity! > 0,
+    && validDeliveryQuantity(item.quantity),
   );
 }
 
@@ -1368,9 +1370,9 @@ export async function getGeneralCartDeliveryEstimate(
   if (!validGeneralCart(items, complete)) {
     return { enabled: false, reason: complete ? "invalid_cart" : "cart_incomplete", cart_complete: false };
   }
-  const estimates = await Promise.all(aggregateCartDeliveryItems(items).map(({ item }) =>
+  const estimates = await mapCartDeliveryItems(items, ({ item }) =>
     getGeneralDeliveryEstimate({ ...input, ...item }),
-  ));
+  );
   const failed = estimates.find((estimate) => !estimate.enabled);
   if (failed) return { ...failed, enabled: false, cart_complete: true, cart_items_checked: items.length };
   const window = aggregateDeliveryDateWindow(estimates);
@@ -1407,9 +1409,9 @@ export async function checkCartDeliveryPolicy(
       message: "Full cart delivery policy could not be verified.",
     };
   }
-  const policies = await Promise.all(aggregateCartDeliveryItems(items).map(({ item }) =>
+  const policies = await mapCartDeliveryItems(items, ({ item }) =>
     checkDeliveryPolicy({ ...input, ...item }),
-  ));
+  );
   const failure = policies.find((policy) => policy.reason);
   const requireValidPin = policies.some((policy) => policy.require_valid_pin);
   return {
@@ -1431,32 +1433,35 @@ export async function checkCartDelivery(
   items: CartDeliveryItem[],
   options: { complete?: boolean } = {},
 ): Promise<DeliveryResult> {
-  const boundedItems = items.slice(0, 20);
-  if (boundedItems.length === 0) {
+  const complete = options.complete !== false;
+  if (!validGeneralCart(items, complete)) {
     const country = normalizeCountryCode(input.country);
     return {
       available: false,
       country,
       postal_code: normalizePostalCode(country, input.postalCode ?? ""),
       source: "none",
-      reason: "invalid_cart",
+      reason: !complete && items.length > 0 ? "cart_incomplete" : "invalid_cart",
       cart_complete: false,
       cart_items_checked: 0,
       disable_add_to_cart: true,
       require_valid_pin: true,
+      shipping_available: false,
+      local_delivery_available: false,
+      pickup_available: false,
+      shipping_methods: [],
       message: "Full cart delivery context could not be verified.",
     };
   }
 
-  const aggregatedItems = aggregateCartDeliveryItems(boundedItems);
-  const checked = await Promise.all(aggregatedItems.map(async ({ item, itemCount }) => ({
+  const checked = await mapCartDeliveryItems(items, async ({ item, itemCount }) => ({
     itemCount,
     result: await checkDelivery({
       ...input,
       ...item,
       trackAnalytics: false,
     }),
-  })));
+  }));
   const results = checked.map(({ result }) => result);
   const unavailableItems = checked.reduce(
     (total, entry) => total + (entry.result.available ? 0 : entry.itemCount),
@@ -1465,31 +1470,15 @@ export async function checkCartDelivery(
   const latest = [...results].sort((a, b) =>
     String(b.estimated_date ?? "").localeCompare(String(a.estimated_date ?? "")),
   )[0];
-  const cartComplete = options.complete !== false && items.length <= 20;
   const dateWindow = aggregateDeliveryDateWindow(results);
-  const locationOptions = cartLocationOptions(results, cartComplete);
-
-  if (!cartComplete) {
-    return {
-      ...(results.find((result) => !result.available) ?? latest),
-      ...dateWindow,
-      ...locationOptions,
-      shipping_methods: [],
-      available: false,
-      reason: "cart_incomplete",
-      cart_items_checked: boundedItems.length,
-      cart_complete: false,
-      unavailable_items: unavailableItems,
-      message: `Only ${boundedItems.length} cart items were received. Full cart delivery availability could not be verified.`,
-    };
-  }
+  const locationOptions = cartLocationOptions(results, true);
 
   if (unavailableItems > 0) {
     return {
       ...results.find((result) => !result.available)!,
       ...locationOptions,
       shipping_methods: [],
-      cart_items_checked: boundedItems.length,
+      cart_items_checked: items.length,
       cart_complete: true,
       unavailable_items: unavailableItems,
       message: unavailableItems === 1
@@ -1502,7 +1491,7 @@ export async function checkCartDelivery(
   const combined: DeliveryResult = {
     ...latest,
     ...dateWindow,
-    cart_items_checked: boundedItems.length,
+    cart_items_checked: items.length,
     cart_complete: true,
     unavailable_items: 0,
     ...locationOptions,
@@ -1514,7 +1503,7 @@ export async function checkCartDelivery(
     delivery_charge: results.some((result) => result.delivery_charge !== null && result.delivery_charge !== undefined)
       ? results.reduce((total, result) => total + (result.delivery_charge ?? 0), 0)
       : null,
-    message: `All ${boundedItems.length} cart items can be delivered by ${dateWindow.estimated_date_max_label ?? dateWindow.estimated_date_max}.`,
+    message: `All ${items.length} cart items can be delivered by ${dateWindow.estimated_date_max_label ?? dateWindow.estimated_date_max}.`,
   };
   if (input.features?.analytics !== false && input.trackAnalytics !== false) {
     await trackSearchEvent(input, combined);

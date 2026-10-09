@@ -274,7 +274,7 @@ test("proxy estimate/init fail closed on inventory failures", async () => {
 test("proxy estimate/init reject malformed, missing, empty, incomplete and unverified carts", async () => {
   const { proxy } = fixture();
   for (const mode of ["estimate", "init"]) {
-    for (const cart of ["not json", undefined, [], [{ quantity: 1 }], Array.from({ length: 21 }, () => item(1))]) {
+    for (const cart of ["not json", undefined, [], [{ quantity: 1 }], Array.from({ length: 251 }, () => item(1))]) {
       const { response, body } = await proxy(mode, cart);
       assert.equal(response.status, 400);
       assert.equal(body.enabled, false);

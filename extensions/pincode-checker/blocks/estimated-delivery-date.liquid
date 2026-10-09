@@ -1,63 +1,64 @@
 {% liquid
-  assign eta_id = block.id | replace: '-', ''
-  assign eta_product = product
-  assign eta_product_id = ''
-  assign eta_vendor = ''
-  assign eta_tags = '[]'
-  assign eta_collections = '[]'
-  if eta_product
-    assign eta_product_id = eta_product.id
-    assign eta_vendor = eta_product.vendor
-    assign eta_tags = eta_product.tags | json
-    assign eta_collection_values = ''
-    for eta_collection in eta_product.collections limit: 20
-      assign eta_collection_json = eta_collection.handle | json
-      if eta_collection_values != ''
-        assign eta_collection_values = eta_collection_values | append: ','
-      endif
-      assign eta_collection_values = eta_collection_values | append: eta_collection_json
-    endfor
-    assign eta_collections = eta_collection_values | prepend: '[' | append: ']'
-  elsif collection
-    assign eta_collections = collection.handle | json | prepend: '[' | append: ']'
-  endif
-  assign eta_eyebrow = block.settings.eyebrow
-  if eta_eyebrow == blank
-    assign eta_eyebrow = 'automatic_eta.eyebrow' | t
-  endif
-  assign eta_heading = block.settings.heading
-  if eta_heading == blank
-    assign eta_heading = 'automatic_eta.heading' | t
-  endif
-  assign eta_country = localization.country.iso_code | default: 'US'
-  assign eta_saved_postal = ''
-  if customer and customer.default_address
-    assign eta_country = customer.default_address.country_code | default: eta_country
-    assign eta_saved_postal = customer.default_address.zip | default: ''
-  endif
-  assign eta_display_sections = ''
-  if block.settings.show_delivery_date
-    assign eta_display_sections = 'date'
-  endif
-  if block.settings.show_journey
-    if eta_display_sections != blank
-      assign eta_display_sections = eta_display_sections | append: ','
-    endif
-    assign eta_display_sections = eta_display_sections | append: 'journey'
-  endif
-  if block.settings.show_countdown
-    if eta_display_sections != blank
-      assign eta_display_sections = eta_display_sections | append: ','
-    endif
-    assign eta_display_sections = eta_display_sections | append: 'countdown'
-  endif
-  if eta_display_sections == blank
-    assign eta_display_sections = 'date'
-  endif
+assign eta_id = block.id | replace: '-', ''
+assign eta_product = product
+assign eta_product_id = ''
+assign eta_vendor = ''
+assign eta_tags = '[]'
+assign eta_collections = '[]'
+if eta_product
+assign eta_product_id = eta_product.id
+assign eta_vendor = eta_product.vendor
+assign eta_tags = eta_product.tags | json
+assign eta_collection_values = ''
+for eta_collection in eta_product.collections limit: 20
+assign eta_collection_json = eta_collection.handle | json
+if eta_collection_values != ''
+assign eta_collection_values = eta_collection_values | append: ','
+endif
+assign eta_collection_values = eta_collection_values | append: eta_collection_json
+endfor
+assign eta_collections = eta_collection_values | prepend: '[' | append: ']'
+elsif collection
+assign eta_collections = collection.handle | json | prepend: '[' | append: ']'
+endif
+assign eta_eyebrow = block.settings.eyebrow
+if eta_eyebrow == blank
+assign eta_eyebrow = 'automatic_eta.eyebrow' | t
+endif
+assign eta_heading = block.settings.heading
+if eta_heading == blank
+assign eta_heading = 'automatic_eta.heading' | t
+endif
+assign eta_country = localization.country.iso_code | default: 'US'
+assign eta_saved_postal = ''
+if customer and customer.default_address
+assign eta_country = customer.default_address.country_code | default: eta_country
+assign eta_saved_postal = customer.default_address.zip | default: ''
+endif
+assign eta_display_sections = ''
+if block.settings.show_delivery_date
+assign eta_display_sections = 'date'
+endif
+if block.settings.show_journey
+if eta_display_sections != blank
+assign eta_display_sections = eta_display_sections | append: ','
+endif
+assign eta_display_sections = eta_display_sections | append: 'journey'
+endif
+if block.settings.show_countdown
+if eta_display_sections != blank
+assign eta_display_sections = eta_display_sections | append: ','
+endif
+assign eta_display_sections = eta_display_sections | append: 'countdown'
+endif
+if eta_display_sections == blank
+assign eta_display_sections = 'date'
+endif
 %}
 
 <div
   id="incode-eta-{{ eta_id }}"
+  data-proxy-path="{{ block.settings.proxy_path | escape }}"
   class="incode-eta"
   data-product-id="{{ eta_product_id | escape }}"
   data-initial-variant="{{ product.selected_or_first_available_variant.id }}"
@@ -114,7 +115,7 @@
         <strong data-eta-delivery></strong>
       </div>
     </div>
-    <section class="incode-eta__countdown" data-eta-countdown hidden aria-live="polite">
+    <section class="incode-eta__countdown" data-eta-countdown hidden aria-live="off">
       <strong data-eta-countdown-title>{{ 'delivery_checker.countdown_title' | t }}</strong>
       <span>{{ 'delivery_checker.order_within' | t }}</span>
       <div data-eta-countdown-value></div>
@@ -192,9 +193,12 @@
 <script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
 <script>
   (() => {
-    const initialize = () => {
-    const root = document.getElementById('incode-eta-{{ eta_id }}');
-    if (!root || !root.isConnected || root.dataset.initialized === 'true') return;
+    if (window.incodeEtaInit) { window.incodeEtaInit(); return; }
+    const instances = new Map();
+    const unloaded = new WeakSet();
+    const initialize = (root) => {
+    if (!root || !root.isConnected || instances.has(root) || unloaded.has(root)) return;
+    if (!root.querySelector('.incode-eta__status span:last-child') || !root.querySelector('.incode-eta__content')) return;
     root.dataset.initialized = 'true';
     const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } };
     const hasProduct = Boolean(String(root.dataset.productId || '').trim());
@@ -203,6 +207,7 @@
     let refreshTimer = null;
     let expiryTimer = null;
     let countdownTimer = null;
+    let disposed = false;
     const calculating = root.querySelector('.incode-eta__status span:last-child').textContent;
     const fonts = {
       system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -211,21 +216,8 @@
       'dm-sans': "'DM Sans', system-ui, sans-serif",
       jakarta: "'Plus Jakarta Sans', system-ui, sans-serif"
     };
-    const applyDisplayMode = (value) => {
-      const sections = new Set(value === 'both' ? ['date', 'journey'] : String(value || 'date,journey').split(','));
-      const summary = root.querySelector('[data-eta-summary]');
-      const journey = root.querySelector('.incode-eta__journey');
-      const countdown = root.querySelector('[data-eta-countdown]');
-      const note = root.querySelector('[data-eta-note]');
-      root.dataset.displaySections = [...sections].join(',');
-      if (summary) summary.hidden = !sections.has('date');
-      if (journey) journey.hidden = !sections.has('journey');
-      if (countdown && !sections.has('countdown')) countdown.hidden = true;
-      if (note) note.hidden = !sections.has('date');
-    };
-    applyDisplayMode(root.dataset.displayMode);
-    const applyStorefrontStyle = (style) => {
-      if (root.dataset.appearanceSource === 'block' || !style || typeof style !== 'object') return;
+    const applyStorefrontStyle = (style, displayOnly = false) => {
+      if ((!displayOnly && root.dataset.appearanceSource === 'block') || !style || typeof style !== 'object') return;
       const setColor = (name, value) => {
         if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(name, value);
       };
@@ -265,6 +257,7 @@
         customStyle.textContent = style.custom_css;
       }
     };
+    applyStorefrontStyle({ eta_display_mode: root.dataset.displayMode }, true);
     const getSelectedVariantId = () => {
       if (!hasProduct) return '';
       return window.incodeThemeContext.productContext(root).variantId;
@@ -301,6 +294,7 @@
       countdownTimer = window.setInterval(updateCountdown, 1000);
     };
     const refresh = async () => {
+      if (disposed || !root.isConnected) return;
       const current = ++version;
       clearTimeout(expiryTimer);
       if (countdownTimer) window.clearInterval(countdownTimer);
@@ -332,7 +326,7 @@
           await window.incodeThemeContext.cartParams(params, controller.signal);
         }
         if (current !== version) return;
-        const response = await fetch(`/apps/delivery-checker?${params.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+        const response = await window.incodeThemeContext.request(root, params, { signal: controller.signal, headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error('request failed');
         const data = await response.json();
         if (current !== version || !root.isConnected) return;
@@ -355,6 +349,7 @@
       }
     };
     const invalidate = () => {
+      if (disposed) return;
       version += 1;
       active?.abort();
       root.querySelector('.incode-eta__content').hidden = true;
@@ -365,49 +360,40 @@
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refresh, 100);
     };
-    window.incodeThemeContext.watch(root, invalidate, () => {
+    const cleanup = () => {
+      if (disposed) return;
+      disposed = true;
+      instances.delete(root);
+      delete root.dataset.initialized;
       version += 1;
       active?.abort();
       clearTimeout(refreshTimer);
       clearTimeout(expiryTimer);
       if (countdownTimer) window.clearInterval(countdownTimer);
-    });
+    };
+    instances.set(root, cleanup);
+    window.incodeThemeContext.watch(root, invalidate, cleanup);
     refresh();
     };
-    if (window.incodeThemeContext) initialize();
-    else {
-      const ready = () => {
-        if (!window.incodeThemeContext) return;
-        document.removeEventListener('incode:theme-context-ready', ready);
-        document.removeEventListener('DOMContentLoaded', ready);
-        initialize();
-      };
-      document.addEventListener('incode:theme-context-ready', ready);
-      document.addEventListener('DOMContentLoaded', ready, { once: true });
-    }
+    const scan = (event) => {
+      if (!window.incodeThemeContext) return;
+      for (const [root, cleanup] of instances) if (!root.isConnected) cleanup();
+      const roots = document.querySelectorAll?.('.incode-eta');
+      (roots?.length ? roots : [document.getElementById('incode-eta-{{ eta_id }}')]).forEach((root) => {
+        if (event?.type === 'shopify:section:load' && event.target?.contains?.(root)) unloaded.delete(root);
+        initialize(root);
+      });
+    };
+    window.incodeEtaInit = scan;
+    ['incode:theme-context-ready', 'DOMContentLoaded', 'shopify:section:load'].forEach((name) => document.addEventListener?.(name, scan));
+    document.addEventListener?.('shopify:section:unload', (event) => {
+      for (const [root, cleanup] of instances) if (event.target?.contains?.(root)) { unloaded.add(root); cleanup(); }
+    });
+    if (typeof MutationObserver !== 'undefined' && document.documentElement) new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+    scan();
   })();
 </script>
 
 {% schema %}
-{
-  "name": "t:automatic_eta.schema.name",
-  "target": "section",
-  "enabled_on": {
-    "templates": ["product", "collection", "cart"]
-  },
-  "settings": [
-    { "type": "select", "id": "appearance_source", "label": "Appearance source", "default": "shop", "info": "Use shared app appearance or customize this block independently in the Theme Editor.", "options": [{ "value": "shop", "label": "Shared shop settings" }, { "value": "block", "label": "This block's settings" }] },
-    { "type": "text", "id": "eyebrow", "label": "t:automatic_eta.schema.eyebrow_label" },
-    { "type": "text", "id": "heading", "label": "t:automatic_eta.schema.heading_label" },
-    { "type": "header", "content": "t:automatic_eta.schema.content_heading" },
-    { "type": "checkbox", "id": "show_delivery_date", "label": "t:automatic_eta.schema.show_delivery_date", "default": true },
-    { "type": "checkbox", "id": "show_journey", "label": "t:automatic_eta.schema.show_journey", "default": true },
-    { "type": "checkbox", "id": "show_countdown", "label": "t:automatic_eta.schema.show_countdown", "default": true },
-    { "type": "color", "id": "accent_color", "label": "t:automatic_eta.schema.accent_color_label", "default": "#f47d32" },
-    { "type": "color", "id": "text_color", "label": "t:automatic_eta.schema.text_color_label", "default": "#1f2937" },
-    { "type": "color", "id": "card_color", "label": "t:automatic_eta.schema.card_color_label", "default": "#ffffff" },
-    { "type": "color", "id": "journey_color", "label": "t:automatic_eta.schema.journey_color_label", "default": "#fff4ec" },
-    { "type": "range", "id": "corner_radius", "label": "t:automatic_eta.schema.corner_radius_label", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 14 }
-  ]
-}
+{"name":"t:automatic_eta.schema.name","target":"section","enabled_on":{"templates":["product","collection","cart"]},"settings":[{"type":"text","id":"proxy_path","label":"App proxy path","default":"/apps/delivery-checker","info":"Match the customized Shopify app proxy path, including its prefix (for example /apps/delivery-checker)."},{"type":"select","id":"appearance_source","label":"Appearance source","default":"shop","info":"Use shared app appearance or customize this block independently in the Theme Editor.","options":[{"value":"shop","label":"Shared shop settings"},{"value":"block","label":"This block's settings"}]},{"type":"text","id":"eyebrow","label":"t:automatic_eta.schema.eyebrow_label"},{"type":"text","id":"heading","label":"t:automatic_eta.schema.heading_label"},{"type":"header","content":"t:automatic_eta.schema.content_heading"},{"type":"checkbox","id":"show_delivery_date","label":"t:automatic_eta.schema.show_delivery_date","default":true},{"type":"checkbox","id":"show_journey","label":"t:automatic_eta.schema.show_journey","default":true},{"type":"checkbox","id":"show_countdown","label":"t:automatic_eta.schema.show_countdown","default":true},{"type":"color","id":"accent_color","label":"t:automatic_eta.schema.accent_color_label","default":"#f47d32"},{"type":"color","id":"text_color","label":"t:automatic_eta.schema.text_color_label","default":"#1f2937"},{"type":"color","id":"card_color","label":"t:automatic_eta.schema.card_color_label","default":"#ffffff"},{"type":"color","id":"journey_color","label":"t:automatic_eta.schema.journey_color_label","default":"#fff4ec"},{"type":"range","id":"corner_radius","label":"t:automatic_eta.schema.corner_radius_label","min":0,"max":24,"step":2,"unit":"px","default":14}]}
 {% endschema %}

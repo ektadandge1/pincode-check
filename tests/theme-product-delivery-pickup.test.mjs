@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { proxyRequest } from './helpers/theme-proxy-request.mjs';
 
 const base = new URL('../extensions/pincode-checker/', import.meta.url);
 const source = (path) => readFileSync(new URL(path, base), 'utf8');
@@ -55,13 +56,15 @@ const fixture = () => {
       pickup_instructions: 'Bring confirmation.',
     }) };
   } });
+  helper.request = proxyRequest(context.fetch);
   vm.runInContext(code, context);
   return { nodes, requests };
 };
 
 test('product block is product-only and does not contain cart behavior', () => {
   const liquid = source('blocks/product-delivery-pickup.liquid');
-  assert.match(liquid, /"enabled_on": \{ "templates": \["product"\] \}/);
+  const schema = JSON.parse(liquid.match(/{% schema %}([\s\S]*?){% endschema %}/)[1]);
+  assert.deepEqual(schema.enabled_on.templates, ['product']);
   assert.match(liquid, /product-delivery-pickup\.css/);
   assert.match(liquid, /product-delivery-pickup\.js/);
   assert.doesNotMatch(liquid, /data-surface="cart"|cart\/update\.js|cart\.js/);

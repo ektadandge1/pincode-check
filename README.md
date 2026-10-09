@@ -111,3 +111,10 @@ GB,SW1A*,3,false,false,5,GBP,London SW postcodes,,london,false,false,true
 - **Require valid PIN before Add to Cart**: shop-wide default, overridable by the highest-precedence matching target (`true` locks, `false` exempts).
 - When locked, Add to Cart stays disabled until a serviceable delivery check succeeds. Editing the postal code or variant re-locks until the next successful check.
 - The theme block sends `productId`, `productTags`, and `collections` on each app-proxy check (`init=1` loads the initial lock policy).
+
+## Storefront Compatibility
+
+- Blocks reinitialize after Theme Editor section loads and AJAX section replacement. Purchase controls are associated with their product, variant, and quantity; unlocking never overrides the theme's native inventory-disabled state.
+- If the merchant customizes Shopify's app proxy prefix/subpath, set **App proxy path** on each enabled block/embed in the Theme Editor to the matching storefront path. The default remains `/apps/delivery-checker`.
+- Full-cart checks accept up to 250 lines and positive integer quantities up to Shopify's GraphQL `Int` maximum (2,147,483,647). Cart context uses bounded JSON POST requests, and invalid or incomplete carts fail closed rather than returning partial estimates.
+- Theme-side purchase protection is not a server-enforced checkout restriction. Custom AJAX purchase integrations and closed-shadow accelerated checkout controls still require live-theme verification. Automated tests do not establish compatibility with every theme or Shopify API throttling condition.

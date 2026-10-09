@@ -1,91 +1,91 @@
 {% liquid
-  assign block_id = block.id | replace: '-', ''
-  assign heading_text = block.settings.heading
-  if heading_text == blank
-    assign heading_text = 'delivery_checker.heading' | t
-  endif
-  assign supporting_text = block.settings.supporting_text
-  if supporting_text == blank
-    assign supporting_text = 'delivery_checker.supporting_text' | t
-  endif
-  assign button_text = block.settings.button_text
-  if button_text == blank
-    assign button_text = 'delivery_checker.check_button' | t
-  endif
-  assign cod_enabled = block.settings.cod_enabled
-  assign localization_country = localization.country.iso_code | default: 'US'
-   assign selected_country = localization_country
-   assign saved_postal_code = ''
-   assign customer_address_locked = false
-   if customer and customer.default_address
-      assign selected_country = customer.default_address.country_code | default: localization_country
-      assign saved_postal_code = customer.default_address.zip | default: ''
-      if saved_postal_code != blank
-        assign customer_address_locked = true
-      endif
-   endif
-  assign product_id_value = ''
-  assign product_vendor_value = ''
-  assign product_tags_json = '[]'
-  assign collection_handles_json = '[]'
-  assign cart_items_json = '[]'
-  assign context_product = product
-  if context_product == blank and cart.item_count > 0
-    assign context_product = cart.items.first.product
-  endif
-  if context_product
-    assign product_id_value = context_product.id
-    assign product_vendor_value = context_product.vendor
-    assign product_tags_json = context_product.tags | json
-    assign collection_handles_inner = ''
-    for coll in context_product.collections
-      assign handle_json = coll.handle | json
-      if collection_handles_inner != ''
-        assign collection_handles_inner = collection_handles_inner | append: ','
-      endif
-      assign collection_handles_inner = collection_handles_inner | append: handle_json
-    endfor
-    assign collection_handles_json = collection_handles_inner | prepend: '[' | append: ']'
-  elsif collection
-    assign collection_handle_json = collection.handle | json
-    assign collection_handles_json = collection_handle_json | prepend: '[' | append: ']'
-  endif
-  if template.name == 'cart' and cart.item_count > 0
-    capture cart_items_inner
-      for item in cart.items limit: 20
-        unless forloop.first
-          echo ','
-        endunless
-        assign cart_variant_gid = item.variant_id | prepend: 'gid://shopify/ProductVariant/'
-        assign cart_collections_inner = ''
-        for coll in item.product.collections limit: 20
-          assign cart_collection_json = coll.handle | json
-          if cart_collections_inner != ''
-            assign cart_collections_inner = cart_collections_inner | append: ','
-          endif
-          assign cart_collections_inner = cart_collections_inner | append: cart_collection_json
-        endfor
-        echo '{"productId":'
-        echo item.product_id | json
-        echo ',"variantId":'
-        echo cart_variant_gid | json
-        echo ',"quantity":'
-        echo item.quantity | json
-        echo ',"productVendor":'
-        echo item.product.vendor | json
-        echo ',"productTags":'
-        echo item.product.tags | slice: 0, 20 | json
-        echo ',"collectionHandles":['
-        echo cart_collections_inner
-        echo ']}'
-      endfor
-    endcapture
-    assign cart_items_json = cart_items_inner | prepend: '[' | append: ']'
-  endif
-  assign checker_is_empty_cart = false
-  if template.name == 'cart' and cart.item_count == 0
-    assign checker_is_empty_cart = true
-  endif
+assign block_id = block.id | replace: '-', ''
+assign heading_text = block.settings.heading
+if heading_text == blank
+assign heading_text = 'delivery_checker.heading' | t
+endif
+assign supporting_text = block.settings.supporting_text
+if supporting_text == blank
+assign supporting_text = 'delivery_checker.supporting_text' | t
+endif
+assign button_text = block.settings.button_text
+if button_text == blank
+assign button_text = 'delivery_checker.check_button' | t
+endif
+assign cod_enabled = block.settings.cod_enabled
+assign localization_country = localization.country.iso_code | default: 'US'
+assign selected_country = localization_country
+assign saved_postal_code = ''
+assign customer_address_locked = false
+if customer and customer.default_address
+assign selected_country = customer.default_address.country_code | default: localization_country
+assign saved_postal_code = customer.default_address.zip | default: ''
+if saved_postal_code != blank
+assign customer_address_locked = true
+endif
+endif
+assign product_id_value = ''
+assign product_vendor_value = ''
+assign product_tags_json = '[]'
+assign collection_handles_json = '[]'
+assign cart_items_json = '[]'
+assign context_product = product
+if context_product == blank and cart.item_count > 0
+assign context_product = cart.items.first.product
+endif
+if context_product
+assign product_id_value = context_product.id
+assign product_vendor_value = context_product.vendor
+assign product_tags_json = context_product.tags | json
+assign collection_handles_inner = ''
+for coll in context_product.collections
+assign handle_json = coll.handle | json
+if collection_handles_inner != ''
+assign collection_handles_inner = collection_handles_inner | append: ','
+endif
+assign collection_handles_inner = collection_handles_inner | append: handle_json
+endfor
+assign collection_handles_json = collection_handles_inner | prepend: '[' | append: ']'
+elsif collection
+assign collection_handle_json = collection.handle | json
+assign collection_handles_json = collection_handle_json | prepend: '[' | append: ']'
+endif
+if template.name == 'cart' and cart.item_count > 0
+capture cart_items_inner
+for item in cart.items limit: 20
+unless forloop.first
+echo ','
+endunless
+assign cart_variant_gid = item.variant_id | prepend: 'gid://shopify/ProductVariant/'
+assign cart_collections_inner = ''
+for coll in item.product.collections limit: 20
+assign cart_collection_json = coll.handle | json
+if cart_collections_inner != ''
+assign cart_collections_inner = cart_collections_inner | append: ','
+endif
+assign cart_collections_inner = cart_collections_inner | append: cart_collection_json
+endfor
+echo '{"productId":'
+echo item.product_id | json
+echo ',"variantId":'
+echo cart_variant_gid | json
+echo ',"quantity":'
+echo item.quantity | json
+echo ',"productVendor":'
+echo item.product.vendor | json
+echo ',"productTags":'
+echo item.product.tags | slice: 0, 20 | json
+echo ',"collectionHandles":['
+echo cart_collections_inner
+echo ']}'
+endfor
+endcapture
+assign cart_items_json = cart_items_inner | prepend: '[' | append: ']'
+endif
+assign checker_is_empty_cart = false
+if template.name == 'cart' and cart.item_count == 0
+assign checker_is_empty_cart = true
+endif
 %}
 
 {% if checker_is_empty_cart %}
@@ -105,6 +105,7 @@
 <div
   class="pin-checker"
   id="pin-checker-{{ block_id }}"
+  data-proxy-path="{{ block.settings.proxy_path | escape }}"
   data-cod="{{ cod_enabled }}"
   data-localization-country="{{ localization_country | escape }}"
   data-saved-postal="{{ saved_postal_code | escape }}"
@@ -252,7 +253,7 @@
         <small data-journey-delivery></small>
       </div>
     </div>
-    <section class="pin-checker__countdown" id="pin-countdown-{{ block_id }}" hidden aria-live="polite">
+    <section class="pin-checker__countdown" id="pin-countdown-{{ block_id }}" hidden aria-live="off">
       <span class="pin-checker__countdown-title" data-countdown-title>{{ 'delivery_checker.countdown_title' | t }}</span>
       <span class="pin-checker__countdown-label" id="pin-countdown-label-{{ block_id }}">{{ 'delivery_checker.order_within' | t }}</span>
       <strong id="pin-countdown-value-{{ block_id }}"></strong>
@@ -310,48 +311,55 @@
   .pin-checker__label { display:none; }
   .pin-checker__select,.pin-checker__input { width:100%; padding:9px 12px; border:1px solid var(--pc-input-border); border-radius:10px; background:var(--pc-field-bg); }
   .pin-checker__button { grid-column:1/-1; width:100%; padding:9px 16px; border:0; background:var(--pc-btn) }
+  @media (max-width: 520px) {
+    #pin-checker-{{ block_id }} .pin-checker__journey-step small::after { white-space:normal; overflow-wrap:anywhere; }
+  }
 </style>
 
 <script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
 <script>
   (() => {
-    const initialize = () => {
-    const root = document.getElementById('pin-checker-{{ block_id }}');
-    if (!root || !root.isConnected || root.dataset.pincodeInitialized === 'true') return;
-    root.dataset.pincodeInitialized = 'true';
-
-    const countrySelect = document.getElementById('pin-country-{{ block_id }}');
-    const pinInput = document.getElementById('pin-input-{{ block_id }}');
-    const button = document.getElementById('pin-btn-{{ block_id }}');
-    const result = document.getElementById('pin-result-{{ block_id }}');
-    const details = document.getElementById('pin-details-{{ block_id }}');
-    const journey = document.getElementById('pin-journey-{{ block_id }}');
+    if (window.incodeCheckerInit) { window.incodeCheckerInit(); return; }
+    const instances = new Map();
+    const unloaded = new WeakSet();
+    const initialize = (root) => {
+    if (!root || !root.isConnected || instances.has(root) || unloaded.has(root)) return;
+    const id = root.id ? root.id.slice('pin-checker-'.length) : '{{ block_id }}';
+    const find = (name) => root.querySelector(`[id="pin-${name}-${id}"]`) || document.getElementById(`pin-${name}-${id}`);
+    const countrySelect = find('country');
+    const pinInput = find('input');
+    const button = find('btn');
+    const result = find('result');
+    const details = find('details');
+    const journey = find('journey');
     const journeyOrder = journey && journey.querySelector('[data-journey-order]');
     const journeyDispatch = journey && journey.querySelector('[data-journey-dispatch]');
     const journeyDelivery = journey && journey.querySelector('[data-journey-delivery]');
-    const countdown = document.getElementById('pin-countdown-{{ block_id }}');
-    const countdownLabel = document.getElementById('pin-countdown-label-{{ block_id }}');
-    const countdownValue = document.getElementById('pin-countdown-value-{{ block_id }}');
-    const options = document.getElementById('pin-options-{{ block_id }}');
-    const methods = document.getElementById('pin-methods-{{ block_id }}');
-    const methodControls = document.getElementById('pin-method-controls-{{ block_id }}');
-    const methodSummary = document.getElementById('pin-method-summary-{{ block_id }}');
+    const countdown = find('countdown');
+    const countdownLabel = find('countdown-label');
+    const countdownValue = find('countdown-value');
+    const options = find('options');
+    const methods = find('methods');
+    const methodControls = find('method-controls');
+    const methodSummary = find('method-summary');
+    if (!countrySelect || !pinInput || !button || !result || !details || !countdown || !countdownLabel || !countdownValue || !options || !methods || !methodControls || !methodSummary) return;
+    root.dataset.pincodeInitialized = 'true';
     const cod = root.dataset.cod === 'true';
     const savedLocation = root.querySelector('[data-saved-location]');
     const savedPostal = String(root.dataset.savedPostal || '').trim();
     const customerAddressLocked = savedPostal !== '';
     const localizationCountry = String(root.dataset.localizationCountry || 'US').trim();
-    const cartItemsElement = document.getElementById('pin-cart-items-{{ block_id }}');
+    const cartItemsElement = find('cart-items');
     const hasProduct = root.dataset.surface !== 'cart' && Boolean(String(root.dataset.productId || '').trim());
     const productScope = document;
     const eventController = new AbortController();
     const eventOptions = { signal: eventController.signal };
     const rememberPostal = window.incodeThemeContext.postalHistory?.(root, pinInput, countrySelect, eventOptions);
-
     let requireValidPin = false;
     let pinUnlocked = false;
     let shopDisableAtc = false;
     let addToCartDisabled = false;
+    let checkedContext = '';
     let activeController = null;
     let requestVersion = 0;
     let countdownTimer = null;
@@ -361,7 +369,6 @@
     let policyController = null;
     let policyRefreshTimer = null;
     let disposed = false;
-
     const parseJsonArray = (value) => {
       try {
         const parsed = JSON.parse(value || '[]');
@@ -370,7 +377,6 @@
         return [];
       }
     };
-
     const applyStorefrontStyle = (style) => {
       if (root.dataset.appearanceSource === 'block' || !style || typeof style !== 'object') return;
       const fonts = {
@@ -422,7 +428,6 @@
         customStyle.textContent = style.custom_css;
       }
     };
-
     const productContextParams = () => {
       const params = new URLSearchParams();
       params.set('surface', String(root.dataset.surface || 'product'));
@@ -443,39 +448,27 @@
         const cartItems = JSON.parse(cartItemsElement ? cartItemsElement.textContent : '[]');
         if (Array.isArray(cartItems) && cartItems.length) params.set('cartItems', JSON.stringify(cartItems));
       } catch (error) {
-        // Invalid cart context falls back to the current product or shop-wide estimate.
+        // Fall back to product/shop context.
       }
       return params;
     };
-
-    const getAddToCartButtons = () => hasProduct ? Array.from(window.incodeThemeContext.productForm(root)?.querySelectorAll([
-      'button[type="submit"]',
-      'button[name="add"]',
-      '.product-form__submit'
-    ].join(',')) || []) : [];
-
+    const getAddToCartButtons = () => hasProduct ? window.incodeThemeContext.purchaseButtons(root) : [];
+    const blockedForm = (form) => addToCartDisabled || Boolean(checkedContext && (requireValidPin || shopDisableAtc)
+      && (checkedContext !== window.incodeThemeContext.contextKey(root)
+        || checkedContext !== (form ? window.incodeThemeContext.formContextKey(form) : window.incodeThemeContext.contextKey(root))));
     const setAddToCartDisabled = (disabled) => {
       addToCartDisabled = disabled;
-      window.incodeThemeContext.lockButtons(root, getAddToCartButtons(), disabled);
+      const buttons = getAddToCartButtons().filter((button) => blockedForm(button.form || button.closest?.('form')));
+      window.incodeThemeContext.lockButtons(root, buttons, buttons.length > 0);
     };
-
-    const getSelectedVariantId = () => {
-      if (!hasProduct) return '';
-      return window.incodeThemeContext.productContext(root).variantId;
-    };
-
-    const getQuantity = () => {
-      if (!hasProduct) return 1;
-      return window.incodeThemeContext.productContext(root).quantity;
-    };
-
+    const getSelectedVariantId = () => hasProduct ? window.incodeThemeContext.productContext(root).variantId : '';
+    const getQuantity = () => hasProduct ? window.incodeThemeContext.productContext(root).quantity : 1;
     const setResult = (message, state) => {
       result.textContent = message;
       result.setAttribute('data-state', state || '');
       result.setAttribute('role', state === 'error' ? 'alert' : 'status');
       root.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
     };
-
     const clearDetails = () => {
       clearTimeout(expiryTimer);
       expiryTimer = null;
@@ -490,38 +483,32 @@
       methodSummary.textContent = '';
       details.hidden = true;
     };
-
     const formatJourneyDate = (value) => {
       if (!value) return '';
       const parsed = new Date(`${String(value).slice(0, 10)}T12:00:00`);
       if (Number.isNaN(parsed.getTime())) return String(value);
       return new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short' }).format(parsed);
     };
-
     const mobileJourneyDate = (value) => String(value || '').split(/\s+-\s+/).map((part) => {
       const comma = part.indexOf(',');
       return comma >= 0 ? part.slice(comma + 1).trim() : part.trim();
     }).join(' - ');
-
     const setJourneyDate = (element, value) => {
       if (!element) return;
       const label = String(value || '');
       element.textContent = label;
       element.dataset.mobileDate = mobileJourneyDate(label);
     };
-
     const countryFlag = (value) => {
       const code = String(value || '').trim().toUpperCase();
       return /^[A-Z]{2}$/.test(code)
         ? String.fromCodePoint(...[...code].map((character) => 127397 + character.charCodeAt(0)))
         : '';
     };
-
     const updateCountryFlags = () => {
       const flag = countryFlag(countrySelect && countrySelect.value);
       root.querySelectorAll('[data-country-flag]').forEach((element) => { element.textContent = flag; });
     };
-
     const renderJourney = (data) => {
       if (!journey || root.dataset.showJourney !== 'true' || !data || data.available !== true) return;
       setJourneyDate(journeyOrder, root.dataset.journeyToday);
@@ -538,7 +525,6 @@
       updateCountryFlags();
       journey.hidden = false;
     };
-
       const renderShippingOptions = (data) => {
       if (root.dataset.showServiceBadges === 'false') {
         options.replaceChildren();
@@ -555,7 +541,6 @@
         ['pickup_available', root.dataset.pickupLabel]
       ];
       const fragment = document.createDocumentFragment();
-
       optionFields.forEach(([field, label]) => {
         if (field === 'cod_available' && !cod) return;
         if (root.dataset[badgeSettings[field]] === 'false') return;
@@ -597,18 +582,15 @@
         item.append(mark, copy, state);
         fragment.append(item);
       });
-
       options.replaceChildren(fragment);
       options.hidden = options.childElementCount === 0;
     };
-
     const renderMethodSelection = (data) => {
       const methodVersion = requestVersion;
       const shippingMethods = Array.isArray(data.shipping_methods)
         ? data.shipping_methods.filter((method) => method && method.handle && method.name && method.estimated_date)
         : [];
       if (!shippingMethods.length) return;
-
       const selectMethod = (method) => {
         if (disposed || methodVersion !== requestVersion) return;
         const dispatchLabel = method.dispatch_date_label || formatJourneyDate(method.dispatch_date) || method.dispatch_date;
@@ -633,7 +615,6 @@
         setResult(selectedData.message, 'success');
         void persistEstimate(selectedData, data.country, data.postal_code).catch(() => {});
       };
-
       const displayStyle = data.shipping_method_display_style
         || (data.storefront_style && data.storefront_style.shipping_method_display_style)
         || 'visual';
@@ -642,10 +623,10 @@
         const select = document.createElement('select');
         const placeholder = document.createElement('option');
         label.className = 'pin-checker__method-label';
-        label.htmlFor = 'pin-method-select-{{ block_id }}';
+        label.htmlFor = `pin-method-select-${id}`;
         label.textContent = root.dataset.methodSelectLabel;
         select.className = 'pin-checker__method-select';
-        select.id = 'pin-method-select-{{ block_id }}';
+        select.id = `pin-method-select-${id}`;
         placeholder.value = '';
         placeholder.textContent = root.dataset.methodSelectLabel;
         placeholder.disabled = true;
@@ -677,7 +658,7 @@
           const dates = document.createElement('span');
           label.className = 'pin-checker__method-card';
           input.type = 'radio';
-          input.name = 'pin-shipping-method-{{ block_id }}';
+          input.name = `pin-shipping-method-${id}`;
           input.value = method.handle;
           name.textContent = method.name;
           description.className = 'pin-checker__method-copy';
@@ -694,12 +675,10 @@
       }
       methods.hidden = false;
     };
-
     const renderCountdown = (data) => {
       if (root.dataset.showCountdown !== 'true' || root.dataset.countdownVisible === 'false') return;
       const cutoffTime = window.incodeThemeContext.cutoffTime(data);
       if (!Number.isFinite(cutoffTime)) return;
-
       const updateCountdown = () => {
         const remaining = Math.max(0, Math.ceil((cutoffTime - Date.now()) / 1000));
         if (remaining === 0) {
@@ -720,7 +699,6 @@
           [seconds, root.dataset.countdownSeconds]
         ].map(([part, label]) => `<span><b>${String(part).padStart(2, '0')}</b><small>${label}</small></span>`).join('');
       };
-
       countdownLabel.hidden = false;
       const countdownDelivery = countdown.querySelector('[data-countdown-delivery]');
       if (countdownDelivery) {
@@ -731,7 +709,6 @@
       updateCountdown();
       if (cutoffTime > Date.now()) countdownTimer = window.setInterval(updateCountdown, 1000);
     };
-
      const renderDetails = (data) => {
        clearDetails();
        if (!data) return;
@@ -752,7 +729,6 @@
       renderCountdown(data);
        details.hidden = options.hidden && methods.hidden && countdown.hidden && journey.hidden;
     };
-
      const clearPersistedEstimate = () => {
        if (root.dataset.surface !== 'cart') return Promise.resolve();
        const intent = window.incodeThemeContext.invalidateEstimate(root);
@@ -760,7 +736,6 @@
       cartSnapshot = '';
       return intent.write;
     };
-
     const persistEstimate = (data, country, postalCode) => {
       if (!data || data.available !== true || !data.estimated_date) return clearPersistedEstimate();
       const currentVersion = requestVersion;
@@ -790,7 +765,6 @@
        return window.incodeThemeContext.queueAttributes(estimateToken, attributes,
          () => currentVersion === requestVersion && !disposed && root.isConnected, snapshot);
     };
-
     const patterns = {
       AU: /^\d{4}$/,
       CA: /^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/,
@@ -805,61 +779,35 @@
       NZ: /^\d{4}$/,
       US: /^\d{5}(-?\d{4})?$/
     };
-
     const normalizeCountry = (country) => /^[A-Z]{2}$/.test(country || '') ? country : 'US';
-
     const normalizePostalCode = (country, value) => {
       const code = String(value || '').trim().toUpperCase().replace(/\s+/g, ' ');
       if (['IN', 'AU', 'DE', 'ES', 'FR', 'IT', 'NZ'].includes(country)) return code.replace(/\D/g, '');
       if (country === 'US' || country === 'JP') return code.replace(/\s+/g, '');
       return code;
     };
-
     const validate = (country, code) => {
       const pattern = patterns[country];
       if (pattern) return pattern.test(code);
       return /^[A-Z0-9][A-Z0-9 -]{1,18}[A-Z0-9]$/.test(code);
     };
-
-    const applyAddToCartPolicy = (available) => {
-      if (requireValidPin && !pinUnlocked) {
-        setAddToCartDisabled(true);
-        return;
-      }
-      if (shopDisableAtc && available === false) {
-        setAddToCartDisabled(true);
-        return;
-      }
-      if (available === undefined || available === null) {
-        setAddToCartDisabled(requireValidPin && !pinUnlocked);
-        return;
-      }
-      setAddToCartDisabled(false);
-    };
-
+    const applyAddToCartPolicy = (available) => setAddToCartDisabled(
+      (requireValidPin && !pinUnlocked) || (shopDisableAtc && available === false));
     const applyPolicyFrom = (data) => {
       if (data && data.enabled === false) {
         requireValidPin = false;
         shopDisableAtc = false;
         pinUnlocked = true;
+        checkedContext = '';
         setAddToCartDisabled(false);
         root.hidden = true;
         return;
       }
-      if (data && typeof data.require_valid_pin === 'boolean') {
-        requireValidPin = data.require_valid_pin;
-      }
-      if (data && typeof data.disable_add_to_cart === 'boolean') {
-        shopDisableAtc = data.disable_add_to_cart;
-      }
+      if (typeof data?.require_valid_pin === 'boolean') requireValidPin = data.require_valid_pin;
+      if (typeof data?.disable_add_to_cart === 'boolean') shopDisableAtc = data.disable_add_to_cart;
       if (typeof data !== 'object' || data === null) return;
-      if (data.available === true) {
-        pinUnlocked = true;
-      } else {
-        pinUnlocked = false;
-      }
+      pinUnlocked = data.available === true;
     };
-
     const initPolicy = async () => {
       const currentVersion = requestVersion;
       policyController?.abort();
@@ -870,9 +818,7 @@
         query.set('init', '1');
         if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
         if (currentVersion !== requestVersion || disposed) return;
-
-        const response = await fetch(`/apps/delivery-checker?${query.toString()}`, {
-          method: 'GET',
+        const response = await window.incodeThemeContext.request(root, query, {
           headers: { Accept: 'application/json' },
           signal: controller.signal
         });
@@ -897,8 +843,8 @@
         // Keep the widget usable if the policy request fails.
       }
     };
-
     const runCheck = async () => {
+      if (disposed || !root.isConnected) return;
       clearTimeout(policyRefreshTimer);
       policyRefreshTimer = null;
       requestVersion += 1;
@@ -909,11 +855,11 @@
       policyController?.abort();
       button.disabled = false;
       pinUnlocked = false;
+      checkedContext = '';
       applyAddToCartPolicy(undefined);
       const country = normalizeCountry(countrySelect && countrySelect.value);
       const pin = normalizePostalCode(country, pinInput.value || '');
       pinInput.value = pin;
-
       if (!validate(country, pin)) {
         clearDetails();
         void clearPersistedEstimate().catch(() => {});
@@ -922,12 +868,10 @@
         applyAddToCartPolicy(undefined);
         return;
       }
-
       clearDetails();
       void clearPersistedEstimate().catch(() => {});
       setResult(root.dataset.checking, 'loading');
       button.disabled = true;
-
       try {
         const query = productContextParams();
         query.set('country', country);
@@ -936,13 +880,11 @@
         if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
         if (currentVersion !== requestVersion || disposed) return;
         cartSnapshot = root.dataset.surface === 'cart' ? query.get('cartItems') : '';
-
-        const response = await fetch(`/apps/delivery-checker?${query.toString()}`, {
-          method: 'GET',
+        const checked = hasProduct ? `${query.get('variantId')}:${query.get('qty')}` : '';
+        const response = await window.incodeThemeContext.request(root, query, {
           headers: { Accept: 'application/json' },
           signal: controller.signal
         });
-
         const data = await response.json();
         if (currentVersion !== requestVersion) return;
         applyStorefrontStyle(data.storefront_style);
@@ -953,7 +895,6 @@
           applyAddToCartPolicy(undefined);
           return;
         }
-
         applyPolicyFrom(data);
         if (data.enabled === false) {
           await clearPersistedEstimate().catch(() => {});
@@ -964,6 +905,7 @@
         renderDetails(data);
         await persistEstimate(data, country, pin).catch(() => {});
         if (currentVersion !== requestVersion) return;
+        checkedContext = data.available === true ? checked : '';
         if (requireValidPin && data.available) {
           pinUnlocked = true;
         } else if (requireValidPin && !data.available) {
@@ -991,15 +933,13 @@
         }
       }
     };
-
     button.addEventListener('click', runCheck, eventOptions);
     const clearStaleResult = () => {
+      checkedContext = '';
       policyController?.abort();
       requestVersion += 1;
-      if (activeController) {
-        activeController.abort();
-        activeController = null;
-      }
+      activeController?.abort();
+      activeController = null;
       button.disabled = false;
       result.textContent = '';
       result.removeAttribute('data-state');
@@ -1033,47 +973,49 @@
         runCheck();
       }
     }, eventOptions);
-
     productScope.addEventListener('click', (event) => {
-      const target = event.target instanceof Element ? event.target.closest('[data-pincode-atc-disabled="true"]') : null;
-      if (!target) return;
+      if (!hasProduct || !root.isConnected || !(event.target instanceof Element)) return;
+      const button = getAddToCartButtons().find((button) => button === event.target || button.contains(event.target));
+      if (!button) return;
+      setAddToCartDisabled(addToCartDisabled);
+      if (button.dataset.pincodeAtcDisabled !== 'true') return;
       event.preventDefault();
       event.stopImmediatePropagation();
     }, { capture: true, signal: eventController.signal });
     productScope.addEventListener('submit', (event) => {
-      if (!(event.target instanceof Element) || !event.target.querySelector('[data-pincode-atc-disabled="true"]')) return;
+      if (!hasProduct || !root.isConnected || !window.incodeThemeContext.productForms(root).includes(event.target) || !blockedForm(event.target)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
     }, { capture: true, signal: eventController.signal });
-
     const buttonObserver = new MutationObserver(() => {
-      if (addToCartDisabled) setAddToCartDisabled(true);
+      setAddToCartDisabled(addToCartDisabled);
     });
     if (hasProduct) buttonObserver.observe(productScope, { childList: true, subtree: true });
-
      const cleanup = () => {
        if (disposed) return;
        disposed = true;
+       checkedContext = '';
+       instances.delete(root);
+       delete root.dataset.pincodeInitialized;
       clearTimeout(policyRefreshTimer);
-      policyController?.abort();
-      requestVersion += 1;
-      if (activeController) activeController.abort();
-      if (countdownTimer) window.clearInterval(countdownTimer);
-      clearTimeout(expiryTimer);
+       policyController?.abort();
+       requestVersion += 1;
+       if (activeController) activeController.abort();
+       clearDetails();
+       setResult('', '');
+       button.disabled = false;
       void window.incodeThemeContext.releaseEstimate(root).catch(() => {});
       setAddToCartDisabled(false);
       buttonObserver.disconnect();
-      eventController.abort();
-    };
-    document.addEventListener('shopify:section:unload', (event) => {
-      if (event.target instanceof Element && event.target.contains(root)) cleanup();
-    }, eventOptions);
+       eventController.abort();
+       root.querySelector('[id$="-postal-history"]')?.remove?.();
+     };
+    instances.set(root, cleanup);
     window.incodeThemeContext.watch(root, () => {
       clearStaleResult();
       clearTimeout(policyRefreshTimer);
       policyRefreshTimer = setTimeout(initPolicy, 100);
     }, cleanup);
-
     setSavedLocationActive(Boolean(savedPostal));
     updateCountryFlags();
     initPolicy().then(() => {
@@ -1088,139 +1030,27 @@
       ) runCheck();
     });
     };
-    if (window.incodeThemeContext) initialize();
-    else {
-      const ready = () => {
-        if (!window.incodeThemeContext) return;
-        document.removeEventListener('incode:theme-context-ready', ready);
-        document.removeEventListener('DOMContentLoaded', ready);
-        initialize();
-      };
-      document.addEventListener('incode:theme-context-ready', ready);
-      document.addEventListener('DOMContentLoaded', ready, { once: true });
-    }
+    const scan = (event) => {
+      if (!window.incodeThemeContext) return;
+      for (const [root, cleanup] of instances) if (!root.isConnected) cleanup();
+      const roots = document.querySelectorAll?.('[data-inline-delivery-checker]');
+      (roots?.length ? roots : [document.getElementById('pin-checker-{{ block_id }}')]).forEach((root) => {
+        if (event?.type === 'shopify:section:load' && event.target?.contains?.(root)) unloaded.delete(root);
+        initialize(root);
+      });
+    };
+    window.incodeCheckerInit = scan;
+    ['incode:theme-context-ready', 'DOMContentLoaded', 'shopify:section:load'].forEach((name) => document.addEventListener(name, scan));
+    document.addEventListener('shopify:section:unload', (event) => {
+      for (const [root, cleanup] of instances) if (event.target?.contains?.(root)) { unloaded.add(root); cleanup(); }
+    });
+    new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+    scan();
   })();
 </script>
 
 {% endif %}
 
 {% schema %}
-{
-  "name": "t:delivery_checker.schema.name",
-  "target": "section",
-  "stylesheet": "delivery-checker.css",
-  "enabled_on": {
-    "templates": ["product", "cart"]
-  },
-  "settings": [
-    { "type": "select", "id": "appearance_source", "label": "Appearance source", "default": "shop", "info": "Use shared app appearance or customize this block independently in the Theme Editor.", "options": [{ "value": "shop", "label": "Shared shop settings" }, { "value": "block", "label": "This block's settings" }] },
-    {
-      "type": "text",
-      "id": "heading",
-      "label": "t:delivery_checker.schema.heading_label"
-    },
-    {
-      "type": "text",
-      "id": "supporting_text",
-      "label": "t:delivery_checker.schema.supporting_text_label"
-    },
-    {
-      "type": "text",
-      "id": "button_text",
-      "label": "t:delivery_checker.schema.button_label"
-    },
-    {
-      "type": "checkbox",
-      "id": "cod_enabled",
-      "label": "t:delivery_checker.schema.cod_enabled_label",
-      "info": "t:delivery_checker.schema.cod_enabled_info",
-      "default": true
-    },
-    {
-      "type": "checkbox",
-      "id": "show_cutoff_countdown",
-      "label": "t:delivery_checker.schema.show_cutoff_countdown_label",
-      "info": "t:delivery_checker.schema.show_cutoff_countdown_info",
-      "default": false
-    },
-    {
-      "type": "checkbox",
-      "id": "show_delivery_journey",
-      "label": "t:delivery_checker.schema.show_delivery_journey_label",
-      "info": "t:delivery_checker.schema.show_delivery_journey_info",
-      "default": true
-    },
-    {
-      "type": "select",
-      "id": "journey_marker_style",
-      "label": "Journey display",
-      "info": "Choose whether delivery steps use numbers, icons, dots, emoji, or text only.",
-      "default": "number",
-      "options": [
-        { "value": "number", "label": "Numbers" },
-        { "value": "delivery", "label": "Delivery icons" },
-        { "value": "minimal", "label": "Minimal dots" },
-        { "value": "emoji", "label": "Emoji" },
-        { "value": "text", "label": "Text only" }
-      ]
-    },
-    { "type": "header", "content": "Service badges" },
-    { "type": "checkbox", "id": "show_service_badges", "label": "Show service badges", "info": "Hide or show all badges after a ZIP check. Only eligible services are displayed.", "default": true },
-    { "type": "checkbox", "id": "show_same_day", "label": "Show Same day badge", "default": true },
-    { "type": "checkbox", "id": "show_next_day", "label": "Show Next day badge", "default": true },
-    { "type": "checkbox", "id": "show_express", "label": "Show Express badge", "default": true },
-    { "type": "checkbox", "id": "show_local", "label": "Show Local delivery badge", "default": true },
-    { "type": "checkbox", "id": "show_pickup", "label": "Show Store pickup badge", "default": true },
-    {
-      "type": "header",
-      "content": "t:delivery_checker.schema.appearance"
-    },
-    {
-      "type": "color",
-      "id": "background_color",
-      "label": "t:delivery_checker.schema.background_label",
-      "default": "#ffffff"
-    },
-    {
-      "type": "color",
-      "id": "text_color",
-      "label": "t:delivery_checker.schema.text_label",
-      "default": "#16151a"
-    },
-    {
-      "type": "color",
-      "id": "button_color",
-      "label": "t:delivery_checker.schema.button_color_label",
-      "default": "#2b2640"
-    },
-    {
-      "type": "color",
-      "id": "button_text_color",
-      "label": "t:delivery_checker.schema.button_text_color_label",
-      "default": "#ffffff"
-    },
-    {
-      "type": "color",
-      "id": "journey_background_color",
-      "label": "t:delivery_checker.schema.journey_background_label",
-      "default": "#e6edff"
-    },
-    {
-      "type": "color",
-      "id": "journey_active_color",
-      "label": "t:delivery_checker.schema.journey_active_label",
-      "default": "#9bb8f2"
-    },
-    {
-      "type": "range",
-      "id": "corner_radius",
-      "label": "t:delivery_checker.schema.corner_radius_label",
-      "min": 0,
-      "max": 24,
-      "step": 2,
-      "unit": "px",
-      "default": 14
-    }
-  ]
-}
+{"name":"t:delivery_checker.schema.name","target":"section","stylesheet":"delivery-checker.css","enabled_on":{"templates":["product","cart"]},"settings":[{"type":"text","id":"proxy_path","label":"App proxy path","default":"/apps/delivery-checker","info":"Match the customized Shopify app proxy path, including its prefix (for example /apps/delivery-checker)."},{"type":"select","id":"appearance_source","label":"Appearance source","default":"shop","info":"Use shared app appearance or customize this block independently in the Theme Editor.","options":[{"value":"shop","label":"Shared shop settings"},{"value":"block","label":"This block's settings"}]},{"type":"text","id":"heading","label":"t:delivery_checker.schema.heading_label"},{"type":"text","id":"supporting_text","label":"t:delivery_checker.schema.supporting_text_label"},{"type":"text","id":"button_text","label":"t:delivery_checker.schema.button_label"},{"type":"checkbox","id":"cod_enabled","label":"t:delivery_checker.schema.cod_enabled_label","info":"t:delivery_checker.schema.cod_enabled_info","default":true},{"type":"checkbox","id":"show_cutoff_countdown","label":"t:delivery_checker.schema.show_cutoff_countdown_label","info":"t:delivery_checker.schema.show_cutoff_countdown_info","default":false},{"type":"checkbox","id":"show_delivery_journey","label":"t:delivery_checker.schema.show_delivery_journey_label","info":"t:delivery_checker.schema.show_delivery_journey_info","default":true},{"type":"select","id":"journey_marker_style","label":"Journey display","info":"Choose whether delivery steps use numbers, icons, dots, emoji, or text only.","default":"number","options":[{"value":"number","label":"Numbers"},{"value":"delivery","label":"Delivery icons"},{"value":"minimal","label":"Minimal dots"},{"value":"emoji","label":"Emoji"},{"value":"text","label":"Text only"}]},{"type":"header","content":"Service badges"},{"type":"checkbox","id":"show_service_badges","label":"Show service badges","info":"Hide or show all badges after a ZIP check. Only eligible services are displayed.","default":true},{"type":"checkbox","id":"show_same_day","label":"Show Same day badge","default":true},{"type":"checkbox","id":"show_next_day","label":"Show Next day badge","default":true},{"type":"checkbox","id":"show_express","label":"Show Express badge","default":true},{"type":"checkbox","id":"show_local","label":"Show Local delivery badge","default":true},{"type":"checkbox","id":"show_pickup","label":"Show Store pickup badge","default":true},{"type":"header","content":"t:delivery_checker.schema.appearance"},{"type":"color","id":"background_color","label":"t:delivery_checker.schema.background_label","default":"#ffffff"},{"type":"color","id":"text_color","label":"t:delivery_checker.schema.text_label","default":"#16151a"},{"type":"color","id":"button_color","label":"t:delivery_checker.schema.button_color_label","default":"#2b2640"},{"type":"color","id":"button_text_color","label":"t:delivery_checker.schema.button_text_color_label","default":"#ffffff"},{"type":"color","id":"journey_background_color","label":"t:delivery_checker.schema.journey_background_label","default":"#e6edff"},{"type":"color","id":"journey_active_color","label":"t:delivery_checker.schema.journey_active_label","default":"#9bb8f2"},{"type":"range","id":"corner_radius","label":"t:delivery_checker.schema.corner_radius_label","min":0,"max":24,"step":2,"unit":"px","default":14}]}
 {% endschema %}

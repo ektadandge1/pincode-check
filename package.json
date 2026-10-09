@@ -20,7 +20,7 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/*.test.mjs",
+    "test": "node --test --test-concurrency=1 --experimental-strip-types tests/*.test.mjs",
     "test:zones": "npx --yes tsx scripts/verify-zones.mjs",
     "test:targets": "npx --yes tsx scripts/verify-targets.mjs",
     "test:plans": "npx --yes tsx scripts/verify-plan-enforcement.mjs",

@@ -24,7 +24,7 @@ endfor
 endif
 %}
 
-<div class="incode-product-service" data-product-service data-product-id="{{ product.id }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-saved-postal="{{ product_service_saved_postal | escape }}" style="--ips-accent:{{ block.settings.accent_color | default: '#1f4f91' }};--ips-card:#fff;--ips-option:#f7fbff;--ips-text:#202b40;--ips-radius:{{ block.settings.corner_radius | default: 14 }}px" {{ block.shopify_attributes }}>
+<div class="incode-product-service" data-proxy-path="{{ block.settings.proxy_path | escape }}" data-product-service data-product-id="{{ product.id }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-saved-postal="{{ product_service_saved_postal | escape }}" style="--ips-accent:{{ block.settings.accent_color | default: '#1f4f91' }};--ips-card:#fff;--ips-option:#f7fbff;--ips-text:#202b40;--ips-radius:{{ block.settings.corner_radius | default: 14 }}px" {{ block.shopify_attributes }}>
   <div class="incode-product-service__intro">
     <span class="incode-product-service__intro-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg></span>
     <div><h3>{{ block.settings.heading | default: 'Check delivery options' | escape }}</h3><p>{{ block.settings.supporting_text | default: 'Enter your PIN or ZIP code to see delivery and pickup availability.' | escape }}</p></div>
@@ -35,7 +35,7 @@ endif
     <button type="button" data-product-check>{{ block.settings.button_label | default: 'Check availability' | escape }}</button>
   </div>
   <p class="incode-product-service__status" data-product-status role="status" aria-live="polite"></p>
-  <div class="incode-product-service__result" data-product-result hidden>
+  <div class="incode-product-service__result" data-product-result hidden role="status">
     <div class="incode-product-service__result-head"><span data-product-destination></span><strong data-product-availability></strong></div>
     <div class="incode-product-service__eta" data-product-eta hidden><span class="incode-product-service__eta-icon" aria-hidden="true">&#8985;</span><div><b>Estimated delivery</b><small data-product-eta-copy></small></div><strong data-product-eta-date></strong></div>
     <div class="incode-product-service__options">
@@ -52,15 +52,5 @@ endif
 <script src="{{ 'product-delivery-pickup.js' | asset_url }}" defer></script>
 
 {% schema %}
-{
-  "name": "Product delivery & pickup",
-  "target": "section",
-  "enabled_on": { "templates": ["product"] },
-  "settings": [
-    { "type": "text", "id": "heading", "label": "Heading", "default": "Check delivery options" },
-    { "type": "text", "id": "supporting_text", "label": "Supporting text", "default": "Enter your PIN or ZIP code to see delivery and pickup availability." },
-    { "type": "color", "id": "accent_color", "label": "Accent color", "default": "#1f4f91" },
-    { "type": "range", "id": "corner_radius", "label": "Corner radius", "min": 0, "max": 24, "step": 2, "unit": "px", "default": 14 }
-  ]
-}
+{"name":"Product delivery & pickup","target":"section","enabled_on":{"templates":["product"]},"settings":[{"type":"text","id":"proxy_path","label":"App proxy path","default":"/apps/delivery-checker","info":"Match the customized Shopify app proxy path, including its prefix (for example /apps/delivery-checker)."},{"type":"text","id":"heading","label":"Heading","default":"Check delivery options"},{"type":"text","id":"supporting_text","label":"Supporting text","default":"Enter your PIN or ZIP code to see delivery and pickup availability."},{"type":"color","id":"accent_color","label":"Accent color","default":"#1f4f91"},{"type":"range","id":"corner_radius","label":"Corner radius","min":0,"max":24,"step":2,"unit":"px","default":14}]}
 {% endschema %}

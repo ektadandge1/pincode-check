@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { proxyRequest } from './helpers/theme-proxy-request.mjs';
 
 const base = new URL('../extensions/pincode-checker/', import.meta.url);
 const source = (path) => readFileSync(new URL(path, base), 'utf8');
@@ -54,6 +55,7 @@ const fixture = ({ surface = 'product', deferred = false, cart = [{ product_id: 
     vm.runInContext(source('assets/delivery-theme-context.js'), context);
     document.dispatchEvent = dispatch;
     window.incodeThemeContext.productContext = () => product;
+    window.incodeThemeContext.request = proxyRequest(context.fetch);
     window.incodeThemeContext.watch = (_root, callback, dispose) => {
       watches++;
       invalidate = callback;
@@ -123,11 +125,14 @@ test('standalone cart checks use the shared fresh complete cart and fail closed 
   assert.equal(params.has('productId'), false);
   assert.equal(params.has('variantId'), false);
   assert.equal(params.has('qty'), false);
-  assert.deepEqual(JSON.parse(params.get('cartItems')), [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 7 }]);
+  assert.equal(params.has('cartItems'), false);
+  assert.equal(data.requests[1].options.method, 'POST');
+  assert.equal(data.requests[1].options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(data.requests[1].options.body).cartItems, [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 7 }]);
   data.requests[1].resolve({ ok: true, json: async () => ({ available: false }) });
   await pending;
   assert.equal(data.nodes.get('.incode-availability__status').dataset.state, 'unavailable');
-  for (const cart of [[], Array.from({ length: 21 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 }))]) {
+  for (const cart of [[], Array.from({ length: 251 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 }))]) {
     const invalid = fixture({ surface: 'cart', cart });
     await invalid.nodes.get('button').fire('click');
     assert.equal(invalid.requests.length, 1);

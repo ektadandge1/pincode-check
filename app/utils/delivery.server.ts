@@ -25,7 +25,15 @@ export type DeliveryDetails = {
   cutoffRemainingSeconds: number;
 };
 
-export const MAX_CART_DELIVERY_ITEMS = 20;
+export const MAX_CART_DELIVERY_ITEMS = 250;
+export const MAX_CART_DELIVERY_BYTES = 65_536;
+// Shopify CartLine.quantity is a signed 32-bit GraphQL Int.
+export const MAX_DELIVERY_QUANTITY = 2_147_483_647;
+
+export function validDeliveryQuantity(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    && value >= 1 && value <= MAX_DELIVERY_QUANTITY;
+}
 
 export type CartDeliveryItemInput = {
   productId?: string;
@@ -499,12 +507,13 @@ function parseCartStringList(value: unknown): string[] | null {
 
 export function parseCartDeliveryItems(value: string | null): ParsedCartDeliveryItems {
   if (value === null) return { provided: false, complete: true, items: [] };
-  if (!value || value.length > 20_000) {
+  if (!value || value.length > MAX_CART_DELIVERY_BYTES
+    || new TextEncoder().encode(value).byteLength > MAX_CART_DELIVERY_BYTES) {
     return {
       provided: true,
       complete: false,
       items: [],
-      error: value.length > 20_000 ? "cart_too_large" : "invalid_cart",
+      error: value ? "cart_too_large" : "invalid_cart",
     };
   }
 
@@ -518,16 +527,17 @@ export function parseCartDeliveryItems(value: string | null): ParsedCartDelivery
     }
 
     const items: CartDeliveryItemInput[] = [];
-    for (const entry of parsed.slice(0, MAX_CART_DELIVERY_ITEMS)) {
+    for (const entry of parsed) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
         return { provided: true, complete: false, items: [], error: "invalid_cart" };
       }
       const row = entry as Record<string, unknown>;
       const variantId = parseCartString(row.variantId);
-      const quantity = Number(row.quantity);
+      const quantity = typeof row.quantity === "string" && row.quantity.trim()
+        ? Number(row.quantity) : row.quantity;
       const productTags = parseCartStringList(row.productTags);
       const collectionHandles = parseCartStringList(row.collectionHandles);
-      if (!variantId || !Number.isInteger(quantity) || quantity < 1 || quantity > 999
+      if (!variantId || !validDeliveryQuantity(quantity)
         || productTags === null || collectionHandles === null) {
         return { provided: true, complete: false, items: [], error: "invalid_cart" };
       }
@@ -590,6 +600,19 @@ export function aggregateCartDeliveryItems(items: CartDeliveryItemInput[]): Aggr
   }
 
   return aggregated;
+}
+
+export async function mapCartDeliveryItems<T>(
+  items: CartDeliveryItemInput[],
+  check: (entry: AggregatedCartDeliveryItem) => Promise<T>,
+): Promise<T[]> {
+  const aggregated = aggregateCartDeliveryItems(items);
+  const results: T[] = [];
+  // Preserve the old maximum fan-out while checking every line of larger carts.
+  for (let offset = 0; offset < aggregated.length; offset += 20) {
+    results.push(...await Promise.all(aggregated.slice(offset, offset + 20).map(check)));
+  }
+  return results;
 }
 
 function maxByIsoDate<T>(items: T[], value: (item: T) => string | undefined): T | undefined {

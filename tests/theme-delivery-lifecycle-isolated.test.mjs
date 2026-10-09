@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { proxyRequest } from './helpers/theme-proxy-request.mjs';
 
 const base = new URL('../extensions/pincode-checker/', import.meta.url);
 const source = (path) => readFileSync(new URL(path, base), 'utf8');
@@ -47,8 +48,8 @@ test('fresh cart context replaces stale product and quantity using localized AJA
   assert.deepEqual(JSON.parse(params.get('cartItems')), [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 7 }]);
 });
 
-test('fresh cart context accepts exactly 20 complete lines', async () => {
-  const items = Array.from({ length: 20 }, (_, index) => ({ product_id: index + 1, variant_id: index + 101, quantity: 1 }));
+test('fresh cart context accepts exactly 250 complete lines', async () => {
+  const items = Array.from({ length: 250 }, (_, index) => ({ product_id: index + 1, variant_id: index + 101, quantity: index === 0 ? 1000 : index === 249 ? 2147483647 : 1 }));
   const window = {};
   vm.runInNewContext(source('assets/delivery-theme-context.js'), {
     window,
@@ -57,7 +58,8 @@ test('fresh cart context accepts exactly 20 complete lines', async () => {
     fetch: async () => ({ ok: true, json: async () => ({ items }) }),
   });
   const params = await window.incodeThemeContext.cartParams(new URLSearchParams());
-  assert.equal(JSON.parse(params.get('cartItems')).length, 20);
+  assert.equal(JSON.parse(params.get('cartItems')).length, 250);
+  assert.deepEqual(JSON.parse(params.get('cartItems')), items.map((item) => ({ productId: String(item.product_id), variantId: `gid://shopify/ProductVariant/${item.variant_id}`, quantity: item.quantity })));
 });
 
 test('cart context fails closed for failed, empty, malformed and incomplete carts', async () => {
@@ -65,7 +67,8 @@ test('cart context fails closed for failed, empty, malformed and incomplete cart
     { ok: false },
     { ok: true, json: async () => ({ items: [] }) },
     { ok: true, json: async () => ({ items: [{ product_id: 1, variant_id: 2, quantity: 0 }] }) },
-    { ok: true, json: async () => ({ items: Array.from({ length: 21 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 })) }) }
+    { ok: true, json: async () => ({ items: [{ product_id: 1, variant_id: 2, quantity: 2147483648 }] }) },
+    { ok: true, json: async () => ({ items: Array.from({ length: 251 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 })) }) }
   ]) {
     const window = {};
     vm.runInNewContext(source('assets/delivery-theme-context.js'), { window, Event, document: { dispatchEvent() {} }, fetch: async () => response });
@@ -89,11 +92,13 @@ test('extracted service script ignores late success and late failure after input
     const root = { dataset: { surface: 'product' }, isConnected: true, querySelector: (selector) => nodes.get(selector), closest: () => ({ querySelector: () => null }) };
     const requests = [];
     let invalidate;
-    vm.runInNewContext(script('delivery-service-options'), {
+    const context = {
       document: { getElementById: () => root }, location: { search: '' }, URLSearchParams, AbortController,
       window: { incodeThemeContext: { productContext: () => ({ variantId: '', quantity: 1 }), watch: (_root, callback) => { invalidate = callback; return {}; } } },
       fetch: (url, options) => new Promise((resolve, reject) => requests.push({ resolve, reject, options }))
-    });
+    };
+    context.window.incodeThemeContext.request = proxyRequest(context.fetch);
+    vm.runInNewContext(script('delivery-service-options'), context);
     const button = nodes.get('button');
     const first = button.handlers.click();
     nodes.get('input').handlers.input();
@@ -138,7 +143,7 @@ test('extracted ETA script refetches current quantity and ignores stale response
   let invalidate;
   let cleanup;
   let scheduled;
-  vm.runInNewContext(script('estimated-delivery-date'), {
+  const context = {
     document: { getElementById: () => root }, URLSearchParams, AbortController,
     window: { location: { search: '' }, incodeThemeContext: {
       cartUrl: (path) => `/${path}`,
@@ -150,7 +155,9 @@ test('extracted ETA script refetches current quantity and ignores stale response
       if (url === '/cart/update.js') return Promise.resolve({ ok: true });
       return new Promise((resolve) => requests.push({ url, options, resolve }));
     }
-  });
+  };
+  context.window.incodeThemeContext.request = proxyRequest(context.fetch);
+  vm.runInNewContext(script('estimated-delivery-date'), context);
   assert.equal(new URL(requests[0].url, 'https://shop.test').searchParams.get('qty'), '2');
   quantity.value = '6';
   invalidate();
@@ -182,8 +189,8 @@ test('executed card asset sends 50 products in 24/24/2 batches and labels duplic
   const root = { dataset: { template: 'collection', country: 'US' }, isConnected: true, querySelector: () => ({ textContent: JSON.stringify(items) }) };
   const requests = [];
   const window = { incodeThemeContext: { cartUrl: (path) => `/fr/${path}`, expiryDelay: () => 15 * 60 * 1000 } };
-  vm.runInNewContext(source('assets/delivery-card-eta.js'), {
-    window, location: { href: 'https://shop.test/collections/all' }, URL, AbortController,
+  const context = {
+    window, location: { href: 'https://shop.test/collections/all' }, URL, URLSearchParams, AbortController,
     setTimeout: (callback, delay) => { if (delay <= 100) callback(); return 1; }, clearTimeout: () => {},
     MutationObserver: class { observe() {} },
     document: {
@@ -196,7 +203,9 @@ test('executed card asset sends 50 products in 24/24/2 batches and labels duplic
       requests.push(body.items);
       return { ok: true, json: async () => ({ results: body.items.map(({ key }) => ({ key, estimate: { enabled: true, delivery_date_range: 'Oct 10' } })) }) };
     }
-  });
+  };
+  window.incodeThemeContext.request = proxyRequest(context.fetch);
+  vm.runInNewContext(source('assets/delivery-card-eta.js'), context);
   await settle();
   assert.deepEqual(requests.map((batch) => batch.length), [24, 24, 2]);
   for (const host of hosts) {

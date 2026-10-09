@@ -1,10 +1,15 @@
 (() => {
-  const initialize = () => {
+  if (window.incodeServiceCardInit) { window.incodeServiceCardInit(); return; }
+  const instances = new Map();
+  const unloaded = new WeakSet();
+  const initialize = (event) => {
+    if (!window.incodeThemeContext) return;
+    for (const [root, cleanup] of instances) if (!root.isConnected) cleanup();
     const queriedRoots = document.querySelectorAll?.('.incode-service-card');
     const roots = queriedRoots?.length ? queriedRoots : [document.getElementById?.('incode-service-card-test')].filter(Boolean);
     roots.forEach((root) => {
-      if (!root || !root.isConnected || root.dataset.initialized === 'true') return;
-      root.dataset.initialized = 'true';
+      if (event?.type === 'shopify:section:load' && event.target?.contains?.(root)) unloaded.delete(root);
+      if (!root || !root.isConnected || instances.has(root) || unloaded.has(root)) return;
       const country = root.querySelector('select');
       const postal = root.querySelector('input');
       const button = root.querySelector('button');
@@ -13,6 +18,8 @@
       const local = root.querySelector('[data-service-local]');
       const pickup = root.querySelector('[data-service-pickup]');
       const options = root.querySelector('.incode-service-card__options');
+      if (!country || !postal || !button || !status || !result) return;
+      root.dataset.initialized = 'true';
       if (!root.querySelector('[data-service-forms]')) root.insertAdjacentHTML?.('beforeend', `<div class="incode-service-card__forms" data-service-forms hidden><button type="button" class="incode-service-card__form-back" data-service-form-back>Back to delivery options</button><div data-service-form="local" hidden><p class="incode-service-card__form-status" data-service-local-form-status></p><label><span>Delivery date</span><input data-service-local-date readonly></label><div class="incode-service-card__form-columns"><label><span>First name</span><input data-service-local-field="first_name" autocomplete="given-name"></label><label><span>Last name</span><input data-service-local-field="last_name" autocomplete="family-name"></label></div><label><span>Email</span><input data-service-local-field="email" type="email" autocomplete="email"></label><label><span>Phone Number</span><input data-service-local-field="phone" type="tel" autocomplete="tel"></label></div><div data-service-form="pickup" hidden><p class="incode-service-card__form-status" data-service-pickup-form-status></p><div data-service-pickup-locations></div><label><span>Choose pickup date</span><input data-service-pickup-date type="date"></label><div class="incode-service-card__form-columns"><label><span>First name</span><input data-service-pickup-field="first_name" autocomplete="given-name"></label><label><span>Last name</span><input data-service-pickup-field="last_name" autocomplete="family-name"></label></div><label><span>Collector email</span><input data-service-pickup-field="email" type="email" autocomplete="email"></label><label><span>Phone No</span><input data-service-pickup-field="phone" type="tel" autocomplete="tel"></label></div></div>`);
       const forms = root.querySelector('[data-service-forms]');
       const localForm = root.querySelector('[data-service-form="local"]');
@@ -29,6 +36,9 @@
       let active = null;
       let formActive = null;
       let latestData = null;
+      let disposed = false;
+      const events = new AbortController();
+      const eventOptions = { signal: events.signal };
       const invalidate = () => {
         version += 1;
         active?.abort();
@@ -41,7 +51,17 @@
         if (options) options.hidden = false;
         setStatus('', '');
       };
-      const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
+      const cleanup = () => {
+        if (disposed) return;
+        disposed = true;
+        invalidate();
+        events.abort();
+        instances.delete(root);
+        delete root.dataset.initialized;
+        root.querySelector('[id$="-postal-history"]')?.remove?.();
+      };
+      instances.set(root, cleanup);
+      window.incodeThemeContext.watch(root, () => { if (!disposed) invalidate(); }, cleanup);
       const rememberPostal = window.incodeThemeContext.postalHistory?.(root, postal, country, eventOptions);
       const variantGid = () => window.incodeThemeContext.productContext(root).variantId;
       const quantity = () => window.incodeThemeContext.productContext(root).quantity;
@@ -137,6 +157,7 @@
         pickupFormStatus.textContent = locations.length ? 'Choose a pickup location and date.' : (data.message || 'No pickup locations are available.');
       };
       const loadPickupLocations = async () => {
+        if (disposed || !root.isConnected) return;
         formActive?.abort();
         const controller = new AbortController();
         formActive = controller;
@@ -144,18 +165,20 @@
           const query = params();
           query.set('service_options', '1');
           if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
-          const response = await fetch(`/apps/delivery-checker?${query.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+          if (disposed || controller.signal.aborted || formActive !== controller || !root.isConnected) return;
+          const response = await window.incodeThemeContext.request(root, query, { signal: controller.signal, headers: { Accept: 'application/json' } });
           const data = await response.json();
           if (!response.ok) throw new Error(data.message || 'Unable to load pickup locations.');
-          if (controller.signal.aborted || !root.isConnected) return;
+          if (disposed || controller.signal.aborted || formActive !== controller || !root.isConnected) return;
           renderPickupLocations(data);
         } catch (error) {
-          if (error.name !== 'AbortError') pickupFormStatus.textContent = error.message || 'Unable to load pickup locations.';
+          if (!disposed && root.isConnected && !controller.signal.aborted && formActive === controller && error.name !== 'AbortError') pickupFormStatus.textContent = error.message || 'Unable to load pickup locations.';
         } finally {
           if (formActive === controller) formActive = null;
         }
       };
       const check = async () => {
+        if (disposed || !root.isConnected) return;
         invalidate();
         const current = version;
         const controller = new AbortController();
@@ -172,10 +195,10 @@
         try {
           const query = params();
           if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
-          if (current !== version) return;
-          const response = await fetch(`/apps/delivery-checker?${query.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+          if (current !== version || disposed || !root.isConnected) return;
+          const response = await window.incodeThemeContext.request(root, query, { signal: controller.signal, headers: { Accept: 'application/json' } });
           const data = await response.json();
-          if (current !== version || !root.isConnected) return;
+          if (current !== version || disposed || !root.isConnected) return;
           if (!response.ok) {
             setStatus(data.message || 'Unable to check this PIN or ZIP code right now.', 'error');
             return;
@@ -184,10 +207,10 @@
           if (data.available || data.local_delivery_available || data.pickup_available) rememberPostal?.(data.postal_code || postal.value);
           render(data);
         } catch (error) {
-          if (current !== version && error.name !== 'AbortError') return;
+          if (current !== version || disposed || !root.isConnected) return;
           if (error.name !== 'AbortError') setStatus('Network issue while checking delivery options. Please retry.', 'error');
         } finally {
-          if (current === version) { button.disabled = false; active = null; }
+          if (current === version && !disposed && root.isConnected) { button.disabled = false; active = null; }
         }
       };
       for (const [node, label] of [[local, 'Choose local delivery'], [pickup, 'Choose store pickup']]) {
@@ -208,15 +231,11 @@
       if (root.dataset.savedPostal && postal.value.trim() === root.dataset.savedPostal) check();
     });
   };
-  if (window.incodeThemeContext) initialize();
-  else {
-    const ready = () => {
-      if (!window.incodeThemeContext) return;
-      document.removeEventListener('incode:theme-context-ready', ready);
-      document.removeEventListener('DOMContentLoaded', ready);
-      initialize();
-    };
-    document.addEventListener('incode:theme-context-ready', ready);
-    document.addEventListener('DOMContentLoaded', ready, { once: true });
-  }
+  window.incodeServiceCardInit = initialize;
+  ['incode:theme-context-ready', 'DOMContentLoaded', 'shopify:section:load'].forEach((name) => document.addEventListener?.(name, initialize));
+  document.addEventListener?.('shopify:section:unload', (event) => {
+    for (const [root, cleanup] of instances) if (event.target?.contains?.(root)) { unloaded.add(root); cleanup(); }
+  });
+  if (typeof MutationObserver !== 'undefined' && document.documentElement) new MutationObserver(initialize).observe(document.documentElement, { childList: true, subtree: true });
+  initialize();
 })();
