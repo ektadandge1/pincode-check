@@ -13,7 +13,7 @@ const rule = (overrides = {}) => ({
 const item = (id, quantity = 1) => ({ productId: `gid://shopify/Product/${id}`, variantId: `gid://shopify/ProductVariant/${id}`, quantity });
 const input = { shop: "test.myshopify.com", country: "US", postalCode: "10001", features, trackAnalytics: false };
 
-function fixture(targets = [rule()], { inventoryFailure = false, contextFailure = false, unknown = false, utils, cityRecords = [] } = {}) {
+function fixture(targets = [rule()], { inventoryFailure = false, contextFailure = false, unknown = false, utils, cityRecords = [], serviceRules = [] } = {}) {
   const calls = [];
   const admin = { graphql: async (query, options) => {
     calls.push({ query, variables: options.variables });
@@ -35,6 +35,7 @@ function fixture(targets = [rule()], { inventoryFailure = false, contextFailure 
   const prisma = {
     deliverySetting: { findUnique: async () => null },
     deliveryTarget: { findMany: async () => targets },
+    serviceAvailabilityRule: { findMany: async () => serviceRules },
     postalCode: { findFirst: async () => ({ zoneId: null, serviceable: true, deliveryDays: 4, codAvailable: false }), findMany: async (args = {}) => args.where?.city ? cityRecords : [] },
     shippingMethodRule: { findMany: async () => [] },
     fulfillmentLocationRule: { findMany: async () => [] },
@@ -60,6 +61,54 @@ function fixture(targets = [rule()], { inventoryFailure = false, contextFailure 
   };
   return { service, admin, calls, proxy };
 }
+
+test("service availability rules suppress automatic shipping estimates and initialize service choices", async () => {
+  const serviceRule = rule({
+    name: "Pickup only",
+    inventoryMode: "any",
+    requireValidPin: false,
+    processingDays: null,
+    transitDays: null,
+    shippingAvailable: false,
+    localDeliveryAvailable: false,
+    pickupAvailable: true,
+  });
+  const { service, admin } = fixture([], { serviceRules: [serviceRule] });
+  const context = { ...input, postalCode: undefined, ...item(1), admin };
+
+  const estimate = await service.getGeneralDeliveryEstimate(context);
+  assert.equal(estimate.enabled, false);
+  assert.equal(estimate.shipping_available, false);
+  assert.equal(estimate.reason, "service_unavailable");
+  assert.equal(estimate.matched_service_target, "Pickup only");
+
+  const policy = await service.checkDeliveryPolicy(context);
+  assert.equal(policy.shipping_available, false);
+  assert.equal(policy.local_delivery_available, false);
+  assert.equal(policy.pickup_available, true);
+
+  const cartPolicy = await service.checkCartDeliveryPolicy(context, [item(1), item(2)]);
+  assert.equal(cartPolicy.shipping_available, false);
+  assert.equal(cartPolicy.local_delivery_available, false);
+  assert.equal(cartPolicy.pickup_available, true);
+});
+
+test("specific all-service rules override broader restrictions", async () => {
+  const allOn = rule({
+    name: "Product exception",
+    inventoryMode: "any",
+    requireValidPin: false,
+    processingDays: null,
+    transitDays: null,
+    shippingAvailable: true,
+    localDeliveryAvailable: true,
+    pickupAvailable: true,
+  });
+  const restriction = { ...allOn, id: 2, name: "Tagged products cannot ship", targetKind: "tag", targetValue: "restricted", priority: 2, shippingAvailable: false };
+  const { service, admin } = fixture([], { serviceRules: [allOn, restriction] });
+  const estimate = await service.getGeneralDeliveryEstimate({ ...input, postalCode: undefined, ...item(1), productTags: ["restricted"], admin });
+  assert.equal(estimate.enabled, true);
+});
 
 test("actual delivery, general estimate and policy callers fail closed on inventory-target fetch failures without inventoryAware", async () => {
   const { service, admin } = fixture([rule(), rule({ id: 2, inventoryMode: "any", name: "Fallback", requireValidPin: false, priority: 2 })], { inventoryFailure: true });
@@ -188,9 +237,8 @@ test("ordinary proxy cart checks reject missing/empty context even with a page p
   assert.equal(validCart.body.cart_complete, true);
   const partialCart = await proxy(null, Array.from({ length: 20 }, () => item(1)), { postal_code: "10001" });
   assert.equal(partialCart.response.status, 200);
-  assert.equal(partialCart.body.available, false);
-  assert.equal(partialCart.body.reason, "cart_incomplete");
-  assert.equal(partialCart.body.cart_complete, false);
+  assert.equal(partialCart.body.available, true);
+  assert.equal(partialCart.body.cart_complete, true);
 });
 
 test("proxy estimate/init use canonical cart targets, exclusions and summed quantities rather than page context", async () => {
@@ -226,7 +274,7 @@ test("proxy estimate/init fail closed on inventory failures", async () => {
 test("proxy estimate/init reject malformed, missing, empty, incomplete and unverified carts", async () => {
   const { proxy } = fixture();
   for (const mode of ["estimate", "init"]) {
-    for (const cart of ["not json", undefined, [], [{ quantity: 1 }], Array.from({ length: 20 }, () => item(1))]) {
+    for (const cart of ["not json", undefined, [], [{ quantity: 1 }], Array.from({ length: 21 }, () => item(1))]) {
       const { response, body } = await proxy(mode, cart);
       assert.equal(response.status, 400);
       assert.equal(body.enabled, false);

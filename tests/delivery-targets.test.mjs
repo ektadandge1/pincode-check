@@ -6,10 +6,35 @@ import {
   isDeliveryTargetActive,
   matchDeliveryTarget,
   normalizeTargetValue,
+  parseTargetValues,
   parseListParam,
   parseProductEstimateBatch,
   productContextCacheKey,
+  serializeTargetValues,
 } from "../app/utils/targeting.server.ts";
+
+test("serializes multiple targets without breaking existing single-target rules", () => {
+  assert.equal(serializeTargetValues("product", ["gid://shopify/Product/10", "20", "10"]), '["10","20"]');
+  assert.equal(serializeTargetValues("zone", ["7"]), "7");
+  assert.deepEqual(parseTargetValues("vendor", '[" Acme ","BRAVO"]'), ["acme", "bravo"]);
+  assert.deepEqual(parseTargetValues("product", "123456"), ["123456"]);
+  assert.deepEqual(parseTargetValues("product", "[invalid"), []);
+});
+
+test("matches any value in a multi-target service rule", () => {
+  const cases = [
+    { kind: "product", values: ["10", "20"], matching: { productId: "20" }, missing: { productId: "30" } },
+    { kind: "collection", values: ["summer", "sale"], matching: { collectionHandles: ["sale"] }, missing: { collectionHandles: ["new"] } },
+    { kind: "vendor", values: ["acme", "bravo"], matching: { vendor: "Bravo" }, missing: { vendor: "Other" } },
+    { kind: "tag", values: ["bulky", "fragile"], matching: { tags: ["Fragile"] }, missing: { tags: ["sale"] } },
+    { kind: "zone", values: ["7", "8"], matching: { zoneId: 8 }, missing: { zoneId: 9 } },
+  ];
+  for (const entry of cases) {
+    const target = conditionalTarget({ targetKind: entry.kind, targetValue: JSON.stringify(entry.values) });
+    assert.equal(matchDeliveryTarget([target], entry.matching)?.id, target.id, entry.kind);
+    assert.equal(matchDeliveryTarget([target], entry.missing), null, entry.kind);
+  }
+});
 
 function conditionalTarget(overrides = {}) {
   return {
@@ -88,12 +113,22 @@ const vendorTarget = {
   priority: 1,
 };
 
-test("normalizes product, collection, vendor, and tag values", () => {
+test("normalizes product, collection, vendor, tag, and zone values", () => {
   assert.equal(normalizeTargetValue("product", "gid://shopify/Product/998877"), "998877");
   assert.equal(normalizeTargetValue("collection", "/Sale-Items"), "sale-items");
   assert.equal(normalizeTargetValue("tag", " Clearance "), "clearance");
   assert.equal(normalizeTargetValue("vendor", " Acme "), "acme");
   assert.equal(normalizeTargetValue("product", "abc"), null);
+  assert.equal(normalizeTargetValue("product", "abc123"), null);
+  assert.equal(normalizeTargetValue("zone", "42"), "42");
+  assert.equal(normalizeTargetValue("zone", "gid://shopify/Zone/42"), null);
+});
+
+test("matches a service target to its resolved delivery zone", () => {
+  const zoneTarget = conditionalTarget({ id: 30, targetKind: "zone", targetValue: "42", name: "Zone 42" });
+  assert.equal(matchDeliveryTarget([zoneTarget], { zoneId: 42 })?.name, "Zone 42");
+  assert.equal(matchDeliveryTarget([zoneTarget], { zoneId: 41 }), null);
+  assert.equal(matchDeliveryTarget([zoneTarget], {}), null);
 });
 
 test("matches vendor ETA overrides case-insensitively", () => {

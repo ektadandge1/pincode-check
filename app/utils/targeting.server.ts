@@ -1,4 +1,6 @@
-export type TargetKind = "product" | "collection" | "vendor" | "tag";
+export type TargetKind = "product" | "collection" | "vendor" | "tag" | "zone";
+export const MAX_SERVICE_AVAILABILITY_RULES = 2_000;
+export const MAX_TARGET_VALUES_PER_RULE = 100;
 export type InventoryMode = "any" | "in_stock" | "backorder" | "out_of_stock";
 export type ActivationMode = "always" | "date_range" | "weekly";
 
@@ -34,6 +36,7 @@ export type ProductTargetContext = {
   tags?: string[] | null;
   collectionHandles?: string[] | null;
   vendor?: string | null;
+  zoneId?: number | string | null;
   country?: string | null;
   state?: string | null;
   inventoryStatus?: Exclude<InventoryMode, "any"> | null;
@@ -60,6 +63,7 @@ const KIND_RANK: Record<TargetKind, number> = {
   collection: 1,
   vendor: 2,
   tag: 3,
+  zone: 4,
 };
 
 const INVENTORY_MODES = new Set<InventoryMode>(["any", "in_stock", "backorder", "out_of_stock"]);
@@ -141,7 +145,7 @@ export function isDeliveryTargetActive(
 
 export function normalizeTargetKind(value: string): TargetKind | null {
   const normalized = String(value ?? "").trim().toLowerCase();
-  if (normalized === "product" || normalized === "collection" || normalized === "vendor" || normalized === "tag") {
+  if (normalized === "product" || normalized === "collection" || normalized === "vendor" || normalized === "tag" || normalized === "zone") {
     return normalized;
   }
   return null;
@@ -151,10 +155,11 @@ export function normalizeTargetValue(kind: TargetKind, value: string): string | 
   const raw = String(value ?? "").trim();
   if (!raw) return null;
 
-  if (kind === "product") {
-    const numeric = raw.replace(/\D/g, "");
-    if (!numeric) return null;
-    return numeric;
+  if (kind === "product" || kind === "zone") {
+    const match = kind === "product"
+      ? /^(?:gid:\/\/shopify\/Product\/)?([0-9]+)$/.exec(raw)
+      : /^([1-9][0-9]*)$/.exec(raw);
+    return match?.[1] ?? null;
   }
 
   if (kind === "collection") {
@@ -168,6 +173,33 @@ export function normalizeTargetValue(kind: TargetKind, value: string): string | 
   return text;
 }
 
+export function parseTargetValues(kind: TargetKind, stored: string): string[] {
+  const raw = String(stored ?? "").trim();
+  if (!raw) return [];
+  let values: unknown[] = [raw];
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      values = parsed;
+    } catch {
+      return [];
+    }
+  }
+  return [...new Set(values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => normalizeTargetValue(kind, value))
+    .filter((value): value is string => Boolean(value)))];
+}
+
+export function serializeTargetValues(kind: TargetKind, values: string[]): string {
+  const normalized = [...new Set(values
+    .map((value) => normalizeTargetValue(kind, value))
+    .filter((value): value is string => Boolean(value)))];
+  if (normalized.length === 0) return "";
+  return normalized.length === 1 ? normalized[0] : JSON.stringify(normalized);
+}
+
 export function normalizeProductContext(
   context: ProductTargetContext,
 ): {
@@ -175,6 +207,7 @@ export function normalizeProductContext(
   tags: string[];
   collectionHandles: string[];
   vendor: string | null;
+  zoneId: string | null;
   country: string | null;
   state: string | null;
   inventoryStatus: Exclude<InventoryMode, "any"> | null;
@@ -200,6 +233,7 @@ export function normalizeProductContext(
   ];
 
   const vendor = normalizeTargetValue("vendor", String(context.vendor ?? ""));
+  const zoneId = normalizeTargetValue("zone", String(context.zoneId ?? ""));
   const country = /^[A-Z]{2}$/.test(String(context.country ?? "").trim().toUpperCase())
     ? String(context.country).trim().toUpperCase()
     : null;
@@ -210,6 +244,7 @@ export function normalizeProductContext(
     tags,
     collectionHandles,
     vendor,
+    zoneId,
     country,
     state,
     inventoryStatus,
@@ -225,8 +260,8 @@ function targetMatches(
   if (!isDeliveryTargetActive(target, context.timeZone, context.now)) return false;
   const kind = normalizeTargetKind(target.targetKind);
   if (!kind) return false;
-  const value = normalizeTargetValue(kind, target.targetValue);
-  if (!value) return false;
+  const values = parseTargetValues(kind, target.targetValue);
+  if (!values.length) return false;
 
   const countryCode = String(target.countryCode ?? "").trim().toUpperCase();
   const contextCountry = String(context.country ?? "").trim().toUpperCase();
@@ -240,15 +275,18 @@ function targetMatches(
   if (!inventoryMode || (inventoryMode !== "any" && inventoryMode !== context.inventoryStatus)) return false;
 
   if (kind === "product") {
-    return Boolean(context.productId && context.productId === value);
+    return Boolean(context.productId && values.includes(context.productId));
   }
   if (kind === "collection") {
-    return context.collectionHandles.includes(value);
+    return values.some((value) => context.collectionHandles.includes(value));
   }
   if (kind === "vendor") {
-    return context.vendor === value;
+    return Boolean(context.vendor && values.includes(context.vendor));
   }
-  return context.tags.includes(value);
+  if (kind === "zone") {
+    return Boolean(context.zoneId && values.includes(context.zoneId));
+  }
+  return values.some((value) => context.tags.includes(value));
 }
 
 export function matchDeliveryTarget(

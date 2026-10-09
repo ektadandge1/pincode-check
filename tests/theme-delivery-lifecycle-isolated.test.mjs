@@ -15,6 +15,18 @@ test('theme inline scripts and assets parse as JavaScript', () => {
   for (const name of ['delivery-theme-context', 'delivery-card-eta']) new vm.Script(source(`assets/${name}.js`));
 });
 
+test('previous service card opens dedicated local-delivery and pickup forms', () => {
+  const liquid = source('blocks/delivery-service-options.liquid');
+  const card = source('assets/delivery-service-card.js');
+  assert.match(card, /data-service-forms/);
+  assert.match(card, /data-service-form="local"/);
+  assert.match(card, /data-service-form="pickup"/);
+  assert.match(card, /showForm\('local'\)/);
+  assert.match(card, /showForm\('pickup'\)/);
+  assert.match(card, /service_options', '1'/);
+  assert.match(card, /options\.hidden = true/);
+});
+
 test('fresh cart context replaces stale product and quantity using localized AJAX URL', async () => {
   const requests = [];
   const window = { Shopify: { routes: { root: '/fr/' } } };
@@ -35,12 +47,25 @@ test('fresh cart context replaces stale product and quantity using localized AJA
   assert.deepEqual(JSON.parse(params.get('cartItems')), [{ productId: '42', variantId: 'gid://shopify/ProductVariant/84', quantity: 7 }]);
 });
 
+test('fresh cart context accepts exactly 20 complete lines', async () => {
+  const items = Array.from({ length: 20 }, (_, index) => ({ product_id: index + 1, variant_id: index + 101, quantity: 1 }));
+  const window = {};
+  vm.runInNewContext(source('assets/delivery-theme-context.js'), {
+    window,
+    Event,
+    document: { dispatchEvent() {} },
+    fetch: async () => ({ ok: true, json: async () => ({ items }) }),
+  });
+  const params = await window.incodeThemeContext.cartParams(new URLSearchParams());
+  assert.equal(JSON.parse(params.get('cartItems')).length, 20);
+});
+
 test('cart context fails closed for failed, empty, malformed and incomplete carts', async () => {
   for (const response of [
     { ok: false },
     { ok: true, json: async () => ({ items: [] }) },
     { ok: true, json: async () => ({ items: [{ product_id: 1, variant_id: 2, quantity: 0 }] }) },
-    { ok: true, json: async () => ({ items: Array.from({ length: 20 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 })) }) }
+    { ok: true, json: async () => ({ items: Array.from({ length: 21 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 })) }) }
   ]) {
     const window = {};
     vm.runInNewContext(source('assets/delivery-theme-context.js'), { window, Event, document: { dispatchEvent() {} }, fetch: async () => response });

@@ -28,7 +28,8 @@ import { shopifyPricingUrl } from "../utils/shopify-pricing-url";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
-  const subscriptions = await getActiveAppSubscriptions(admin);
+  const billingRequired = isBillingRequired();
+  const subscriptions = billingRequired ? await getActiveAppSubscriptions(admin) : [];
   const subscription = subscriptions[0] ?? null;
   const returnedPlanHandle = new URL(request.url).searchParams.get("plan_handle");
   const appHandle = process.env.SHOPIFY_APP_HANDLE?.trim() ?? "";
@@ -41,7 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     trialDays: STANDARD_PLAN_TRIAL_DAYS,
     subscriptionStatus: subscription?.status ?? "NONE",
     hasActiveSubscription: Boolean(subscription),
-    billingRequired: isBillingRequired(),
+    billingRequired,
     returnedPlanHandle,
     pricingUrl: appHandle ? shopifyPricingUrl({ shop: session.shop, appHandle }) : null,
     billingManagementUrl: `https://admin.shopify.com/store/${session.shop.replace(/\.myshopify\.com$/i, "")}/settings/billing/subscriptions`,
@@ -57,7 +58,7 @@ export default function PlansPage() {
         {data.hasActiveSubscription ? (
           <Banner title="Your Standard plan is active" tone="success">
             {data.returnedPlanHandle
-              ? "Your 7-day trial has started and all delivery tools are now available."
+              ? "Shopify approved the subscription. All delivery tools are now available."
               : "All delivery tools are available. Charges are managed through your Shopify invoice."}
           </Banner>
         ) : data.returnedPlanHandle ? (
@@ -69,7 +70,7 @@ export default function PlansPage() {
             Start your 7-day trial, then pay $9 USD every 30 days through Shopify.
           </Banner>
         )}
-        {!data.pricingUrl ? <Banner title="Billing is not configured" tone="critical">Add the app URL handle to SHOPIFY_APP_HANDLE before merchants select a plan.</Banner> : null}
+        {!data.pricingUrl ? <Banner title="Billing is not configured" tone="critical">Add the Shopify App Pricing handle to SHOPIFY_APP_HANDLE.</Banner> : null}
         {!data.billingRequired ? (
           <Banner title="Billing enforcement is disabled" tone="warning">
             Paid routes are currently available without an active subscription.
@@ -117,7 +118,7 @@ export default function PlansPage() {
           <BlockStack gap="200">
             <Text as="h2" variant="headingMd">Billing transparency</Text>
             <Text as="p" tone="subdued">
-              Shopify hosts plan selection, approves the subscription, manages the free trial, and adds recurring charges to your Shopify invoice. No external payment provider is used.
+              Shopify hosts plan selection and subscription approval, manages the free trial, and adds recurring charges to your Shopify invoice. No external payment provider is used.
             </Text>
           </BlockStack>
         </Card>

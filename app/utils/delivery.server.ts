@@ -513,6 +513,9 @@ export function parseCartDeliveryItems(value: string | null): ParsedCartDelivery
     if (!Array.isArray(parsed)) {
       return { provided: true, complete: false, items: [], error: "invalid_cart" };
     }
+    if (parsed.length > MAX_CART_DELIVERY_ITEMS) {
+      return { provided: true, complete: false, items: [], error: "cart_too_large" };
+    }
 
     const items: CartDeliveryItemInput[] = [];
     for (const entry of parsed.slice(0, MAX_CART_DELIVERY_ITEMS)) {
@@ -538,11 +541,9 @@ export function parseCartDeliveryItems(value: string | null): ParsedCartDelivery
       });
     }
 
-    // The current storefront payload is capped at 20 and has no total-line count,
-    // so a full payload at that limit cannot safely be described as complete.
     return {
       provided: true,
-      complete: parsed.length < MAX_CART_DELIVERY_ITEMS,
+      complete: true,
       items,
     };
   } catch {

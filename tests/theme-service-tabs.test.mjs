@@ -23,7 +23,7 @@ const element = (value = '') => ({
   focus() { this.focused = true; }
 });
 
-const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWrites = false, pickupDisplay = 'all' } = {}) => {
+const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWrites = false, pickupDisplay = 'all', servicePolicy = {} } = {}) => {
   const names = ['status', 'delivery-status', 'shipping-postal', 'shipping-check', 'shipping-status', 'shipping-result', 'shipping-date', 'suggestions', 'retry', 'check', 'country', 'address', 'pickup-details', 'delivery-details', 'locations', 'clear', 'pickup-filter', 'pickup-postal', 'filter'];
   const nodes = new Map(names.map((name) => [`[data-${name}]`, element()]));
   const country = nodes.get('[data-country]');
@@ -37,6 +37,7 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
   for (const name of ['date', 'first_name', 'last_name', 'email', 'phone', 'address', 'pickup_postal']) nodes.set(`[data-error="${name}"]`, element());
   for (const name of ['date', 'first_name', 'last_name', 'email', 'phone']) nodes.set(`[data-error="delivery_${name}"]`, element());
   const radios = ['shipping', 'pickup', 'delivery'].map((service) => ({ ...element(service), checked: service === 'shipping' }));
+  radios.forEach((radio) => { radio.parentElement = element(); });
   const panels = radios.map((radio) => ({ ...element(), dataset: { panel: radio.value }, hidden: radio.value !== 'shipping' }));
   const root = {
     ...element(), id: 'test-service-tabs', isConnected: true,
@@ -100,11 +101,13 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
       const request = { url, options };
       requests.push(request);
       if (url.endsWith('cart/update.js') && !holdWrites) return Promise.resolve({ ok: true });
+      if (url.startsWith('/apps/') && url.includes('init=1')) return Promise.resolve({ ok: true, json: async () => servicePolicy });
       return new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
     }
   });
   vm.runInContext(code, context);
-  const api = () => requests.filter((request) => request.url.startsWith('/apps/'));
+  const api = () => requests.filter((request) => request.url.startsWith('/apps/') && !request.url.includes('init=1'));
+  const policyApi = () => requests.filter((request) => request.url.startsWith('/apps/') && request.url.includes('init=1'));
   const writes = () => requests.filter((request) => request.url.endsWith('cart/update.js'));
   const respond = (request, data, ok = true) => request.resolve({ ok, json: async () => data });
   const choose = async (service) => {
@@ -118,7 +121,7 @@ const fixture = ({ surface = 'product', bootstrap = false, saved = false, holdWr
     callbacks.forEach((callback) => callback());
     await settle();
   };
-  return { nodes, root, roots, radios, panels, requests, context, document, navigations, product, choose, api, writes, respond, flushTimers,
+  return { nodes, root, roots, radios, panels, requests, context, document, navigations, product, choose, api, policyApi, writes, respond, flushTimers,
     invalidate: () => invalidate(), cleanup: () => cleanup(), watches: () => watches, setItems: (next) => { items = next; } };
 };
 
@@ -156,6 +159,14 @@ test('Liquid renders service tabs before JavaScript and Theme Editor blocks can 
   assert.match(code, /shopify:block:select/);
 });
 
+test('cart app block markup remains visible when the cart preview has no items', () => {
+  const liquid = source('blocks/delivery-service-options.liquid');
+  assert.match(liquid, /\{% if service_layout == 'service-tabs' %\}/);
+  assert.doesNotMatch(liquid, /\{% if service_empty_cart %\}/);
+  assert.doesNotMatch(liquid, /service_empty_cart/);
+  assert.match(liquid, /delivery-theme-context\.js/);
+});
+
 test('generated markup has no checkout/navigation controls or technical instructions and keeps country internal', () => {
   for (const surface of ['product', 'cart']) {
     const data = fixture({ surface, bootstrap: true });
@@ -166,15 +177,17 @@ test('generated markup has no checkout/navigation controls or technical instruct
   }
 });
 
-test('cart service tabs are kept directly above the native checkout actions', () => {
-  assert.match(code, /placeAboveCheckout\(root\)/);
-  assert.match(code, /ensureCartPlacement\(root\)/);
-  assert.match(code, /setTimeout\(retry, 100\)/);
-  assert.match(code, /button\[name="checkout"\]/);
-  assert.match(code, /closest\?\.\('\.cart__ctas, \[data-cart-actions\]'\)/);
-  assert.match(code, /insertBefore\(mount, anchor\)/);
+test('cart service tabs stay inside the Shopify app block selected by the merchant', () => {
+  assert.doesNotMatch(code, /placeAboveCheckout|ensureCartPlacement/);
+  assert.doesNotMatch(code, /button\[name="checkout"\]/);
+  assert.doesNotMatch(code, /insertBefore\(mount, anchor\)/);
   assert.doesNotMatch(code, /new MutationObserver\(initialize\)/);
-  assert.match(source('assets/delivery-service-options.css'), /data-checkout-placement="true"\]\s*\{[^}]*var\(--ist-margin/);
+});
+
+test('every cart service block initializes without suppressing duplicate blocks', () => {
+  assert.doesNotMatch(code, /Only the first cart block relocates/);
+  assert.doesNotMatch(code, /const first = document\.querySelectorAll\('\[data-template="service-tabs"\]/);
+  assert.match(code, /document\.querySelectorAll\('\[data-template="service-tabs"\]'\)\.forEach/);
 });
 
 test('cart placement exposes alignment, width, margin, and padding controls in the Theme Editor', () => {
@@ -192,17 +205,22 @@ test('cart placement exposes alignment, width, margin, and padding controls in t
 });
 
 test('pickup date lists only server-approved dates so blocked dates never display', () => {
+  const css = source('assets/delivery-service-options.css');
+  assert.match(code, /data-date-picker/);
+  assert.match(code, /data-date-grid/);
   assert.match(code, /data-field="date"/);
-  assert.doesNotMatch(code, /data-field="date" type="date"/);
-  assert.match(code, /only contains server-approved dates, so blocked dates never display/);
+  assert.match(code, /calendar only enables server-approved dates, so blocked dates never display/);
   assert.match(code, /Choose pickup date/);
   assert.match(code, /availableDates/);
+  assert.match(css, /ist-date-popover/);
+  assert.match(css, /ist-date-day:not\(:disabled\)/);
 });
 
 test('shipping is the default and cart initialization clears only block-owned service attributes', async () => {
   const data = fixture({ surface: 'cart' });
   await settle();
   assert.equal(data.api().length, 0);
+  assert.equal(data.policyApi().length, 1);
   assert.equal(data.panels[0].hidden, false);
   assert.ok(data.writes().length > 0);
   for (const request of data.writes()) {
@@ -212,8 +230,18 @@ test('shipping is the default and cart initialization clears only block-owned se
   }
 });
 
-test('shipping displays availability and the delivery date only after a successful estimate', async () => {
-  const data = fixture();
+test('service rules hide unavailable tabs and select the first allowed service', async () => {
+  const data = fixture({ servicePolicy: { shipping_available: false, local_delivery_available: false, pickup_available: true } });
+  await settle();
+  assert.equal(data.radios[0].parentElement.hidden, true);
+  assert.equal(data.radios[2].parentElement.hidden, true);
+  assert.equal(data.radios[1].parentElement.hidden, false);
+  assert.equal(data.radios[1].checked, true);
+  assert.equal(data.panels[1].hidden, false);
+});
+
+test('shipping uses the estimate enabled flag and displays its delivery date', async () => {
+  const data = fixture({ surface: 'cart' });
   const postal = data.nodes.get('[data-shipping-postal]');
   postal.value = 'K1A 0B1';
   assert.equal(data.nodes.get('[data-shipping-check]').handlers.click.length, 1);
@@ -223,7 +251,7 @@ test('shipping displays availability and the delivery date only after a successf
   assert.equal(query.get('country'), 'CA');
   assert.equal(query.get('postal_code'), 'K1A 0B1');
   assert.equal(query.get('estimate'), '1');
-  data.respond(data.api()[0], { available: true, delivery_date_range: 'Oct 12 to Oct 14, 2026' });
+  data.respond(data.api()[0], { enabled: true, delivery_date_range: 'Oct 12 to Oct 14, 2026' });
   await pending;
   assert.equal(data.nodes.get('[data-shipping-status]').textContent, '');
   assert.equal(data.nodes.get('[data-shipping-result]').hidden, false);
@@ -233,9 +261,9 @@ test('shipping displays availability and the delivery date only after a successf
   unavailable.nodes.get('[data-shipping-postal]').value = 'K1A 0B1';
   const unavailablePending = unavailable.nodes.get('[data-shipping-check]').fire('click');
   await settle();
-  unavailable.respond(unavailable.api()[0], { available: false });
+  unavailable.respond(unavailable.api()[0], { enabled: false, message: 'One cart item is not available for this postal code.' });
   await unavailablePending;
-  assert.equal(unavailable.nodes.get('[data-shipping-status]').textContent, 'Shipping is not available for this postcode.');
+  assert.equal(unavailable.nodes.get('[data-shipping-status]').textContent, 'One cart item is not available for this postal code.');
   assert.equal(unavailable.nodes.get('[data-shipping-result]').hidden, true);
 });
 
@@ -266,7 +294,7 @@ test('cart delivery automatically verifies a fresh snapshot and persists deliver
   assert.equal(attributes._incode_delivery_first_name, 'Jane');
   assert.equal(attributes._incode_delivery_email, 'jane@example.test');
   for (const key of Object.keys(attributes).filter((key) => key.startsWith('_incode_pickup_'))) assert.equal(attributes[key], '');
-  assert.equal(data.requests.filter((request) => request.url === '/fr/cart.js').length, 3);
+  assert.equal(data.requests.filter((request) => request.url === '/fr/cart.js').length, 4);
   assert.equal(data.nodes.get('[data-delivery-status]').textContent, 'Local delivery is available.');
   assert.deepEqual(data.navigations, []);
 });

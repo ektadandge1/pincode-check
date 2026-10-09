@@ -19,11 +19,11 @@ endunless
 endif
 if customer and customer.default_address
 assign saved_country = customer.default_address.country_code
+for country in localization.available_countries
+if country.iso_code == saved_country
 assign service_saved_country = saved_country | default: ''
 assign service_saved_postal = customer.default_address.zip | default: ''
 assign service_saved_address = customer.default_address | format_address | replace: '<br>', ', ' | replace: '<br/>', ', ' | replace: '<br />', ', ' | strip_html | strip_newlines
-for country in localization.available_countries
-if country.iso_code == saved_country
 assign service_country = saved_country
 assign service_postal = service_saved_postal
 break
@@ -50,23 +50,9 @@ endfor
 endcapture
 assign service_cart_items = service_cart_items_inner | prepend: '[' | append: ']'
 endif
-assign service_empty_cart = false
-if template.name == 'cart' and cart.item_count == 0
-assign service_empty_cart = true
-endif
 %}
 
-{% if service_empty_cart %}
-{% if request.design_mode %}
-<div class="incode-service-card incode-service-card--empty" {{ block.shopify_attributes }}>
-<div class="incode-service-card__empty-icon" aria-hidden="true">&#128230;</div>
-<div>
-<strong>Local delivery & pickup</strong>
-<span>This block appears when the cart contains a product.</span>
-</div>
-</div>
-{% endif %}
-{% elsif service_layout == 'service-tabs' %}
+{% if service_layout == 'service-tabs' %}
 <div id="incode-service-tabs-{{ service_id }}" data-template="service-tabs" data-surface="{{ template.name | escape }}" data-cart-align="{{ block.settings.cart_alignment | default: 'center' | escape }}" style="--ist-width:{{ block.settings.cart_width | default: 410 }}px;--ist-margin:{{ block.settings.cart_margin | default: 16 }}px;--ist-padding:{{ block.settings.cart_padding | default: 16 }}px" data-product-id="{{ service_product_id | escape }}" data-initial-variant="{{ product.selected_or_first_available_variant.id }}" data-show-pickup="{{ block.settings.show_store_pickup }}" data-show-local="{{ block.settings.show_local_delivery }}" data-pickup-display="{{ block.settings.pickup_display | default: 'all' | escape }}" data-saved-postal="{{ service_saved_postal | escape }}" data-saved-country="{{ service_saved_country | escape }}" data-saved-address="{{ service_saved_address | escape }}" {{ block.shopify_attributes }}>
 <div data-service-fallback><b>Shipping</b><b data-fallback-pickup>Store Pickup</b><b data-fallback-local>Delivery</b></div>
 <select data-country hidden>{% for country in localization.available_countries %}<option value="{{ country.iso_code | escape }}" {% if country.iso_code == service_country %}selected{% endif %}>{{ country.name | escape }}</option>{% else %}<option value="{{ service_country | escape }}">{{ service_country | escape }}</option>{% endfor %}</select>
@@ -159,14 +145,12 @@ data-surface="{{ template.name | escape }}"
 }
 </style>
 
-{% unless service_empty_cart %}
 <script src="{{ 'delivery-theme-context.js' | asset_url }}" defer></script>
 {% if service_layout == 'service-tabs' %}
 <script src="{{ 'delivery-service-options.js' | asset_url }}" defer></script>
 {% else %}
 <script src="{{ 'delivery-service-card.js' | asset_url }}" defer></script>
 {% endif %}
-{% endunless %}
 
 {% schema %}
 {

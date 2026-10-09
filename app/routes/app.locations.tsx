@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBeforeUnload, useBlocker, useFetcher, useLoaderData } from "react-router";
 import {
+  Autocomplete,
   Badge,
   Banner,
   BlockStack,
@@ -21,6 +22,7 @@ import { resolvePlanAccess } from "../services/plan-access.server";
 import { NO_PLAN_ACCESS } from "../services/plans.server";
 import { requireActiveBilling } from "../services/billing.server";
 import { clearDeliveryCheckCaches } from "../services/delivery-checker.server";
+import { loadShopifyTargetSuggestionsForKind } from "../services/shopify-target-suggestions.server";
 import { validatePostalPattern } from "../utils/delivery.server";
 import { COUNTRY_CODES, COUNTRY_OPTIONS } from "../utils/countries";
 
@@ -45,6 +47,12 @@ type ShopifyLocation = {
 type ActionData = {
   ok: boolean;
   message: string;
+  savedPriorityMode?: string;
+  saved?: {
+    locationId: string;
+    section: string;
+    values: Partial<LocationForm>;
+  };
 };
 
 type PickupOrder = {
@@ -120,8 +128,10 @@ type LocationForm = {
   pickupWeekdaysCsv: string;
   pickupBlockedDatesCsv: string;
   pickupAdvanceDays: string;
-  serviceTargetMode: string;
-  serviceTargetValuesCsv: string;
+  localDeliveryTargetMode: string;
+  localDeliveryTargetValuesCsv: string;
+  pickupTargetMode: string;
+  pickupTargetValuesCsv: string;
 };
 
 function locationForm(location: LocationRow): LocationForm {
@@ -142,8 +152,10 @@ function locationForm(location: LocationRow): LocationForm {
     pickupWeekdaysCsv: location.rule?.pickupWeekdaysCsv ?? "0,1,2,3,4,5,6",
     pickupBlockedDatesCsv: location.rule?.pickupBlockedDatesCsv ?? "",
     pickupAdvanceDays: String(location.rule?.pickupAdvanceDays ?? 30),
-    serviceTargetMode: location.rule?.serviceTargetMode ?? "all",
-    serviceTargetValuesCsv: location.rule?.serviceTargetValuesCsv ?? "",
+    localDeliveryTargetMode: location.rule?.localDeliveryTargetMode ?? location.rule?.serviceTargetMode ?? "all",
+    localDeliveryTargetValuesCsv: location.rule?.localDeliveryTargetValuesCsv ?? location.rule?.serviceTargetValuesCsv ?? "",
+    pickupTargetMode: location.rule?.pickupTargetMode ?? location.rule?.serviceTargetMode ?? "all",
+    pickupTargetValuesCsv: location.rule?.pickupTargetValuesCsv ?? location.rule?.serviceTargetValuesCsv ?? "",
   };
 }
 
@@ -154,8 +166,10 @@ const SERVICE_TARGET_OPTIONS = [
   { label: "Only selected products", value: "product" },
   { label: "Only products in selected collections", value: "collection" },
   { label: "Only products with selected tags", value: "tag" },
-  { label: "Only selected delivery zones", value: "zone" },
 ];
+const LEGACY_SERVICE_TARGET_OPTION = { label: "Existing delivery-zone restriction", value: "zone", disabled: true };
+
+const TARGET_MODE_VALUES = new Set(["all", "product", "collection", "tag", "zone"]);
 
 const PICKUP_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -168,76 +182,112 @@ function ServiceTargetPicker({ options, label, value, disabled, onChange, name =
   name?: string;
 }) {
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
-  const [selectedOnly, setSelectedOnly] = useState(false);
-  const [showAllSelected, setShowAllSelected] = useState(false);
   const selected = value.split(",").map((item) => item.trim()).filter(Boolean);
-  const matching = options.filter((option) => (!selectedOnly || selected.includes(option.value)) && option.label.toLowerCase().includes(search.trim().toLowerCase()));
-  const pageCount = Math.max(1, Math.ceil(matching.length / 6));
-  const currentPage = Math.min(page, pageCount - 1);
-  const visible = matching.slice(currentPage * 6, currentPage * 6 + 6);
-  const selectedLabels = new Map(options.map((option) => [option.value, option.label]));
-  const remove = (item: string) => onChange(selected.filter((entry) => entry !== item).join(","));
+  const query = search.trim().toLowerCase();
+  const visible = options
+    .filter((option) => !query || `${option.label} ${option.value}`.toLowerCase().includes(query))
+    .slice(0, 100);
+  for (const selectedValue of selected) {
+    if (!visible.some((option) => option.value === selectedValue)) {
+      visible.unshift(options.find((option) => option.value === selectedValue) ?? { label: selectedValue, value: selectedValue });
+    }
+  }
 
   return (
     <section className="incode-service-picker" aria-label={`Choose ${label.toLowerCase()}`}>
       <input type="hidden" name={name} value={value} />
       <div className="incode-service-picker__header">
-        <div>
-          <Text as="h4" variant="headingSm">Choose {label.toLowerCase()}</Text>
-          <Text as="p" tone="subdued" variant="bodySm">Search by name, then select your choices.</Text>
-        </div>
+        <Text as="h4" variant="headingSm">Choose {label.toLowerCase()}</Text>
         <Badge tone={selected.length ? "success" : "info"}>{`${selected.length} selected`}</Badge>
       </div>
-      <TextField
-        label={`Search ${label.toLowerCase()}`}
-        labelHidden
-        value={search}
-        onChange={(text) => { setSearch(text); setPage(0); }}
-        placeholder={`Search ${options.length} ${label.toLowerCase()} by name`}
-        autoComplete="off"
-        disabled={disabled}
-        clearButton
-        onClearButtonClick={() => { setSearch(""); setPage(0); }}
-        prefix={<svg className="incode-service-picker__search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>}
+      <Autocomplete
+        allowMultiple
+        options={visible}
+        selected={selected}
+        onSelect={(next) => onChange([...new Set(next)].slice(0, 100).join(","))}
+        emptyState={options.length ? "No matching choices." : "No choices available. Refresh after adding them in Shopify."}
+        textField={<Autocomplete.TextField
+          label={`Search ${label.toLowerCase()}`}
+          value={search}
+          onChange={setSearch}
+          placeholder={`Search ${options.length} ${label.toLowerCase()}`}
+          autoComplete="off"
+          disabled={disabled}
+          clearButton
+          onClearButtonClick={() => setSearch("")}
+          prefix={<svg className="incode-service-picker__search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>}
+        />}
       />
-      <div className="incode-service-picker__toolbar">
-        <div className="incode-service-picker__tabs" role="group" aria-label="Filter choices">
-          <button type="button" aria-pressed={!selectedOnly} onClick={() => { setSelectedOnly(false); setPage(0); }}>Browse all</button>
-          <button type="button" aria-pressed={selectedOnly} onClick={() => { setSelectedOnly(true); setPage(0); }}>Selected ({selected.length})</button>
-        </div>
-        <Button variant="plain" disabled={disabled || !selected.length} onClick={() => onChange("")}>Clear selection</Button>
-      </div>
-      <div className="incode-service-picker__choices">
-        {visible.map((option) => (
-          <div key={option.value} className={`incode-service-picker__choice${selected.includes(option.value) ? " is-selected" : ""}`}>
-            <Checkbox
-              label={option.label}
-              checked={selected.includes(option.value)}
-              disabled={disabled}
-              onChange={(checked) => onChange((checked ? [...new Set([...selected, option.value])] : selected.filter((item) => item !== option.value)).join(","))}
-            />
-          </div>
-        ))}
-        {!visible.length ? <div className="incode-service-picker__empty"><Text as="p" tone="subdued">{selectedOnly && !selected.length ? "No selections yet. Choose Browse all to get started." : options.length ? "No matches. Try a different search." : "No choices found. Add them to your store, then refresh."}</Text></div> : null}
-      </div>
-      <div className="incode-service-picker__footer">
-        <Text as="span" tone="subdued" variant="bodySm">{matching.length ? `${currentPage * 6 + 1}-${Math.min((currentPage + 1) * 6, matching.length)} of ${matching.length} choices` : "0 choices"}</Text>
-        <InlineStack gap="200" blockAlign="center">
-          <Button accessibilityLabel="Previous choices" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)} size="slim">Previous</Button>
-          <Text as="span" variant="bodySm">{`${currentPage + 1} / ${pageCount}`}</Text>
-          <Button accessibilityLabel="Next choices" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)} size="slim">Next</Button>
-        </InlineStack>
-      </div>
       {selected.length ? <div className="incode-service-picker__selected">
-        <Text as="p" variant="bodySm" fontWeight="semibold">Your selection</Text>
-        <InlineStack gap="200" wrap>
-          {(showAllSelected ? selected : selected.slice(0, 4)).map((item) => <Tag key={item} onRemove={disabled ? undefined : () => remove(item)}>{selectedLabels.get(item) ?? item}</Tag>)}
-          {selected.length > 4 ? <Button variant="plain" onClick={() => setShowAllSelected(!showAllSelected)}>{showAllSelected ? "Show less" : `+${selected.length - 4} more`}</Button> : null}
-        </InlineStack>
+        {selected.map((selectedValue) => <Tag key={selectedValue} onRemove={disabled ? undefined : () => onChange(selected.filter((item) => item !== selectedValue).join(","))}>
+          {options.find((option) => option.value === selectedValue)?.label ?? selectedValue}
+        </Tag>)}
+        <Button variant="plain" disabled={disabled} onClick={() => onChange("")}>Clear all</Button>
       </div> : null}
     </section>
   );
+}
+
+function ServiceAudienceFields({ serviceLabel, mode, values, modeName, valuesName, suggestions, disabled, onModeChange, onValuesChange }: {
+  serviceLabel: string;
+  mode: string;
+  values: string;
+  modeName: string;
+  valuesName: string;
+  suggestions: Array<{ label: string; value: string }>;
+  disabled: boolean;
+  onModeChange: (value: string) => void;
+  onValuesChange: (value: string) => void;
+}) {
+  const options = mode === "zone" ? [LEGACY_SERVICE_TARGET_OPTION, ...SERVICE_TARGET_OPTIONS] : SERVICE_TARGET_OPTIONS;
+  const targetLabel = mode === "product" ? "Products" : mode === "collection" ? "Collections" : mode === "tag" ? "Product tags" : "Existing delivery zones";
+  return (
+    <BlockStack gap="200">
+      <Text as="h4" variant="headingSm">{serviceLabel} audience</Text>
+      {mode === "zone" ? <Banner tone="warning" title="Legacy delivery-zone restriction">Choose another audience option to replace this saved restriction.</Banner> : null}
+      <Select
+        label="Show this service for"
+        name={modeName}
+        value={mode}
+        disabled={disabled}
+        options={options}
+        onChange={onModeChange}
+      />
+      {mode !== "all" ? (
+        <ServiceTargetPicker
+          options={suggestions}
+          label={targetLabel}
+          value={values}
+          name={valuesName}
+          disabled={disabled || mode === "zone"}
+          onChange={onValuesChange}
+        />
+      ) : null}
+    </BlockStack>
+  );
+}
+
+async function validateServiceTarget(admin: Parameters<typeof loadShopifyTargetSuggestionsForKind>[0], shop: string, mode: string, values: string[]) {
+  if (!TARGET_MODE_VALUES.has(mode)) return "Choose a supported service targeting option.";
+  if (values.length > 500 || values.some((value) => value.length > 100)) return "Service targeting supports up to 500 values of 100 characters each.";
+  if (mode !== "all" && values.length === 0) return "Add at least one value for the selected service targeting option.";
+  if (mode === "product" || mode === "collection" || mode === "tag") {
+    try {
+      const suggestions = await loadShopifyTargetSuggestionsForKind(admin, mode);
+      const allowed = new Set(suggestions.map((suggestion) => suggestion.value));
+      if (values.some((value) => !allowed.has(value))) return "One or more selected Shopify targets are unavailable. Refresh and choose again.";
+    } catch {
+      return "Shopify could not verify the selected targets. Refresh and try again.";
+    }
+  }
+  if (mode === "zone") {
+    const zoneIds = values.filter((value) => /^\d+$/.test(value)).map(Number);
+    const ownedZones = zoneIds.length === values.length
+      ? await prisma.zone.count({ where: { shop, enabled: true, id: { in: zoneIds } } })
+      : 0;
+    if (ownedZones !== values.length) return "One or more selected delivery zones are unavailable. Refresh and choose again.";
+  }
+  return null;
 }
 
 function BlockedDatesPicker({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (value: string) => void }) {
@@ -270,9 +320,9 @@ function BlockedDatesPicker({ value, disabled, onChange }: { value: string; disa
   );
 }
 
-function LocationSettingsSection({ title, description, status, children }: { title: string; description: string; status: string; children: React.ReactNode }) {
+function LocationSettingsSection({ id, title, description, status, children }: { id?: string; title: string; description: string; status: string; children: React.ReactNode }) {
   return (
-    <details className="incode-location-section">
+    <details id={id} className="incode-location-section" open>
       <summary>
         <span>
           <strong>{title}</strong>
@@ -296,7 +346,9 @@ function optionalDays(value: FormDataEntryValue | null): number | null {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await requireActiveBilling(request);
-  const requestedView = new URL(request.url).searchParams.get("view");
+  const url = new URL(request.url);
+  const requestedView = url.searchParams.get("view");
+  const requestedLocationId = url.searchParams.get("location");
   const view = requestedView === "pickups" || requestedView === "deliveries" ? requestedView : "setup";
   const [rules, setting, zones, targetRuleCount] = await Promise.all([
     prisma.fulfillmentLocationRule.findMany({
@@ -310,6 +362,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const ruleByLocation = new Map(rules.map((rule) => [rule.shopifyLocationId, rule]));
   let locations: LocationRow[] = [];
   let locationError = "";
+  let catalogError = "";
   let targetSuggestions: TargetSuggestions = {
     product: [],
     collection: [],
@@ -339,17 +392,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
            }
            pageInfo { hasNextPage endCursor }
          }
-          ${view === "setup" ? `
-            products(first: 250) { nodes { id title tags } pageInfo { hasNextPage endCursor } }
-            collections(first: 250) { nodes { handle title } pageInfo { hasNextPage endCursor } }
-          ` : ""}
-      }
+       }
     `);
     const payload = (await response.json()) as {
       data?: {
         locations?: { nodes?: ShopifyLocation[]; pageInfo?: { hasNextPage: boolean; endCursor: string | null } };
-        products?: { nodes?: Array<{ id: string; title: string; tags: string[] }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
-        collections?: { nodes?: Array<{ handle: string; title: string }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
       };
       errors?: Array<{ message?: string }>;
     };
@@ -408,35 +455,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...location,
       rule: ruleByLocation.get(location.id) ?? null,
     }));
-    const products = payload.data?.products?.nodes ?? [];
-    const collections = payload.data?.collections?.nodes ?? [];
-    for (const kind of ["products", "collections"] as const) {
-      let pageInfo = payload.data?.[kind]?.pageInfo;
-      while (pageInfo?.hasNextPage) {
-        if (!pageInfo.endCursor) throw new Error("Shopify catalog pagination could not be completed.");
-        const nextResponse = await admin.graphql(`query LocationServiceCatalog($after: String!) {
-          ${kind}(first: 250, after: $after) {
-            nodes { ${kind === "products" ? "id title tags" : "handle title"} }
-            pageInfo { hasNextPage endCursor }
-          }
-        }`, { variables: { after: pageInfo.endCursor } });
-        const next = await nextResponse.json() as typeof payload;
-        if (!nextResponse.ok || next.errors?.length) throw new Error(next.errors?.[0]?.message ?? "Unable to load service targeting choices.");
-        if (kind === "products") products.push(...(next.data?.products?.nodes ?? []));
-        else collections.push(...(next.data?.collections?.nodes ?? []));
-        const nextPageInfo = next.data?.[kind]?.pageInfo;
-        if (!nextPageInfo || (nextPageInfo.hasNextPage && nextPageInfo.endCursor === pageInfo.endCursor)) {
-          throw new Error("Shopify catalog pagination could not be completed.");
-        }
-        pageInfo = nextPageInfo;
-      }
-    }
-    targetSuggestions = {
-      product: products.map((product) => ({ label: product.title, value: product.id.replace(/\D/g, "") })),
-      collection: collections.map((collection) => ({ label: collection.title, value: collection.handle })),
-      tag: [...new Set(products.flatMap((product) => product.tags))].sort().map((tag) => ({ label: tag, value: tag })),
-      zone: zones.map((zone) => ({ label: `${zone.name} (Zone ${zone.id})`, value: String(zone.id) })),
-    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load Shopify locations.";
     locationError = [locationError, message].filter(Boolean).join(" ");
@@ -449,6 +467,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         address: null,
         rule,
       }));
+    }
+  }
+  const selectedLocationId = requestedLocationId && locations.some((location) => location.id === requestedLocationId)
+    ? requestedLocationId
+    : view === "setup" && locations.length === 1 ? locations[0].id : null;
+  if (view === "setup" && selectedLocationId) {
+    try {
+      const [product, collection, tag] = await Promise.all([
+        loadShopifyTargetSuggestionsForKind(admin, "product"),
+        loadShopifyTargetSuggestionsForKind(admin, "collection"),
+        loadShopifyTargetSuggestionsForKind(admin, "tag"),
+      ]);
+      targetSuggestions = { product, collection, tag, zone: targetSuggestions.zone };
+    } catch (error) {
+      catalogError = error instanceof Error ? error.message : "Unable to load Shopify catalog choices.";
     }
   }
   let access = NO_PLAN_ACCESS;
@@ -492,6 +525,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         if (!response.ok || !payload.data?.orders) {
           throw new Error(payload.errors?.[0]?.message ?? "Shopify could not load recent orders.");
         }
+        const locationById = new Map(locations.map((location) => [location.id, location]));
         for (const order of payload.data.orders.nodes ?? []) {
           const attributes = new Map((order.customAttributes ?? []).map((attribute) => [attribute.key, attribute.value ?? ""]));
           if (view === "deliveries") {
@@ -514,7 +548,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
             });
             continue;
           }
-          const locationById = new Map(locations.map((location) => [location.id, location]));
           const pickupLocationId = attributes.get("_incode_pickup_location_id") ?? "";
           const pickupLocationName = attributes.get("_incode_pickup_location_name") ?? "";
           const pickupDate = attributes.get("_incode_pickup_date") ?? "";
@@ -558,9 +591,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     inventoryAwareEnabled: setting?.inventoryAwareEnabled ?? false,
     priorityMode: setting?.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
     locations,
+    selectedLocationId,
     targetSuggestions,
     targetRuleCount,
     locationError,
+    catalogError,
     orderAccessGranted,
     pickupOrders,
     pickupOrdersError,
@@ -605,7 +640,15 @@ export async function action({ request }: ActionFunctionArgs) {
         update: { name: location.name, enabled: true, pickupEnabled: true, ...(deliveryConfigured ? { localDeliveryEnabled: true } : {}) },
       });
       clearDeliveryCheckCaches(session.shop);
-      return { ok: true, message: `${location.name} is enabled for pickup${deliveryConfigured ? " and local delivery" : ""}. Assign inventory to this location for every eligible product.` } satisfies ActionData;
+      return {
+        ok: true,
+        message: `${location.name} is enabled for pickup${deliveryConfigured ? " and local delivery" : ""}. Assign inventory to this location for every eligible product.`,
+        saved: {
+          locationId: shopifyLocationId,
+          section: "enable_pickup",
+          values: { enabled: true, pickupEnabled: true, localDeliveryEnabled: deliveryConfigured },
+        },
+      } satisfies ActionData;
     } catch {
       return { ok: false, message: "Unable to enable this Shopify location. Refresh and try again." } satisfies ActionData;
     }
@@ -621,7 +664,7 @@ export async function action({ request }: ActionFunctionArgs) {
       update: { locationPriorityMode: mode },
     });
     clearDeliveryCheckCaches(session.shop);
-    return { ok: true, message: "Inventory location priority saved." } satisfies ActionData;
+    return { ok: true, message: "Inventory location priority saved.", savedPriorityMode: mode } satisfies ActionData;
   }
 
   const shopifyLocationId = String(formData.get("shopifyLocationId") ?? "").trim();
@@ -629,9 +672,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const processingDays = optionalDays(formData.get("processingDays"));
   const transitDays = optionalDays(formData.get("transitDays"));
   const pickupInstructions = String(formData.get("pickupInstructions") ?? "").trim();
-  const pickupEnabled = parseBool(formData.get("pickupEnabled"));
-  const localDeliveryEnabled = parseBool(formData.get("localDeliveryEnabled"));
-  const enabled = parseBool(formData.get("enabled")) || pickupEnabled || localDeliveryEnabled;
+  const pickupEnabled = parseBool(formData.get("pickupEnabledState") ?? formData.get("pickupEnabled"));
+  const localDeliveryEnabled = parseBool(formData.get("localDeliveryEnabledState") ?? formData.get("localDeliveryEnabled"));
+  const enabled = parseBool(formData.get("enabledState") ?? formData.get("enabled")) || pickupEnabled || localDeliveryEnabled;
   const pickupPhone = String(formData.get("pickupPhone") ?? "").trim();
   const pickupPreparationRaw = String(formData.get("pickupPreparationDays") ?? "").trim();
   const pickupAdvanceRaw = String(formData.get("pickupAdvanceDays") ?? "").trim();
@@ -644,11 +687,23 @@ export async function action({ request }: ActionFunctionArgs) {
   const localDeliveryCountry = String(formData.get("localDeliveryCountry") ?? "").trim().toUpperCase();
   const localDeliveryCoverageMode = String(formData.get("localDeliveryCoverageMode") ?? "postal");
   const localDeliveryZoneIds = [...new Set(String(formData.get("localDeliveryZoneIdsCsv") ?? "").split(",").map((value) => value.trim()).filter(Boolean))];
-  const serviceTargetMode = String(formData.get("serviceTargetMode") ?? "all");
-  const serviceTargetValues = String(formData.get("serviceTargetValuesCsv") ?? "")
+  const legacyServiceTargetMode = String(formData.get("serviceTargetMode") ?? "all");
+  const legacyServiceTargetValues = String(formData.get("serviceTargetValuesCsv") ?? "")
     .split(/[\n,]/)
     .map((value) => value.trim())
     .filter(Boolean);
+  const localDeliveryTargetMode = String(formData.get("localDeliveryTargetMode") ?? legacyServiceTargetMode);
+  const localDeliveryTargetValues = String(formData.get("localDeliveryTargetValuesCsv") ?? (formData.has("localDeliveryTargetMode") ? "" : formData.get("serviceTargetValuesCsv") ?? ""))
+    .split(/[\n,]/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const pickupTargetMode = String(formData.get("pickupTargetMode") ?? legacyServiceTargetMode);
+  const pickupTargetValues = String(formData.get("pickupTargetValuesCsv") ?? (formData.has("pickupTargetMode") ? "" : formData.get("serviceTargetValuesCsv") ?? ""))
+    .split(/[\n,]/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const serviceTargetMode = legacyServiceTargetMode;
+  const serviceTargetValues = legacyServiceTargetValues;
   const patterns = String(formData.get("localDeliveryPostalCodesCsv") ?? "")
     .split(/[\n,]/)
     .map((value) => value.trim())
@@ -666,7 +721,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const existingRule = await prisma.fulfillmentLocationRule.findUnique({
       where: { shop_shopifyLocationId: { shop: session.shop, shopifyLocationId } },
     });
-    const submittedEnabled = parseBool(formData.get("enabled"));
+    const submittedEnabled = parseBool(formData.get("enabledState") ?? formData.get("enabled"));
     const baseEnabled = existingRule?.enabled ?? false;
     const basePickupEnabled = existingRule?.pickupEnabled ?? false;
     const baseDeliveryEnabled = existingRule?.localDeliveryEnabled ?? false;
@@ -703,7 +758,11 @@ export async function action({ request }: ActionFunctionArgs) {
         update: { name: location.name, enabled: nextEnabled },
       });
       clearDeliveryCheckCaches(session.shop);
-      return { ok: true, message: `${location.name} status saved.` } satisfies ActionData;
+      return {
+        ok: true,
+        message: `${location.name} status saved.`,
+        saved: { locationId: shopifyLocationId, section: "status", values: { enabled: nextEnabled } },
+      } satisfies ActionData;
     }
 
     if (section === "routing") {
@@ -743,26 +802,42 @@ export async function action({ request }: ActionFunctionArgs) {
         update: { name: location.name, priority, processingDays, transitDays },
       });
       clearDeliveryCheckCaches(session.shop);
-      return { ok: true, message: `${location.name} routing saved.` } satisfies ActionData;
+      return {
+        ok: true,
+        message: `${location.name} routing saved.`,
+        saved: {
+          locationId: shopifyLocationId,
+          section: "routing",
+          values: {
+            priority: String(priority),
+            processingDays: processingDays === null ? "" : String(processingDays),
+            transitDays: transitDays === null ? "" : String(transitDays),
+          },
+        },
+      } satisfies ActionData;
     }
 
     if (section === "delivery") {
-      if (patterns.length > 500 || patterns.some((pattern) => pattern.length > 30)) {
+      if (localDeliveryEnabled) {
+        const targetError = await validateServiceTarget(admin, session.shop, localDeliveryTargetMode, localDeliveryTargetValues);
+        if (targetError) return { ok: false, message: targetError } satisfies ActionData;
+      }
+      if (localDeliveryEnabled && (patterns.length > 500 || patterns.some((pattern) => pattern.length > 30))) {
         return { ok: false, message: "Local delivery supports up to 500 postal patterns of 30 characters each." } satisfies ActionData;
       }
-      if (localDeliveryCountry && !COUNTRY_CODES.has(localDeliveryCountry)) {
+      if (localDeliveryEnabled && localDeliveryCountry && !COUNTRY_CODES.has(localDeliveryCountry)) {
         return { ok: false, message: "Choose a valid local delivery country." } satisfies ActionData;
       }
-      if (localDeliveryCoverageMode !== "postal" && localDeliveryCoverageMode !== "zone") {
+      if (localDeliveryEnabled && localDeliveryCoverageMode !== "postal" && localDeliveryCoverageMode !== "zone") {
         return { ok: false, message: "Choose postal patterns or delivery zones for local delivery coverage." } satisfies ActionData;
       }
       if (localDeliveryEnabled && localDeliveryCoverageMode === "postal" && (!localDeliveryCountry || !patterns.length)) {
         return { ok: false, message: "Choose a local delivery country and add at least one postal code or pattern." } satisfies ActionData;
       }
-      if (localDeliveryCoverageMode === "postal" && localDeliveryCountry && patterns.some((pattern) => !validatePostalPattern(localDeliveryCountry, pattern))) {
+      if (localDeliveryEnabled && localDeliveryCoverageMode === "postal" && localDeliveryCountry && patterns.some((pattern) => !validatePostalPattern(localDeliveryCountry, pattern))) {
         return { ok: false, message: `A postal pattern is invalid for ${localDeliveryCountry}. Check the codes, ranges or wildcards.` } satisfies ActionData;
       }
-      if (localDeliveryZoneIds.length > 100 || localDeliveryZoneIds.some((id) => !/^\d+$/.test(id))) {
+      if (localDeliveryEnabled && (localDeliveryZoneIds.length > 100 || localDeliveryZoneIds.some((id) => !/^\d+$/.test(id)))) {
         return { ok: false, message: "Choose valid delivery zones." } satisfies ActionData;
       }
       if (localDeliveryEnabled && localDeliveryCoverageMode === "zone") {
@@ -798,46 +873,77 @@ export async function action({ request }: ActionFunctionArgs) {
           processingDays: existingRule?.processingDays ?? null,
           transitDays: existingRule?.transitDays ?? null,
           localDeliveryEnabled,
-          localDeliveryCountry,
-          localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
-          localDeliveryCoverageMode,
-          localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+           ...(localDeliveryEnabled ? {
+             localDeliveryCountry,
+             localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
+             localDeliveryCoverageMode,
+             localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+             localDeliveryTargetMode,
+             localDeliveryTargetValuesCsv: [...new Set(localDeliveryTargetValues)].join(","),
+           } : {}),
         },
         update: {
           name: location.name,
           enabled: nextEnabled,
           localDeliveryEnabled,
-          localDeliveryCountry,
-          localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
-          localDeliveryCoverageMode,
-          localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+           ...(localDeliveryEnabled ? {
+             localDeliveryCountry,
+             localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
+             localDeliveryCoverageMode,
+             localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+             localDeliveryTargetMode,
+             localDeliveryTargetValuesCsv: [...new Set(localDeliveryTargetValues)].join(","),
+           } : {}),
         },
       });
       clearDeliveryCheckCaches(session.shop);
-      return { ok: true, message: `${location.name} local delivery saved.` } satisfies ActionData;
+      return {
+        ok: true,
+        message: `${location.name} local delivery saved.`,
+        saved: {
+          locationId: shopifyLocationId,
+          section: "delivery",
+          values: {
+            enabled: nextEnabled,
+            localDeliveryEnabled,
+            ...(localDeliveryEnabled ? {
+              localDeliveryCountry,
+             localDeliveryPostalCodesCsv: [...new Set(patterns)].join(","),
+             localDeliveryCoverageMode,
+             localDeliveryZoneIdsCsv: localDeliveryZoneIds.join(","),
+             localDeliveryTargetMode,
+             localDeliveryTargetValuesCsv: [...new Set(localDeliveryTargetValues)].join(","),
+           } : {}),
+          },
+        },
+      } satisfies ActionData;
     }
 
     if (section === "pickup") {
-      if (pickupInstructions.length > 500) {
+      if (pickupEnabled) {
+        const targetError = await validateServiceTarget(admin, session.shop, pickupTargetMode, pickupTargetValues);
+        if (targetError) return { ok: false, message: targetError } satisfies ActionData;
+      }
+      if (pickupEnabled && pickupInstructions.length > 500) {
         return { ok: false, message: "Pickup instructions must be 500 characters or fewer." } satisfies ActionData;
       }
-      if (pickupPhone.length > 50) {
+      if (pickupEnabled && pickupPhone.length > 50) {
         return { ok: false, message: "Pickup phone must be 50 characters or fewer." } satisfies ActionData;
       }
-      if (!/^\d+$/.test(pickupPreparationRaw) || !Number.isInteger(pickupPreparationDays) || pickupPreparationDays < 0 || pickupPreparationDays > 60) {
+      if (pickupEnabled && (!/^\d+$/.test(pickupPreparationRaw) || !Number.isInteger(pickupPreparationDays) || pickupPreparationDays < 0 || pickupPreparationDays > 60)) {
         return { ok: false, message: "Pickup preparation days must be an integer from 0 to 60." } satisfies ActionData;
       }
-      if (!/^\d+$/.test(pickupAdvanceRaw) || !Number.isInteger(pickupAdvanceDays) || pickupAdvanceDays < 1 || pickupAdvanceDays > 90 || pickupAdvanceDays < pickupPreparationDays) {
+      if (pickupEnabled && (!/^\d+$/.test(pickupAdvanceRaw) || !Number.isInteger(pickupAdvanceDays) || pickupAdvanceDays < 1 || pickupAdvanceDays > 90 || pickupAdvanceDays < pickupPreparationDays)) {
         return { ok: false, message: "Pickup advance horizon must be an integer from 1 to 90 and at least the preparation days." } satisfies ActionData;
       }
-      if (pickupWeekdaysRaw.length > 13 || pickupWeekdays.some((day) => !/^[0-6]$/.test(day)) || (pickupEnabled && !pickupWeekdays.length)) {
+      if (pickupEnabled && (pickupWeekdaysRaw.length > 13 || pickupWeekdays.some((day) => !/^[0-6]$/.test(day)) || !pickupWeekdays.length)) {
         return { ok: false, message: "Choose valid pickup weekdays, with at least one day when pickup is enabled." } satisfies ActionData;
       }
-      if (pickupBlockedDatesRaw.length > 4000 || pickupBlockedDates.length > 365 || pickupBlockedDates.some((date) => {
+      if (pickupEnabled && (pickupBlockedDatesRaw.length > 4000 || pickupBlockedDates.length > 365 || pickupBlockedDates.some((date) => {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith("0000")) return true;
         const parsed = new Date(`${date}T00:00:00.000Z`);
         return !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date;
-      })) {
+      }))) {
         return { ok: false, message: "Blocked pickup dates must be real YYYY-MM-DD dates (up to 365 dates and 4000 characters)." } satisfies ActionData;
       }
       const nextEnabled = baseEnabled || baseDeliveryEnabled || pickupEnabled;
@@ -868,39 +974,61 @@ export async function action({ request }: ActionFunctionArgs) {
           processingDays: existingRule?.processingDays ?? null,
           transitDays: existingRule?.transitDays ?? null,
           pickupEnabled,
-          pickupInstructions,
-          pickupPhone,
-          pickupPreparationDays,
-          pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
-          pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
-          pickupAdvanceDays,
+           ...(pickupEnabled ? {
+             pickupInstructions,
+             pickupPhone,
+             pickupPreparationDays,
+             pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
+             pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
+             pickupAdvanceDays,
+             pickupTargetMode,
+             pickupTargetValuesCsv: [...new Set(pickupTargetValues)].join(","),
+           } : {}),
         },
         update: {
           name: location.name,
           enabled: nextEnabled,
           pickupEnabled,
-          pickupInstructions,
-          pickupPhone,
-          pickupPreparationDays,
-          pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
-          pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
-          pickupAdvanceDays,
+           ...(pickupEnabled ? {
+             pickupInstructions,
+             pickupPhone,
+             pickupPreparationDays,
+             pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
+             pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
+             pickupAdvanceDays,
+             pickupTargetMode,
+             pickupTargetValuesCsv: [...new Set(pickupTargetValues)].join(","),
+           } : {}),
         },
       });
       clearDeliveryCheckCaches(session.shop);
-      return { ok: true, message: `${location.name} pickup saved.` } satisfies ActionData;
+      return {
+        ok: true,
+        message: `${location.name} pickup saved.`,
+        saved: {
+          locationId: shopifyLocationId,
+          section: "pickup",
+          values: {
+            enabled: nextEnabled,
+            pickupEnabled,
+            ...(pickupEnabled ? {
+              pickupInstructions,
+              pickupPhone,
+              pickupPreparationDays: String(pickupPreparationDays),
+             pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
+             pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
+             pickupAdvanceDays: String(pickupAdvanceDays),
+             pickupTargetMode,
+             pickupTargetValuesCsv: [...new Set(pickupTargetValues)].join(","),
+           } : {}),
+          },
+        },
+      } satisfies ActionData;
     }
 
     if (section === "targeting") {
-      if (!SERVICE_TARGET_OPTIONS.some((option) => option.value === serviceTargetMode)) {
-        return { ok: false, message: "Choose a supported service targeting option." } satisfies ActionData;
-      }
-      if (serviceTargetValues.length > 500 || serviceTargetValues.some((value) => value.length > 100)) {
-        return { ok: false, message: "Service targeting supports up to 500 values of 100 characters each." } satisfies ActionData;
-      }
-      if (serviceTargetMode !== "all" && serviceTargetValues.length === 0) {
-        return { ok: false, message: "Add at least one value for the selected service targeting option." } satisfies ActionData;
-      }
+      const targetError = await validateServiceTarget(admin, session.shop, serviceTargetMode, serviceTargetValues);
+      if (targetError) return { ok: false, message: targetError } satisfies ActionData;
       let location: ShopifyLocation | null = null;
       try {
         const response = await admin.graphql(`#graphql
@@ -924,20 +1052,41 @@ export async function action({ request }: ActionFunctionArgs) {
           shopifyLocationId,
           name: location.name,
           enabled: baseEnabled || basePickupEnabled || baseDeliveryEnabled,
-          priority: existingRule?.priority ?? 100,
-          processingDays: existingRule?.processingDays ?? null,
-          transitDays: existingRule?.transitDays ?? null,
-          serviceTargetMode,
-          serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+           priority: existingRule?.priority ?? 100,
+           processingDays: existingRule?.processingDays ?? null,
+           transitDays: existingRule?.transitDays ?? null,
+           localDeliveryTargetMode: serviceTargetMode,
+           localDeliveryTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+           pickupTargetMode: serviceTargetMode,
+           pickupTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+           serviceTargetMode,
+           serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
         },
         update: {
           name: location.name,
+          localDeliveryTargetMode: serviceTargetMode,
+          localDeliveryTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+          pickupTargetMode: serviceTargetMode,
+          pickupTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
           serviceTargetMode,
           serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
         },
       });
       clearDeliveryCheckCaches(session.shop);
-      return { ok: true, message: `${location.name} targeting saved.` } satisfies ActionData;
+      return {
+        ok: true,
+        message: `${location.name} targeting saved.`,
+        saved: {
+          locationId: shopifyLocationId,
+          section: "targeting",
+          values: {
+            localDeliveryTargetMode: serviceTargetMode,
+            localDeliveryTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+            pickupTargetMode: serviceTargetMode,
+            pickupTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
+          },
+        },
+      } satisfies ActionData;
     }
   }
   if (!Number.isInteger(priority) || priority < 0 || priority > 9999) {
@@ -991,15 +1140,10 @@ export async function action({ request }: ActionFunctionArgs) {
   })) {
     return { ok: false, message: "Blocked pickup dates must be real YYYY-MM-DD dates (up to 365 dates and 4000 characters)." } satisfies ActionData;
   }
-  if (!SERVICE_TARGET_OPTIONS.some((option) => option.value === serviceTargetMode)) {
-    return { ok: false, message: "Choose a supported service targeting option." } satisfies ActionData;
-  }
-  if (serviceTargetValues.length > 500 || serviceTargetValues.some((value) => value.length > 100)) {
-    return { ok: false, message: "Service targeting supports up to 500 values of 100 characters each." } satisfies ActionData;
-  }
-  if (serviceTargetMode !== "all" && serviceTargetValues.length === 0) {
-    return { ok: false, message: "Add at least one value for the selected service targeting option." } satisfies ActionData;
-  }
+  const localTargetError = await validateServiceTarget(admin, session.shop, localDeliveryTargetMode, localDeliveryTargetValues);
+  if (localTargetError) return { ok: false, message: localTargetError } satisfies ActionData;
+  const pickupTargetError = await validateServiceTarget(admin, session.shop, pickupTargetMode, pickupTargetValues);
+  if (pickupTargetError) return { ok: false, message: pickupTargetError } satisfies ActionData;
 
   let location: ShopifyLocation | null = null;
   try {
@@ -1045,6 +1189,10 @@ export async function action({ request }: ActionFunctionArgs) {
       pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
       pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
       pickupAdvanceDays,
+      localDeliveryTargetMode,
+      localDeliveryTargetValuesCsv: [...new Set(localDeliveryTargetValues)].join(","),
+      pickupTargetMode,
+      pickupTargetValuesCsv: [...new Set(pickupTargetValues)].join(","),
       serviceTargetMode,
       serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
     },
@@ -1066,6 +1214,10 @@ export async function action({ request }: ActionFunctionArgs) {
       pickupWeekdaysCsv: [...new Set(pickupWeekdays)].sort().join(","),
       pickupBlockedDatesCsv: [...new Set(pickupBlockedDates)].sort().join(","),
       pickupAdvanceDays,
+      localDeliveryTargetMode,
+      localDeliveryTargetValuesCsv: [...new Set(localDeliveryTargetValues)].join(","),
+      pickupTargetMode,
+      pickupTargetValuesCsv: [...new Set(pickupTargetValues)].join(","),
       serviceTargetMode,
       serviceTargetValuesCsv: [...new Set(serviceTargetValues)].join(","),
     },
@@ -1197,19 +1349,82 @@ function DeliveryOrdersPanel({ orders, error, orderAccessGranted, shop, shopHand
 }
 
 export default function LocationsPage() {
-  const { view, access, apiKey, shop, locations, targetSuggestions, targetRuleCount, priorityMode, locationError, orderAccessGranted, pickupOrders, pickupOrdersError, deliveryOrders, deliveryOrdersError } = useLoaderData<typeof loader>();
+  const { view, access, apiKey, shop, locations, selectedLocationId, targetSuggestions, targetRuleCount, priorityMode, locationError, catalogError, orderAccessGranted, pickupOrders, pickupOrdersError, deliveryOrders, deliveryOrdersError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
-  const isAdvanced = access.active;
+  const isAdvanced = access.features.inventory;
   const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
   const shopifyLocationsUrl = `https://admin.shopify.com/store/${shopHandle}/settings/locations`;
   const [forms, setForms] = useState<Record<string, LocationForm>>(() => Object.fromEntries(locations.map((location) => [location.id, locationForm(location)])));
+  const [persistedForms, setPersistedForms] = useState<Record<string, LocationForm>>(() => Object.fromEntries(locations.map((location) => [location.id, locationForm(location)])));
   const [locationSearch, setLocationSearch] = useState("");
   const [selectedPriorityMode, setSelectedPriorityMode] = useState(priorityMode);
+  const [persistedPriorityMode, setPersistedPriorityMode] = useState(priorityMode);
+  const [activeSave, setActiveSave] = useState("");
+  const [lastSaved, setLastSaved] = useState<{ id: string; section: string; at: number } | null>(null);
+  const submittedLocation = useRef<{ id: string; section: string } | null>(null);
+  const isSaving = (key: string) => fetcher.state !== "idle" && activeSave === key;
   useEffect(() => {
-    if (!fetcher.data?.ok) return;
-    setForms(Object.fromEntries(locations.map((location) => [location.id, locationForm(location)])));
-    setSelectedPriorityMode(priorityMode);
-  }, [fetcher.data, locations, priorityMode]);
+    if (fetcher.state === "idle") setActiveSave("");
+    else setLastSaved(null);
+  }, [fetcher.state]);
+  useEffect(() => {
+    if (!fetcher.formData) return;
+    const intent = String(fetcher.formData.get("intent") ?? "");
+    const id = String(fetcher.formData.get("shopifyLocationId") ?? "");
+    if (id) submittedLocation.current = { id, section: intent === "enable_pickup" ? intent : String(fetcher.formData.get("section") ?? "all") };
+  }, [fetcher.formData]);
+  useEffect(() => {
+    const saved = fetcher.state === "idle" && fetcher.data?.ok ? submittedLocation.current : null;
+    const savedData = fetcher.data?.saved;
+    if (fetcher.state === "idle" && fetcher.data?.ok && fetcher.data.savedPriorityMode) {
+      setPersistedPriorityMode(fetcher.data.savedPriorityMode);
+    }
+    if (saved && savedData?.locationId === saved.id && savedData.section === saved.section) {
+      setLastSaved({ ...saved, at: Date.now() });
+      setPersistedForms((current) => ({
+        ...current,
+        [saved.id]: { ...(current[saved.id] ?? locationForm(locations.find((location) => location.id === saved.id)!)), ...savedData.values },
+      }));
+    }
+    setForms((current) => Object.fromEntries(locations.map((location) => {
+      const existing = current[location.id];
+      const fresh = locationForm(location);
+      if (!existing) return [location.id, fresh];
+      if (!saved || saved.id !== location.id) return [location.id, existing];
+       if (savedData?.locationId === location.id && savedData.section === saved.section) {
+         return [location.id, { ...existing, ...savedData.values }];
+      }
+      return [location.id, existing];
+    })));
+    if (saved) submittedLocation.current = null;
+  }, [fetcher.data, fetcher.state, locations]);
+  const isSectionSaved = (section: string, locationId = selectedLocationId) => lastSaved?.id === locationId && lastSaved.section === section;
+  const savedLabel = (section: string, locationId = selectedLocationId) => isSectionSaved(section, locationId) ? <span className="incode-save-state" role="status">Saved just now</span> : null;
+  const sectionDirty = (location: LocationRow, section: string) => {
+    const form = forms[location.id];
+    const saved = persistedForms[location.id] ?? locationForm(location);
+    if (!form) return false;
+    if (section === "status") return form.enabled !== saved.enabled;
+    if (section === "routing") return form.priority !== saved.priority || form.processingDays !== saved.processingDays || form.transitDays !== saved.transitDays;
+    if (section === "delivery") return form.localDeliveryEnabled !== saved.localDeliveryEnabled
+      || form.localDeliveryCountry !== saved.localDeliveryCountry
+       || form.localDeliveryPostalCodesCsv !== saved.localDeliveryPostalCodesCsv
+       || form.localDeliveryCoverageMode !== saved.localDeliveryCoverageMode
+       || form.localDeliveryZoneIdsCsv !== saved.localDeliveryZoneIdsCsv
+       || form.localDeliveryTargetMode !== saved.localDeliveryTargetMode
+       || form.localDeliveryTargetValuesCsv !== saved.localDeliveryTargetValuesCsv;
+    if (section === "pickup") return form.pickupEnabled !== saved.pickupEnabled
+      || form.pickupInstructions !== saved.pickupInstructions
+      || form.pickupPhone !== saved.pickupPhone
+      || form.pickupPreparationDays !== saved.pickupPreparationDays
+       || form.pickupWeekdaysCsv !== saved.pickupWeekdaysCsv
+       || form.pickupBlockedDatesCsv !== saved.pickupBlockedDatesCsv
+       || form.pickupAdvanceDays !== saved.pickupAdvanceDays
+       || form.pickupTargetMode !== saved.pickupTargetMode
+       || form.pickupTargetValuesCsv !== saved.pickupTargetValuesCsv;
+    return false;
+  };
+  const saveButtonLabel = (location: LocationRow, section: string, label: string) => sectionDirty(location, section) ? label : "Already saved";
   const updateForm = (locationId: string, field: string, value: string | boolean) => {
     setForms((current) => ({
       ...current,
@@ -1220,25 +1435,28 @@ export default function LocationsPage() {
       },
       }));
   };
-  const dirty = selectedPriorityMode !== priorityMode || locations.some((location) => {
+   const dirty = selectedPriorityMode !== persistedPriorityMode || locations.some((location) => {
     const form = forms[location.id];
     const rule = location.rule;
     return form.enabled !== (rule?.enabled ?? location.isActive) || form.priority !== String(rule?.priority ?? 100)
       || form.processingDays !== String(rule?.processingDays ?? "") || form.transitDays !== String(rule?.transitDays ?? "")
         || form.localDeliveryEnabled !== (rule?.localDeliveryEnabled ?? false) || form.localDeliveryPostalCodesCsv !== (rule?.localDeliveryPostalCodesCsv ?? "")
-        || form.localDeliveryCountry !== (rule?.localDeliveryCountry || location.address?.countryCode || "")
-        || form.localDeliveryCoverageMode !== (rule?.localDeliveryCoverageMode === "zone" ? "zone" : "postal") || form.localDeliveryZoneIdsCsv !== (rule?.localDeliveryZoneIdsCsv ?? "")
+       || form.localDeliveryCountry !== (rule?.localDeliveryCountry || location.address?.countryCode || "")
+       || form.localDeliveryCoverageMode !== (rule?.localDeliveryCoverageMode === "zone" ? "zone" : "postal") || form.localDeliveryZoneIdsCsv !== (rule?.localDeliveryZoneIdsCsv ?? "")
+       || form.localDeliveryTargetMode !== (rule?.localDeliveryTargetMode ?? rule?.serviceTargetMode ?? "all")
+       || form.localDeliveryTargetValuesCsv !== (rule?.localDeliveryTargetValuesCsv ?? rule?.serviceTargetValuesCsv ?? "")
        || form.pickupEnabled !== (rule?.pickupEnabled ?? false) || form.pickupInstructions !== (rule?.pickupInstructions ?? "")
        || form.pickupPhone !== (rule?.pickupPhone ?? "") || form.pickupPreparationDays !== String(rule?.pickupPreparationDays ?? 0)
        || form.pickupWeekdaysCsv !== (rule?.pickupWeekdaysCsv ?? "0,1,2,3,4,5,6") || form.pickupBlockedDatesCsv !== (rule?.pickupBlockedDatesCsv ?? "")
        || form.pickupAdvanceDays !== String(rule?.pickupAdvanceDays ?? 30)
-       || form.serviceTargetMode !== (rule?.serviceTargetMode ?? "all") || form.serviceTargetValuesCsv !== (rule?.serviceTargetValuesCsv ?? "");
+       || form.pickupTargetMode !== (rule?.pickupTargetMode ?? rule?.serviceTargetMode ?? "all")
+       || form.pickupTargetValuesCsv !== (rule?.pickupTargetValuesCsv ?? rule?.serviceTargetValuesCsv ?? "");
   });
   useBeforeUnload((event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
   useBlocker(() => dirty && !window.confirm("Leave with unsaved location changes?"));
-  const localDeliveryCount = locations.filter((location) => forms[location.id]?.localDeliveryEnabled).length;
-  const pickupCount = locations.filter((location) => forms[location.id]?.pickupEnabled).length;
   const blockEditorUrl = (template: "cart" | "product") => `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=${template}&addAppBlockId=${apiKey}/delivery-service-options&target=mainSection`;
+  const selectedLocation = locations.find((location) => location.id === selectedLocationId) ?? null;
+  const locationUrl = (locationId: string) => `/app/locations?location=${encodeURIComponent(locationId)}#location-workspace`;
   const visibleLocations = locations.filter((location) => {
     const query = locationSearch.trim().toLowerCase();
     if (!query) return true;
@@ -1248,9 +1466,8 @@ export default function LocationsPage() {
   return (
       <Page
       title="Delivery & pickup"
-      subtitle="Set up where you deliver, then configure local delivery and pickup options."
+      subtitle="Connect the storefront, choose a location, and turn on its services."
       titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Standard" : "Subscription required"}</Badge>}
-      primaryAction={{ content: "Add pickup location", url: shopifyLocationsUrl, external: true }}
     >
       <BlockStack gap="400">
         <div className="incode-location-tabs" role="navigation" aria-label="Delivery and pickup views">
@@ -1264,65 +1481,37 @@ export default function LocationsPage() {
           <PickupOrdersPanel orders={pickupOrders} error={pickupOrdersError} orderAccessGranted={orderAccessGranted} shop={shop} shopHandle={shopHandle} />
         ) : <BlockStack gap="400">
         <Card>
-          <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
-              <BlockStack gap="100">
-                <Text as="h2" variant="headingLg">Storefront block</Text>
-                <Text as="p" tone="subdued">Enable the Local delivery & pickup block on your cart page so customers choose Shipping, Store Pickup, or Delivery above checkout. Product page is optional.</Text>
-              </BlockStack>
-              <InlineStack gap="200" wrap>
-                <Button url={blockEditorUrl("cart")} external target="_blank" variant="primary">Enable on cart page</Button>
-                <Button url={blockEditorUrl("product")} external target="_blank">Enable on product page</Button>
-              </InlineStack>
-            </InlineStack>
-            <Text as="p" tone="subdued" variant="bodySm">Opens Theme Editor with the block preselected. Use the Theme Editor eye icon to show or hide it anytime without losing settings.</Text>
-          </BlockStack>
+          <div className="incode-setup-rail" aria-label="Setup steps">
+            <section>
+              <span>1</span>
+              <div><strong>Set Shipping coverage</strong><small>Exact PINs, ranges, or zones.</small></div>
+              <Button url="/app/delivery-settings?tab=coverage" size="slim">Open coverage</Button>
+            </section>
+            <section>
+              <span>2</span>
+              <div><strong>Set Product rules</strong><small>{targetRuleCount ? `${targetRuleCount} active` : "Optional exceptions"}</small></div>
+              <Button url="/app/service-rules" size="slim">Manage rules</Button>
+            </section>
+            <section>
+              <span>3</span>
+              <div><strong>Configure locations</strong><small>{`${locations.length} synced from Shopify`}</small></div>
+              <Button url={shopifyLocationsUrl} external target="_blank" size="slim">Add location</Button>
+            </section>
+          </div>
         </Card>
         <Card>
           <BlockStack gap="300">
             <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
-              <BlockStack gap="100">
-                <Text as="h2" variant="headingLg">Product service rules</Text>
-                <Text as="p" tone="subdued">Choose which services are available for specific products, collections, vendors, or tags.</Text>
-              </BlockStack>
-              <Button url="/app/service-rules" variant="primary">Configure rules</Button>
-            </InlineStack>
-            <InlineStack gap="200" wrap>
-              <Badge tone={targetRuleCount ? "success" : "info"}>{targetRuleCount ? `${targetRuleCount} active rule${targetRuleCount === 1 ? "" : "s"}` : "No product rules yet"}</Badge>
-              <Text as="p" tone="subdued" variant="bodySm">Each rule can independently allow or block Shipping, Local delivery, and Store pickup. Location-specific targeting is configured in each location below.</Text>
-            </InlineStack>
-          </BlockStack>
-        </Card>
-        <Card>
-          <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
-              <BlockStack gap="100">
-                <Text as="h2" variant="headingLg">Pickup locations</Text>
-                <Text as="p" tone="subdued">Locations are securely synced from Shopify, including address, phone, inventory and fulfillment status.</Text>
+              <BlockStack gap="050">
+                <Text as="h2" variant="headingMd">Storefront setup</Text>
+                <Text as="p" tone="subdued" variant="bodySm">Add the service selector to both templates. Shopify requires one app block on Product and one on Cart.</Text>
               </BlockStack>
               <InlineStack gap="200" wrap>
-                <Button url="/app/locations">Refresh</Button>
-                <Button url={shopifyLocationsUrl} external target="_blank" variant="primary">Add new location</Button>
+                <Button url={blockEditorUrl("product")} external target="_blank" variant="primary" size="slim">Add to Product</Button>
+                <Button url={blockEditorUrl("cart")} external target="_blank" size="slim">Add to Cart</Button>
               </InlineStack>
             </InlineStack>
-            {locations.length > 1 ? <TextField label="Search pickup locations" labelHidden value={locationSearch} onChange={setLocationSearch} clearButton onClearButtonClick={() => setLocationSearch("")} autoComplete="off" placeholder={`Search ${locations.length} locations by name, city or postcode`} /> : null}
-            {visibleLocations.length ? <div className="incode-pickup-directory">
-              {visibleLocations.map((location) => {
-                const form = forms[location.id];
-                const ready = location.isActive && location.fulfillsOnlineOrders && form.enabled;
-                const shortAddress = [location.address?.city, location.address?.provinceCode, location.address?.countryCode].filter(Boolean).join(", ");
-                return <div key={location.id} className="incode-pickup-directory__item">
-                  <span className="incode-pickup-directory__pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg></span>
-                  <span><strong>{location.name}</strong><small>{shortAddress || "Address needed in Shopify"}</small></span>
-                  <span className={`incode-pickup-directory__state ${form.pickupEnabled && ready ? "is-ready" : ""}`}>{form.pickupEnabled && ready ? "Pickup ready" : !ready ? "Needs setup" : "Pickup off"}</span>
-                  <span className="incode-pickup-directory__actions">
-                    {!form.pickupEnabled || !form.enabled || !form.localDeliveryEnabled ? <fetcher.Form method="post"><input type="hidden" name="intent" value="enable_pickup"/><input type="hidden" name="shopifyLocationId" value={location.id}/><Button submit size="slim" variant="primary" loading={fetcher.state !== "idle"}>Enable configured services</Button></fetcher.Form> : null}
-                    <Button size="slim" url={`#pickup-location-${location.id.replace(/\D/g, "")}`}>Configure</Button>
-                  </span>
-                </div>;
-              })}
-            </div> : locations.length ? <Text as="p" tone="subdued">No locations match your search.</Text> : <Banner tone="warning" title="No Shopify locations found">Add your first location in Shopify, assign inventory, then return here and refresh.</Banner>}
-            <Text as="p" tone="subdued" variant="bodySm">After adding a location in Shopify, return here, refresh, enable it, and turn on Store pickup.</Text>
+            <Text as="p" tone="subdued" variant="bodySm">Use the <strong>Delivery & pickup tabs</strong> layout, then save and publish the theme. The block is not an app embed.</Text>
           </BlockStack>
         </Card>
         {locationError ? (
@@ -1340,28 +1529,39 @@ export default function LocationsPage() {
             Activate Standard to configure fulfillment routing, location-specific transit times, pickup, and local delivery.
           </Banner>
         ) : null}
-        <div className="incode-location-metrics">
-          <div><strong>{locations.length}</strong><span>Shopify locations</span></div>
-          <div><strong>{localDeliveryCount}</strong><span>Local delivery</span></div>
-          <div><strong>{pickupCount}</strong><span>Store pickup</span></div>
-        </div>
         <Card>
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="save_priority_mode" />
-            <div className="incode-location-strategy">
-              <div><Text as="h2" variant="headingMd">Location selection</Text><Text as="p" tone="subdued" variant="bodySm">Choose how orders are matched to stocked locations.</Text></div>
-              <Select label="Selection strategy" labelHidden name="priorityMode" value={selectedPriorityMode} disabled={!isAdvanced} onChange={setSelectedPriorityMode} options={[{ label: "Manual priority", value: "manual" }, { label: "Highest available stock", value: "highest_stock" }]} />
-              <Button submit disabled={!isAdvanced || selectedPriorityMode === priorityMode} loading={fetcher.state !== "idle"}>Save</Button>
-            </div>
-          </fetcher.Form>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
+              <BlockStack gap="050"><Text as="h2" variant="headingLg">Locations</Text><Text as="p" tone="subdued" variant="bodySm">Choose one to configure.</Text></BlockStack>
+              <InlineStack gap="200"><Button url="/app/locations" size="slim">Refresh</Button><Button url={shopifyLocationsUrl} external target="_blank" size="slim">Add in Shopify</Button></InlineStack>
+            </InlineStack>
+            {locations.length > 1 ? <TextField label="Search locations" labelHidden value={locationSearch} onChange={setLocationSearch} clearButton onClearButtonClick={() => setLocationSearch("")} autoComplete="off" placeholder={`Search ${locations.length} locations`} /> : null}
+            {visibleLocations.length ? <div className="incode-pickup-directory">
+              {visibleLocations.map((location) => {
+                const form = forms[location.id];
+                const ready = location.isActive && location.fulfillsOnlineOrders && form.enabled;
+                const shortAddress = [location.address?.city, location.address?.provinceCode, location.address?.countryCode].filter(Boolean).join(", ");
+                return <div key={location.id} className={`incode-pickup-directory__item${selectedLocationId === location.id ? " is-selected" : ""}`}>
+                  <span className="incode-pickup-directory__pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg></span>
+                  <span><strong>{location.name}</strong><small>{shortAddress || "Address needed in Shopify"}</small></span>
+                  <span className={`incode-pickup-directory__state ${ready ? "is-ready" : ""}`}>{ready ? form.pickupEnabled ? "Pickup on" : form.localDeliveryEnabled ? "Delivery on" : "Ready" : "Needs setup"}</span>
+                  <span className="incode-pickup-directory__actions">
+                     {!form.pickupEnabled ? <fetcher.Form method="post" onSubmit={() => setActiveSave(`enable-pickup:${location.id}`)}><input type="hidden" name="intent" value="enable_pickup"/><input type="hidden" name="shopifyLocationId" value={location.id}/><Button submit size="slim" variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={isSaving(`enable-pickup:${location.id}`)}>Enable pickup</Button></fetcher.Form> : null}
+                    <Button size="slim" url={locationUrl(location.id)} variant={selectedLocationId === location.id ? "primary" : "secondary"}>{selectedLocationId === location.id ? "Selected" : "Configure"}</Button>
+                  </span>
+                </div>;
+              })}
+            </div> : locations.length ? <Text as="p" tone="subdued">No matching locations.</Text> : <Banner tone="warning" title="No Shopify locations found">Add a Shopify location, assign inventory, then refresh.</Banner>}
+          </BlockStack>
         </Card>
-        {locations.map((location) => {
+        {catalogError ? <Banner tone="warning" title="Product choices unavailable">{catalogError} Refresh before editing the audience.</Banner> : null}
+        {locations.filter((location) => location.id === selectedLocationId).map((location) => {
           const form = forms[location.id];
           const address = [location.address?.address1, location.address?.address2, location.address?.city, location.address?.province || location.address?.provinceCode, location.address?.zip, location.address?.country || location.address?.countryCode]
             .filter(Boolean)
             .join(", ");
           return (
-            <div key={location.id} id={`pickup-location-${location.id.replace(/\D/g, "")}`} className="incode-location-anchor"><Card>
+             <div key={location.id} id="location-workspace" className="incode-location-anchor"><Card>
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="start" gap="200" wrap>
                     <BlockStack gap="100">
@@ -1370,27 +1570,30 @@ export default function LocationsPage() {
                     </BlockStack>
                     <InlineStack gap="200" wrap>
                       <Badge tone={location.isActive ? "success" : undefined}>{location.isActive ? "Active" : "Inactive"}</Badge>
-                      <Badge tone={location.fulfillsOnlineOrders ? "info" : undefined}>{location.fulfillsOnlineOrders ? "Online fulfillment" : "Not online"}</Badge>
-                      <Badge tone={form.localDeliveryEnabled ? "success" : undefined}>{form.localDeliveryEnabled ? "Delivery on" : "Delivery off"}</Badge>
-                      <Badge tone={form.pickupEnabled ? "success" : undefined}>{form.pickupEnabled ? "Pickup on" : "Pickup off"}</Badge>
+                       <Badge tone={location.fulfillsOnlineOrders ? "info" : undefined}>{location.fulfillsOnlineOrders ? "Online fulfillment" : "Not online"}</Badge>
                     </InlineStack>
                    </InlineStack>
-                   <div className="incode-location-save-note">
-                     <span aria-hidden="true">i</span>
-                     <Text as="p" tone="subdued" variant="bodySm">Each section saves independently. Only the fields in that section are updated.</Text>
-                   </div>
-                   <fetcher.Form method="post">
-                     <input type="hidden" name="intent" value="save_location" />
-                     <input type="hidden" name="section" value="status" />
-                     <input type="hidden" name="shopifyLocationId" value={location.id} />
-                     <div className="incode-location-enable">
+                     <fetcher.Form method="post" onSubmit={() => setActiveSave(`status:${location.id}`)}>
+                      <input type="hidden" name="intent" value="save_location" />
+                      <input type="hidden" name="section" value="status" />
+                      <input type="hidden" name="shopifyLocationId" value={location.id} />
+                      <input type="hidden" name="enabledState" value={String(form.enabled)} />
+                      <div className="incode-location-enable">
                       <Checkbox label="Location enabled for services" name="enabled" checked={form.enabled} disabled={!isAdvanced || form.localDeliveryEnabled || form.pickupEnabled} onChange={(checked) => updateForm(location.id, "enabled", checked)} helpText={form.localDeliveryEnabled || form.pickupEnabled ? "Automatically enabled while delivery or pickup is on." : "Enable this location for routing."} />
-                      <Button submit disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save status</Button>
+                        <div className="incode-status-save">{savedLabel("status", location.id)}<Button submit disabled={!isAdvanced || !sectionDirty(location, "status") || fetcher.state !== "idle"} loading={isSaving(`status:${location.id}`)}>{saveButtonLabel(location, "status", "Save status")}</Button></div>
                      </div>
                    </fetcher.Form>
-                  <div className="incode-location-sections">
-                    <LocationSettingsSection title="Routing & delivery timing" description="Priority and optional delivery-time overrides" status={selectedPriorityMode === "manual" ? `Priority ${form.priority}` : "Stock based"}>
-                      <fetcher.Form method="post">
+                   <div className="incode-location-sections">
+                     <LocationSettingsSection id="location-section-routing" title="Routing & timing" description="Priority and delivery-day overrides" status={selectedPriorityMode === "manual" ? `Priority ${form.priority}` : "Stock based"}>
+                        <fetcher.Form method="post" onSubmit={() => setActiveSave("priority-mode")}>
+                          <input type="hidden" name="intent" value="save_priority_mode" />
+                          <div className="incode-location-strategy">
+                            <div><Text as="h3" variant="headingSm">Location selection</Text><Text as="p" tone="subdued" variant="bodySm">Choose how stocked locations are selected.</Text></div>
+                            <Select label="Selection strategy" labelHidden name="priorityMode" value={selectedPriorityMode} disabled={!isAdvanced} onChange={setSelectedPriorityMode} options={[{ label: "Manual priority", value: "manual" }, { label: "Highest available stock", value: "highest_stock" }]} />
+                            <Button submit disabled={!isAdvanced || selectedPriorityMode === persistedPriorityMode || fetcher.state !== "idle"} loading={isSaving("priority-mode")}>{selectedPriorityMode === persistedPriorityMode ? "Already saved" : "Save strategy"}</Button>
+                          </div>
+                        </fetcher.Form>
+                        <fetcher.Form method="post" onSubmit={() => setActiveSave(`routing:${location.id}`)}>
                         <input type="hidden" name="intent" value="save_location" />
                         <input type="hidden" name="section" value="routing" />
                         <input type="hidden" name="shopifyLocationId" value={location.id} />
@@ -1400,16 +1603,17 @@ export default function LocationsPage() {
                        <TextField label="Processing days override" name="processingDays" type="number" min={0} max={60} value={form.processingDays} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "processingDays", value)} autoComplete="off" />
                        <TextField label="Transit days override" name="transitDays" type="number" min={0} max={60} value={form.transitDays} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "transitDays", value)} autoComplete="off" />
                       </FormLayout.Group>
-                      <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save routing</Button></div>
+                         <div className="incode-section-save">{savedLabel("routing")}<Button submit variant="primary" disabled={!isAdvanced || !sectionDirty(location, "routing") || fetcher.state !== "idle"} loading={isSaving(`routing:${location.id}`)}>{saveButtonLabel(location, "routing", "Save routing")}</Button></div>
                       </FormLayout>
                       </fetcher.Form>
                     </LocationSettingsSection>
-                    <LocationSettingsSection title="Local delivery" description="Use existing delivery zones or manual postal coverage" status={form.localDeliveryEnabled ? form.localDeliveryCoverageMode === "zone" ? `${form.localDeliveryZoneIdsCsv.split(",").filter(Boolean).length} zones` : "Postal coverage" : "Off"}>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="save_location" />
-                        <input type="hidden" name="section" value="delivery" />
-                        <input type="hidden" name="shopifyLocationId" value={location.id} />
-                      <FormLayout>
+                     <LocationSettingsSection id="location-section-delivery" title="Local delivery" description="Zones or postal coverage" status={form.localDeliveryEnabled ? form.localDeliveryCoverageMode === "zone" ? `${form.localDeliveryZoneIdsCsv.split(",").filter(Boolean).length} zones` : "Postal coverage" : "Off"}>
+                       <fetcher.Form method="post" onSubmit={() => setActiveSave(`delivery:${location.id}`)}>
+                         <input type="hidden" name="intent" value="save_location" />
+                         <input type="hidden" name="section" value="delivery" />
+                         <input type="hidden" name="shopifyLocationId" value={location.id} />
+                         <input type="hidden" name="localDeliveryEnabledState" value={String(form.localDeliveryEnabled)} />
+                       <FormLayout>
                      <Checkbox label="Offer local delivery from this location" name="localDeliveryEnabled" checked={form.localDeliveryEnabled} disabled={!isAdvanced} onChange={(checked) => updateForm(location.id, "localDeliveryEnabled", checked)} />
                     <div hidden={!form.localDeliveryEnabled} className="incode-service-settings">
                     <Select label="Coverage source" name="localDeliveryCoverageMode" value={form.localDeliveryCoverageMode} disabled={!isAdvanced} options={[{ label: "Use existing delivery zones (recommended)", value: "zone" }, { label: "Enter postal codes and patterns manually", value: "postal" }]} onChange={(value) => updateForm(location.id, "localDeliveryCoverageMode", value)} helpText="Zones stay synced with the coverage already configured in Delivery control." />
@@ -1426,36 +1630,45 @@ export default function LocationsPage() {
                       helpText="Postal patterns apply only in this country. Each location can serve a different country."
                     />
                     {form.localDeliveryEnabled && !location.rule?.localDeliveryCountry ? <Text as="p" tone="caution" variant="bodySm">Save this location to confirm its delivery country.</Text> : null}
-                    <TextField
-                      label="Local delivery postal patterns"
+                     <TextField
+                       label="Local delivery postal patterns"
                       name="localDeliveryPostalCodesCsv"
                       value={form.localDeliveryPostalCodesCsv}
                       disabled={!isAdvanced}
                       onChange={(value) => updateForm(location.id, "localDeliveryPostalCodesCsv", value)}
                       multiline={3}
                       autoComplete="off"
-                      helpText="Comma or line separated exact codes, ranges, or wildcards. Example: 10001, 10010-10020, 100*."
-                    />
-                    </>}
-                    </div>
-                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save delivery</Button></div>
+                       helpText="Comma or line separated exact codes, ranges, or wildcards. Example: 10001, 10010-10020, 100*."
+                     />
+                     </>}
+                     <ServiceAudienceFields
+                       serviceLabel="Local delivery"
+                       mode={form.localDeliveryTargetMode}
+                       values={form.localDeliveryTargetValuesCsv}
+                       modeName="localDeliveryTargetMode"
+                       valuesName="localDeliveryTargetValuesCsv"
+                       suggestions={targetSuggestions[form.localDeliveryTargetMode as keyof TargetSuggestions] ?? []}
+                       disabled={!isAdvanced}
+                       onModeChange={(value) => {
+                         updateForm(location.id, "localDeliveryTargetMode", value);
+                         updateForm(location.id, "localDeliveryTargetValuesCsv", "");
+                       }}
+                       onValuesChange={(value) => updateForm(location.id, "localDeliveryTargetValuesCsv", value)}
+                     />
+                     </div>
+                      <div className="incode-section-save">{savedLabel("delivery")}<Button submit variant="primary" disabled={!isAdvanced || !sectionDirty(location, "delivery") || fetcher.state !== "idle"} loading={isSaving(`delivery:${location.id}`)}>{saveButtonLabel(location, "delivery", "Save delivery")}</Button></div>
                       </FormLayout>
                       </fetcher.Form>
                     </LocationSettingsSection>
-                    <LocationSettingsSection title="Store pickup" description="Availability, schedule, contact and instructions" status={form.pickupEnabled ? "Enabled" : "Off"}>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="save_location" />
-                        <input type="hidden" name="section" value="pickup" />
-                        <input type="hidden" name="shopifyLocationId" value={location.id} />
-                      <FormLayout>
+                     <LocationSettingsSection id="location-section-pickup" title="Store pickup" description="Schedule and customer instructions" status={form.pickupEnabled ? "Enabled" : "Off"}>
+                       <fetcher.Form method="post" onSubmit={() => setActiveSave(`pickup:${location.id}`)}>
+                         <input type="hidden" name="intent" value="save_location" />
+                         <input type="hidden" name="section" value="pickup" />
+                         <input type="hidden" name="shopifyLocationId" value={location.id} />
+                         <input type="hidden" name="pickupEnabledState" value={String(form.pickupEnabled)} />
+                       <FormLayout>
                      <Checkbox label="Offer in-store pickup from this location" name="pickupEnabled" checked={form.pickupEnabled} disabled={!isAdvanced} onChange={(checked) => updateForm(location.id, "pickupEnabled", checked)} />
-                    <div className="incode-pickup-readiness">
-                      <strong>Pickup readiness</strong>
-                      <span data-ready={location.isActive}>{location.isActive ? "Ready" : "Required"} · Shopify location active</span>
-                      <span data-ready={location.fulfillsOnlineOrders}>{location.fulfillsOnlineOrders ? "Ready" : "Required"} · Online fulfillment enabled</span>
-                      <span data-ready={form.pickupEnabled}>{form.pickupEnabled ? "Ready" : "Required"} · Store pickup enabled here</span>
-                      <small>Products also need enough inventory assigned to this exact Shopify location.</small>
-                    </div>
+                    {!location.isActive || !location.fulfillsOnlineOrders ? <Banner tone="warning" title="Shopify setup required">Activate this location and online fulfillment in Shopify before offering pickup.</Banner> : null}
                     <div hidden={!form.pickupEnabled} className="incode-service-settings">
                     <FormLayout.Group>
                       <TextField label="Pickup instructions" name="pickupInstructions" value={form.pickupInstructions} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "pickupInstructions", value)} maxLength={500} autoComplete="off" />
@@ -1475,54 +1688,33 @@ export default function LocationsPage() {
                         }} />)}
                       </InlineStack>
                       <Text as="p" tone="subdued" variant="bodySm">Choose at least one weekday when pickup is enabled. Blocked dates below are excluded even on selected weekdays.</Text>
-                    </BlockStack>
-                    <BlockedDatesPicker value={form.pickupBlockedDatesCsv} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "pickupBlockedDatesCsv", value)} />
-                    </div>
-                    <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save pickup</Button></div>
+                     </BlockStack>
+                     <BlockedDatesPicker value={form.pickupBlockedDatesCsv} disabled={!isAdvanced} onChange={(value) => updateForm(location.id, "pickupBlockedDatesCsv", value)} />
+                     <ServiceAudienceFields
+                       serviceLabel="Store pickup"
+                       mode={form.pickupTargetMode}
+                       values={form.pickupTargetValuesCsv}
+                       modeName="pickupTargetMode"
+                       valuesName="pickupTargetValuesCsv"
+                       suggestions={targetSuggestions[form.pickupTargetMode as keyof TargetSuggestions] ?? []}
+                       disabled={!isAdvanced}
+                       onModeChange={(value) => {
+                         updateForm(location.id, "pickupTargetMode", value);
+                         updateForm(location.id, "pickupTargetValuesCsv", "");
+                       }}
+                       onValuesChange={(value) => updateForm(location.id, "pickupTargetValuesCsv", value)}
+                     />
+                     </div>
+                      <div className="incode-section-save">{savedLabel("pickup")}<Button submit variant="primary" disabled={!isAdvanced || !sectionDirty(location, "pickup") || fetcher.state !== "idle"} loading={isSaving(`pickup:${location.id}`)}>{saveButtonLabel(location, "pickup", "Save pickup")}</Button></div>
                       </FormLayout>
                       </fetcher.Form>
-                    </LocationSettingsSection>
-                    <LocationSettingsSection title="Service availability targeting" description="Show this location's services only for selected products, collections, tags or delivery zones" status={form.serviceTargetMode === "all" ? "Everyone" : SERVICE_TARGET_OPTIONS.find((option) => option.value === form.serviceTargetMode)?.label || "Filtered"}>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="save_location" />
-                        <input type="hidden" name="section" value="targeting" />
-                        <input type="hidden" name="shopifyLocationId" value={location.id} />
-                      <BlockStack gap="300">
-                      <Select
-                        label="Show services for"
-                        name="serviceTargetMode"
-                        value={form.serviceTargetMode}
-                        disabled={!isAdvanced}
-                        options={SERVICE_TARGET_OPTIONS}
-                        onChange={(value) => {
-                          updateForm(location.id, "serviceTargetMode", value);
-                          updateForm(location.id, "serviceTargetValuesCsv", "");
-                        }}
-                      />
-                      {form.serviceTargetMode !== "all" ? (() => {
-                        const options = targetSuggestions[form.serviceTargetMode as keyof TargetSuggestions] ?? [];
-                        const targetLabel = form.serviceTargetMode === "product" ? "Products" : form.serviceTargetMode === "collection" ? "Collections" : form.serviceTargetMode === "tag" ? "Product tags" : "Delivery zones";
-                        return (
-                          <ServiceTargetPicker
-                            key={form.serviceTargetMode}
-                            options={options}
-                            label={targetLabel}
-                            value={form.serviceTargetValuesCsv}
-                            disabled={!isAdvanced}
-                            onChange={(value) => updateForm(location.id, "serviceTargetValuesCsv", value)}
-                          />
-                          );
-                        })() : null}
-                        <div className="incode-section-save"><Button submit variant="primary" disabled={!isAdvanced || fetcher.state !== "idle"} loading={fetcher.state !== "idle"}>Save targeting</Button></div>
-                      </BlockStack>
-                      </fetcher.Form>
-                    </LocationSettingsSection>
+                     </LocationSettingsSection>
                   </div>
                 </BlockStack>
             </Card></div>
           );
         })}
-        {locations.length === 0 ? <Text as="p">No Shopify locations are available.</Text> : null}
+         {!selectedLocation && locations.length ? <div className="incode-location-empty"><strong>Select a location above</strong><span>Its delivery, pickup, routing, and service audience settings will appear here.</span></div> : null}
         </BlockStack>}
       </BlockStack>
     </Page>

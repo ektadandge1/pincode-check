@@ -96,6 +96,8 @@ export default function AdditionalPage() {
   const { shop, apiKey, supportEmail } = useLoaderData<typeof loader>();
   const shopHandle = shop.replace(/\.myshopify\.com$/i, "");
   const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${apiKey}/delivery-checker&target=mainSection`;
+  const serviceTabsEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${apiKey}/delivery-service-options&target=mainSection`;
+  const serviceTabsCartEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=cart&addAppBlockId=${apiKey}/delivery-service-options&target=mainSection`;
 
   const dateCheckSteps: GuideStep[] = [
     { title: "Set delivery timing", desc: "Timezone, cutoff hour, processing days, delivery window, weekends and holidays.", tip: "Start with Asia/Kolkata + 2pm cutoff if you ship same-day.", url: "/app/delivery-settings?tab=timing", action: "Configure" },
@@ -111,35 +113,14 @@ export default function AdditionalPage() {
     { title: "Configure Local Delivery", desc: "Country + All zones / selected zones / postcode list. Details form shows only when available.", tip: "Outside zone = error only, no details form. That is correct.", url: "/app/locations", action: "Set delivery" },
     { title: "Configure Store Pickup", desc: "Phone, instructions, prep days, weekdays, blocked dates and advance window.", tip: "Dates come only from server — blocked dates never show.", url: "/app/locations", action: "Set pickup" },
     { title: "Configure Shipping estimate", desc: "Shipping tab reuses coverage for fallback estimate and delivery date.", tip: "If shipping shows unavailable, check coverage first.", url: "/app/delivery-settings?tab=coverage", action: "Check" },
-    { title: "Add service-tabs block", desc: "Add Local delivery & pickup block to Product and Cart. Cart block sits above Checkout.", tip: "Switching tabs clears stale attributes automatically.", url: themeEditorUrl, action: "Open editor", external: true },
+    { title: "Add Product block", desc: "Add Local delivery & pickup to the published product template.", tip: "Shopify requires the merchant to activate theme app blocks.", url: serviceTabsEditorUrl, action: "Open product editor", external: true },
+    { title: "Add Cart block", desc: "Add the same block to the published cart template. It moves above Checkout when the theme supports it.", tip: "Product and Cart are separate Shopify templates, so activate both.", url: serviceTabsCartEditorUrl, action: "Open cart editor", external: true },
     { title: "Test all 3 tabs + fulfillment", desc: "Test Shipping, Pickup with date + contact save, Delivery with address + contact save.", tip: "Check Delivery & pickup orders view for saved customer details.", url: "/app/locations?view=pickups", action: "Review orders" },
   ];
 
   return (
     <Page title="Setup guide" subtitle="Two guided setups for ETADeliverPickup. Launch fast without guesswork.">
       <BlockStack gap="500">
-        <div className="incode-hero guide-hero">
-          <BlockStack gap="300">
-            <InlineStack gap="200">
-              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width={44} height={44} />
-              <Badge tone="info">Built for Shopify</Badge>
-              <Badge tone="success">No theme code needed</Badge>
-            </InlineStack>
-            <Text as="h1" variant="heading2xl">Get live in under 30 minutes.</Text>
-            <div className="incode-hero__copy">
-              <Text as="p" variant="bodyLg">
-                Follow Guide A for delivery dates, then Guide B for Delivery, Pickup and Shipping tabs.
-                Configure first, add coverage second, publish and test last.
-              </Text>
-            </div>
-            <InlineStack gap="300">
-              <Button url="/app/delivery-settings?tab=timing" variant="primary">Start Guide A</Button>
-              <Button url="/app/locations" variant="secondary">Start Guide B</Button>
-              <Button url={themeEditorUrl} external>Open Theme Editor</Button>
-            </InlineStack>
-          </BlockStack>
-        </div>
-
         <Banner title="Recommended order: A then B" tone="info">
           Delivery Date Check creates the coverage that Shipping and Local Delivery reuse. Do not publish the theme block until coverage is added.
         </Banner>

@@ -369,9 +369,9 @@ height: 10px;
 margin-block: 7px;
 background: currentColor;
 }
-.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(1) .pin-checker__journey-marker::before { content: '\1F6D2'; font-size: 14px; }
-.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(2) .pin-checker__journey-marker::before { content: '\1F4E6'; font-size: 14px; }
-.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(3) .pin-checker__journey-marker::before { content: '\1F3E0'; font-size: 14px; }
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(2) .pin-checker__journey-marker::before { content: '\1F6D2'; font-size: 14px; }
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(3) .pin-checker__journey-marker::before { content: '\1F4E6'; font-size: 14px; }
+.pin-checker[data-icon-style='emoji'] .pin-checker__journey-step:nth-child(4) .pin-checker__journey-marker::before { content: '\1F3E0'; font-size: 14px; }
 .pin-checker[data-animation='soft'] .pin-checker__journey-step {
 animation: pin-checker-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
@@ -895,18 +895,36 @@ padding-inline: 4px;
     align-items: center;
     justify-content: flex-start;
     gap: 4px;
-    padding: 10px 4px 12px;
+    padding: 10px 2px 12px;
   }
-  .pin-checker .pin-checker__journey-marker { flex: 0 0 28px; width: 28px; height: 28px; }
+  .pin-checker .pin-checker__journey-marker { flex: 0 0 30px; width: 30px; height: 30px; }
   .pin-checker .pin-checker__journey-step:not(:last-child)::after {
-    top: 24px;
-    left: calc(50% + 14px);
-    right: calc(-50% + 14px);
+    top: 25px;
+    left: calc(50% + 15px);
+    right: calc(-50% + 15px);
   }
   .pin-checker .pin-checker__journey-step strong,
   .pin-checker .pin-checker__journey-step small {
     max-width: 100%;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: none;
+    line-height: 1.35;
+  }
+  .pin-checker .pin-checker__journey-step strong {
+    min-height: 27px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  .pin-checker .pin-checker__journey-step small {
+    font-size: 0;
+  }
+  .pin-checker .pin-checker__journey-step small::after {
+    content: attr(data-mobile-date);
+    display: block;
+    white-space: nowrap;
+    font-size: 10px;
+    line-height: 1.25;
   }
 }
 @media (max-width: 360px) {
@@ -919,9 +937,9 @@ padding-inline: 4px;
   }
   .pin-checker .pin-checker__header { margin-bottom: 14px; }
   .pin-checker .pin-checker__journey { width: 100%; margin-block: 10px; }
-  .pin-checker .pin-checker__journey-step { min-width: 0; min-height: 92px; padding-inline: 3px; }
+  .pin-checker .pin-checker__journey-step { min-width: 0; min-height: 118px; padding-inline: 2px; }
   .pin-checker .pin-checker__journey-step strong,
-  .pin-checker .pin-checker__journey-step small { min-width: 0; overflow-wrap: anywhere; }
+  .pin-checker .pin-checker__journey-step small { min-width: 0; overflow-wrap: break-word; word-break: normal; hyphens: none; line-height: 1.35; }
   .pin-checker .pin-checker__options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .pin-checker .pin-checker__option[data-service-kind='local'],
   .pin-checker .pin-checker__option[data-service-kind='pickup'] { grid-template-columns: 20px minmax(0, 1fr); min-width: 0; padding: 7px; }

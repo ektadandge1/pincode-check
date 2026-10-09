@@ -33,6 +33,7 @@ function fixture({ location = { id, name: "Canonical Shopify store", address: { 
     "../services/plan-access.server": { resolvePlanAccess: async () => ({ active: true, features: { inventory: true } }) },
     "../services/plans.server": { NO_PLAN_ACCESS: {} },
     "../services/delivery-checker.server": { clearDeliveryCheckCaches: (value) => invalidated.push(value) },
+    "../services/shopify-target-suggestions.server": { loadShopifyTargetSuggestionsForKind: async () => [] },
     "../utils/delivery.server": load("app/utils/delivery.server.ts"),
     "../utils/countries": load("app/utils/countries.ts"),
   };
@@ -51,9 +52,25 @@ function fixture({ location = { id, name: "Canonical Shopify store", address: { 
 
 test("pickup save uses the authenticated shop and canonical Shopify name for create and update", async () => {
   const f = fixture();
-  assert.equal((await f.submit({ pickupBlockedDatesCsv: "2026-12-25,2024-02-29,2026-12-25", pickupWeekdaysCsv: "5,1,1" })).ok, true);
+  const result = await f.submit({ section: "pickup", pickupBlockedDatesCsv: "2026-12-25,2024-02-29,2026-12-25", pickupWeekdaysCsv: "5,1,1" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.saved, {
+    locationId: id,
+    section: "pickup",
+    values: {
+      enabled: true,
+      pickupEnabled: true,
+      pickupInstructions: "",
+      pickupPhone: "+1 555 999 0000",
+      pickupPreparationDays: "2",
+       pickupWeekdaysCsv: "1,5",
+       pickupBlockedDatesCsv: "2024-02-29,2026-12-25",
+       pickupAdvanceDays: "30",
+       pickupTargetMode: "all",
+       pickupTargetValuesCsv: "",
+    },
+  });
   assert.deepEqual(f.lookups[0].options.variables, { id });
-  assert.match(f.lookups[0].query, /address1 address2 city province provinceCode zip country countryCode phone/);
   const write = f.writes[0];
   assert.deepEqual(write.where, { shop_shopifyLocationId: { shop, shopifyLocationId: id } });
   assert.equal(write.create.shop, shop);
@@ -67,6 +84,24 @@ test("pickup save uses the authenticated shop and canonical Shopify name for cre
     assert.equal(data.enabled, true);
   }
   assert.deepEqual(f.invalidated, [shop]);
+});
+
+test("every location section returns its canonical saved state", async () => {
+  for (const section of ["status", "routing", "delivery", "pickup", "targeting"]) {
+    const result = await fixture().submit({ section });
+    assert.equal(result.ok, true, section);
+    assert.equal(result.saved?.locationId, id, section);
+    assert.equal(result.saved?.section, section, section);
+    assert.ok(result.saved?.values, section);
+  }
+});
+
+test("controlled pickup state wins over native checkbox serialization", async () => {
+  const f = fixture();
+  const result = await f.submit({ section: "pickup", pickupEnabled: "", pickupEnabledState: "true" });
+  assert.equal(result.ok, true);
+  assert.equal(result.saved?.values.pickupEnabled, true);
+  assert.equal(f.writes[0].update.pickupEnabled, true);
 });
 
 test("foreign, deleted, mismatched and unverified locations cannot be saved", async () => {
@@ -112,6 +147,8 @@ test("loader requests and preserves the complete canonical Shopify address", asy
     assert.match(f.lookups[0].query, new RegExp(`\\b${field}\\b`));
     assert.ok(result.locations[0].address[field]);
   }
+  assert.doesNotMatch(f.lookups[0].query, /products\(|collections\(/);
+  assert.equal(result.selectedLocationId, id);
 });
 
 test("pickup orders view reads Shopify attributes without persisting customer data", async () => {
@@ -178,7 +215,8 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   for (const guidance of [
     'title="Local delivery"',
     'title="Store pickup"',
-    "Show this location's services only for selected products, collections, tags or delivery zones",
+     'serviceLabel="Local delivery"',
+     'serviceLabel="Store pickup"',
     "Use existing delivery zones",
   ]) assert.match(source, new RegExp(guidance));
 
@@ -187,7 +225,15 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   }
   assert.doesNotMatch(source, /label="Preview style"/);
   assert.doesNotMatch(source, /label="Block icons"/);
-  assert.match(source, /Add pickup location/);
+  assert.match(source, /Set Shipping coverage/);
+  assert.match(source, /Storefront setup/);
+  assert.match(source, /Add to Product/);
+  assert.match(source, /Add to Cart/);
+   assert.doesNotMatch(source, /<Text as="h2" variant="headingMd">Service setup/);
+   assert.doesNotMatch(source, /Set up Shipping/);
+   assert.doesNotMatch(source, /Set up delivery/);
+   assert.doesNotMatch(source, /Set up pickup/);
+   assert.doesNotMatch(source, /Audience and zones only filter a service; they do not enable it/);
   assert.match(source, /settings\/locations/);
   assert.match(source, /function BlockedDatesPicker/);
   assert.match(source, /label="Block a pickup date"/);
@@ -195,33 +241,55 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   assert.match(source, /No blocked dates added\./);
   assert.doesNotMatch(source, /label="Blocked pickup dates"/);
   assert.match(source, /function LocationSettingsSection/);
-  assert.match(source, /Routing & delivery timing/);
-  assert.match(source, /Service availability targeting/);
-  assert.match(source, /incode-location-metrics/);
+  assert.match(source, /Routing & timing/);
+  assert.match(source, /incode-setup-rail/);
   assert.match(source, /name="localDeliveryZoneIdsCsv"/);
   assert.match(source, /One or more delivery zones are unavailable/);
-  assert.match(source, /Pickup locations/);
-  assert.match(source, /Add new location/);
-  assert.match(source, /Pickup ready/);
+  assert.match(source, />Locations</);
+  assert.match(source, /Add in Shopify/);
+  assert.match(source, /Pickup on/);
   assert.match(source, /Needs setup/);
   assert.match(source, /incode-pickup-directory/);
   assert.match(source, /Pickup customer details/);
   assert.match(source, /Delivery customer details/);
   assert.match(source, /Delivery orders/);
   assert.match(source, /Customer data is read live and is not copied into the app database/);
-  assert.match(source, /Search pickup locations/);
-  assert.match(source, /name, city or postcode/);
-  assert.match(source, />Save status</);
-  assert.match(source, />Save routing</);
-  assert.match(source, />Save delivery</);
-  assert.match(source, />Save pickup</);
-  assert.match(source, />Save targeting</);
-  assert.match(source, /Each section saves independently/);
+  assert.match(source, /Search locations/);
+   assert.match(source, /Save status/);
+   assert.match(source, /Save routing/);
+   assert.match(source, /Save delivery/);
+   assert.match(source, /Save pickup/);
+   assert.match(source, /modeName="localDeliveryTargetMode"/);
+   assert.match(source, /valuesName="localDeliveryTargetValuesCsv"/);
+   assert.match(source, /modeName="pickupTargetMode"/);
+   assert.match(source, /valuesName="pickupTargetValuesCsv"/);
+    assert.doesNotMatch(source, /title="Audience"/);
+    assert.doesNotMatch(source, /Only selected delivery zones/);
+   assert.match(source, /Location selection/);
+    assert.match(source, /Save strategy/);
   assert.match(source, /name="section"/);
-  assert.match(source, /Pickup readiness/);
-  assert.match(source, /inventory assigned to this exact Shopify location/);
+  assert.match(source, /name="pickupEnabledState"/);
+  assert.match(source, /name="localDeliveryEnabledState"/);
   assert.match(source, /value="enable_pickup"/);
-  assert.match(source, />Enable configured services</);
+  assert.match(source, />Enable pickup</);
+  assert.match(source, /locations\.filter\(\(location\) => location\.id === selectedLocationId\)/);
+   assert.doesNotMatch(source, /incode-section-nav/);
+  assert.match(source, /Saved just now/);
+  assert.match(source, /id="location-section-pickup"/);
+  assert.doesNotMatch(source, /Each section saves independently/);
+  assert.doesNotMatch(source, /Pickup readiness/);
+});
+
+test("only the submitted location section displays a saving indicator", () => {
+  assert.doesNotMatch(source, /loading=\{fetcher\.state !== "idle"\}/);
+  for (const section of ["status", "routing", "delivery", "pickup"]) {
+    assert.match(source, new RegExp(`loading=\\{isSaving\\(\\\`${section}:\\\$\\{location\\.id\\}\\\`\\)\\}`));
+  }
+  assert.match(source, /loading=\{isSaving\("priority-mode"\)\}/);
+  assert.match(source, /loading=\{isSaving\(`enable-pickup:\$\{location\.id\}`\)\}/);
+  assert.match(source, /<details id=\{id\} className="incode-location-section" open>/);
+  assert.equal((source.match(/<LocationSettingsSection/g) || []).length, 3);
+  assert.doesNotMatch(source, /openSection/);
 });
 
 test("one-click pickup enablement verifies Shopify status and activates the location", async () => {
@@ -251,4 +319,22 @@ test("additive SQLite migration preserves existing rows and supplies pickup defa
   assert.equal(row.pickupWeekdaysCsv, "0,1,2,3,4,5,6");
   assert.equal(row.pickupBlockedDatesCsv, "");
   assert.equal(Number(row.pickupAdvanceDays), 30);
+});
+
+test("split location targeting migration copies shared audiences to both services", async (t) => {
+  const directory = await mkdtemp("/tmp/opencode/location-targeting-");
+  const prisma = new PrismaClient({ datasources: { db: { url: `file:${directory}/test.sqlite?connection_limit=1` } } });
+  t.after(async () => {
+    await prisma.$disconnect();
+    await rm(directory, { recursive: true, force: true });
+  });
+  await prisma.$executeRawUnsafe('CREATE TABLE "FulfillmentLocationRule" ("id" INTEGER PRIMARY KEY, "serviceTargetMode" TEXT NOT NULL, "serviceTargetValuesCsv" TEXT NOT NULL)');
+  await prisma.$executeRawUnsafe('INSERT INTO "FulfillmentLocationRule" ("id", "serviceTargetMode", "serviceTargetValuesCsv") VALUES (1, \'product\', \'10,11\')');
+  const sql = readFileSync(new URL("../prisma/migrations/20261009100000_split_location_service_targeting/migration.sql", import.meta.url), "utf8");
+  for (const statement of sql.split(";").filter((value) => value.trim())) await prisma.$executeRawUnsafe(statement);
+  const [row] = await prisma.$queryRawUnsafe('SELECT * FROM "FulfillmentLocationRule"');
+  assert.equal(row.localDeliveryTargetMode, "product");
+  assert.equal(row.localDeliveryTargetValuesCsv, "10,11");
+  assert.equal(row.pickupTargetMode, "product");
+  assert.equal(row.pickupTargetValuesCsv, "10,11");
 });

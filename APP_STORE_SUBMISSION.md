@@ -10,14 +10,12 @@ Do not submit the app while any item below is incomplete:
 
 - Replace every `https://example.com` value in `shopify.app.toml` with the final HTTPS domain.
 - Host the web process and database on durable production infrastructure. The repository defaults to SQLite for local development; a container without a persistent volume will lose sessions and merchant data.
-- Replace development values from `.env.example`, including real support email/legal identity. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true` and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset).
+- Replace development values from `.env.example`, including real support email/legal identity and Partner API credentials with Manage apps permission. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true` and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset).
 - Run `npm run env:check`, `npm run setup`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `shopify app build` successfully.
 - Verify install, reinstall, and uninstall flows in Chrome incognito mode.
 - Verify all three mandatory privacy webhook topics against the production endpoint.
-- Test Standard plan approval, duplicate-submit protection, cancellation, trial,
-  reinstall, and billing return redirects through the Shopify Billing API.
-- Configure the Standard plan, $9 monthly price, 7-day trial, and `/app/plans` welcome link in Shopify App Pricing
-  environment. Separate non-production development/review test installations use test billing with no bypass while exercising paid flows; do not change the public production flags for review.
+- Test Standard plan selection, approval, cancellation, trial, reinstall, and the `/app/plans` welcome redirect through Shopify App Pricing.
+- Confirm Shopify App Pricing shows Standard at $9 USD monthly with a 7-day trial. Separate non-production development/review installations use Shopify's no-charge testing with no bypass while exercising paid flows; do not change the public production flags for review.
 - Add the theme app block to a test product template and test desktop and mobile storefront behavior.
 - Measure storefront Lighthouse performance before and after enabling the app block. The reduction must remain within Shopify's current App Store requirement.
 
@@ -55,7 +53,7 @@ Geographic requirement: Built for global postal and ZIP code coverage. India-onl
 
 Languages supported: English.
 
-Pricing method: Shopify Billing API (never off-platform billing).
+Pricing method: Shopify App Pricing (never off-platform billing).
 
 ### Standard
 
@@ -72,9 +70,9 @@ app details, or feature text. Pricing belongs only in Shopify's designated
 Pricing details section. Keep the in-app plan page and Partner Dashboard values
 identical.
 
-Requested scopes: `read_products,read_inventory,read_locations,read_orders,write_app_proxy`.
+Requested scopes: `read_products,read_inventory,read_locations,read_orders,read_themes,write_app_proxy`.
 
-Scope reasons: `read_products` reads product/variant targeting context; `read_inventory` reads selected-variant/location inventory; `read_locations` reads fulfillment locations; `read_orders` lets merchants review pickup selections and customer fulfillment details on the Delivery & pickup page; `write_app_proxy` enables the storefront app proxy. Shipping methods are app-owned rules and no write-order permission is used. Align TOML and Partner configuration before release; documentation is not the deployed scope configuration.
+Scope reasons: `read_products` reads product/variant targeting context; `read_inventory` reads selected-variant/location inventory; `read_locations` reads fulfillment locations; `read_orders` lets merchants review pickup selections and customer fulfillment details on the Delivery & pickup page; `read_themes` reads the published theme's app-embed activation state so the Overview can report Active accurately; `write_app_proxy` enables the storefront app proxy. Shipping methods are app-owned rules and no write-order permission is used. Align TOML and Partner configuration before release; documentation is not the deployed scope configuration.
 
 Protected customer data: The pickup-orders view queries recent Shopify orders live and may display customer name, email, phone and shipping address to an authenticated merchant. The app does not copy those order/customer records into its database. Request the applicable protected customer data fields in Partner Dashboard and confirm the declaration against current Shopify policy. Merchant OAuth sessions can contain staff user IDs, names/emails and credentials. Lookup events retain masked postal regions and product/variant IDs, not customer IDs. See `docs/privacy-data-inventory.md`.
 
@@ -120,8 +118,8 @@ Analytics displays shortened postal regions and stores product and variant IDs. 
 - App icon uploaded as 1200 x 1200 PNG or JPEG.
 - Three to six screenshots uploaded at 1600 x 900.
 - Demo screencast in English or with English subtitles.
-- Standard is configured in the app as $9 USD every 30 days with a 7-day trial.
-- Shopify App Pricing hosts plan selection, approval, trial handling, and development-store no-charge testing.
+- Standard is configured in Shopify App Pricing as $9 USD monthly with a 7-day trial.
+- Shopify hosts subscription approval, trial handling, invoicing, and development-store test charges.
 - Billing is required in production with `SHOPIFY_BILLING_REQUIRED=true`.
 - No screenshot, icon, app details, or feature-list text includes pricing.
 

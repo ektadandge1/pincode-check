@@ -4,6 +4,7 @@ import {
   STANDARD_PLAN,
 } from "../shopify.server";
 import { isBillingRequired } from "./billing-config.server";
+import { getPartnerSubscription } from "./partner-billing.server";
 
 export { isBillingRequired } from "./billing-config.server";
 
@@ -23,34 +24,17 @@ export type ActiveAppSubscription = {
 export async function getActiveAppSubscriptions(
   admin: AdminClient,
 ): Promise<ActiveAppSubscription[]> {
-  const response = await admin.graphql(`#graphql
-    query ActiveAppSubscriptions {
-      currentAppInstallation {
-        activeSubscriptions {
-          id
-          name
-          status
-          test
-          trialDays
-          createdAt
-          currentPeriodEnd
-        }
-      }
-    }
-  `);
-  const payload = (await response.json()) as {
-    data?: { currentAppInstallation?: { activeSubscriptions?: ActiveAppSubscription[] } };
-    errors?: Array<{ message?: string }>;
-  };
-  if (!response.ok || payload.errors?.length) {
-    throw new Error(payload.errors?.[0]?.message ?? "Unable to verify Shopify billing.");
-  }
-
-  return (payload.data?.currentAppInstallation?.activeSubscriptions ?? []).filter(
-    (subscription) =>
-      subscription.name === STANDARD_PLAN &&
-      subscription.status === "ACTIVE",
-  );
+  const subscription = await getPartnerSubscription(admin);
+  if (!subscription) return [];
+  return [{
+    id: "shopify-app-pricing",
+    name: STANDARD_PLAN,
+    status: "ACTIVE",
+    test: false,
+    trialDays: subscription.trialEndsAt ? Math.max(0, Math.ceil((new Date(subscription.trialEndsAt).getTime() - Date.now()) / 86_400_000)) : 0,
+    createdAt: subscription.currentBillingCycle?.startTime ?? "",
+    currentPeriodEnd: subscription.currentBillingCycle?.endTime ?? subscription.trialEndsAt ?? "",
+  }];
 }
 
 export async function hasActiveBilling(admin: AdminClient): Promise<boolean> {

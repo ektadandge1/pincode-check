@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { data, useFetcher, useLoaderData } from "react-router";
-import { Badge, Banner, BlockStack, Button, Card, Checkbox, DataTable, FormLayout, InlineStack, Layout, Page, ProgressBar, Select, Text, TextField } from "@shopify/polaris";
+import { Badge, Banner, BlockStack, Button, Card, Checkbox, DataTable, FormLayout, InlineStack, Layout, Page, Select, Text, TextField } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
-import { resolvePlanAccess } from "../services/plan-access.server";
-import { authenticate } from "../shopify.server";
-import { NO_PLAN_ACCESS } from "../services/plans.server";
+import { requireActiveBilling } from "../services/billing.server";
+import { accessForPlan } from "../services/plans.server";
 import { HEADLESS_READ_SCOPES, normalizeAllowedOrigins, parseHeadlessScopes, storedAllowedOriginsLabel } from "../utils/headless-tokens";
 
-type ActionData = { ok: boolean; message: string; token?: string };
+type ActionResult = { ok: boolean; message: string; token?: string };
+type ActionData = ActionResult & { intent: string };
 const NO_STORE = { "Cache-Control": "no-store" };
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
@@ -18,6 +18,22 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
   "delivery:batch": "Up to 50 product-card estimates",
   "delivery:methods": "Configured shipping methods",
 };
+
+function expiryValidationError(value: string): string | undefined {
+  const expiry = value.trim();
+  if (!expiry) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z$/.test(expiry)) {
+    return "Use a UTC timestamp such as 2027-01-01T00:00:00Z (without a final period).";
+  }
+  const date = new Date(expiry);
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) {
+    return "Expiry must be a valid future UTC timestamp.";
+  }
+  if (date.toISOString().slice(0, 16) !== expiry.slice(0, 16)) {
+    return "Expiry must be a valid calendar date and time.";
+  }
+  return undefined;
+}
 
 async function copyToken(value: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
@@ -43,8 +59,8 @@ export const headers: HeadersFunction = (args) => {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
-  const access = await resolvePlanAccess({ shop: session.shop, admin }).catch(() => NO_PLAN_ACCESS);
+  const { session } = await requireActiveBilling(request);
+  const access = accessForPlan("standard");
   const tokens = await prisma.headlessApiToken.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },
@@ -59,18 +75,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await requireActiveBilling(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
-  const reply = (result: ActionData, status = 200) => data(result, { status, headers: NO_STORE });
+  const reply = (result: ActionResult, status = 200) => data({ ...result, intent }, { status, headers: NO_STORE });
   if (!["create", "enable", "disable", "revoke"].includes(intent)) {
     return reply({ ok: false, message: "Unsupported action." }, 400);
   }
-  if (intent === "create" || intent === "enable") {
-    const access = await resolvePlanAccess({ shop: session.shop, admin });
-    if (!access.active) return reply({ ok: false, message: "An active plan is required to create or enable tokens." }, 403);
-  }
-
   let fields: { name: string; tokenType: "public" | "private"; scopesCsv: string; allowedOriginsJson: string; expiresAt: Date | null } | undefined;
   if (intent === "create") {
     try {
@@ -83,16 +94,9 @@ export async function action({ request }: ActionFunctionArgs) {
       if (tokenType === "private" && origins.length) throw new Error("Private tokens must not have allowed origins.");
       const scopes = parseHeadlessScopes(form.getAll("scopes").map(String));
       const expiry = String(form.get("expiresAt") ?? "").trim();
-      if (expiry && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z$/.test(expiry)) {
-        throw new Error("Expiry must be a UTC timestamp, for example 2027-01-01T00:00:00Z.");
-      }
+      const expiryError = expiryValidationError(expiry);
+      if (expiryError) throw new Error(expiryError);
       const expiresAt = expiry ? new Date(expiry) : null;
-      if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
-        throw new Error("Expiry must be a valid future UTC timestamp.");
-      }
-      if (expiresAt && expiresAt.toISOString().slice(0, 16) !== expiry.slice(0, 16)) {
-        throw new Error("Expiry must be a valid calendar date and time.");
-      }
       fields = { name, tokenType, scopesCsv: scopes.join(","), allowedOriginsJson: JSON.stringify(origins), expiresAt };
     } catch (error) {
       return reply({ ok: false, message: error instanceof Error ? error.message : "Invalid token fields." }, 400);
@@ -100,7 +104,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // SQLite serializes write transactions: count and create/enable share the same transaction.
-  const result = await prisma.$transaction(async (tx): Promise<ActionData> => {
+  const result = await prisma.$transaction(async (tx): Promise<ActionResult> => {
     const now = new Date();
     const id = String(form.get("id") ?? "");
     const existing = intent === "create" ? null : await tx.headlessApiToken.findFirst({ where: { id, shop: session.shop } });
@@ -141,12 +145,15 @@ export default function HeadlessApiPage() {
   const [dismissedToken, setDismissedToken] = useState<string | undefined>();
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const busy = fetcher.state !== "idle";
+  const expiryError = expiryValidationError(expiresAt);
   const activeCount = tokens.filter((token) => token.enabled && !token.revokedAt && (!token.expiresAt || new Date(token.expiresAt).getTime() > now)).length;
   const date = (value: Date | string | null) => value ? new Date(value).toISOString().replace("T", " ").replace(".000Z", " UTC") : "Never";
-  const justCreated = fetcher.data?.ok && fetcher.data.token && fetcher.data.token !== dismissedToken;
+  const createResult = fetcher.data?.intent === "create" ? fetcher.data : undefined;
+  const tokenActionResult = fetcher.data?.intent && fetcher.data.intent !== "create" ? fetcher.data : undefined;
+  const justCreated = createResult?.ok && createResult.token && createResult.token !== dismissedToken;
 
-  const createdToken = fetcher.data?.token;
-  const createdOk = fetcher.data?.ok;
+  const createdToken = createResult?.token;
+  const createdOk = createResult?.ok;
   useEffect(() => {
     if (createdOk && createdToken) {
       setName("");
@@ -183,48 +190,7 @@ export default function HeadlessApiPage() {
   return (
     <Page title="Headless API" subtitle="ETADeliverPickup read-only API for headless storefronts. Create, test, rotate and revoke safely.">
       <BlockStack gap="500">
-        <div className="incode-hero headless-hero">
-          <BlockStack gap="300">
-            <InlineStack gap="200">
-              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width={40} height={40} />
-              <Badge tone="info">Read-only</Badge>
-              <Badge tone="success">{`${activeCount}/20 active`}</Badge>
-            </InlineStack>
-            <Text as="h1" variant="heading2xl">Connect any storefront in minutes.</Text>
-            <div className="incode-hero__copy">
-              <Text as="p" variant="bodyLg">Public tokens for browsers with origin lock. Private tokens for servers only. Scoped to delivery reads — never writes, never checkout rates.</Text>
-            </div>
-            <div className="headless-steps">
-              {["Create with least scopes", "Copy once + save", "Call API + verify", "Rotate then revoke"].map((step, i) => (
-                <span key={step}><strong>{i + 1}.</strong> {step}</span>
-              ))}
-            </div>
-            <ProgressBar progress={Math.round((activeCount / 20) * 100)} size="small" tone={activeCount >= 18 ? "critical" : "primary"} />
-          </BlockStack>
-        </div>
-
         {!access.active ? <Banner tone="warning" action={{ content: "View plans", url: "/app/plans" }}>An active plan is required to create or enable tokens. You can still disable or revoke existing tokens.</Banner> : null}
-        {fetcher.data ? <Banner tone={fetcher.data.ok ? "success" : "critical"}>{fetcher.data.message}</Banner> : null}
-        {justCreated ? (
-          <Card><BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="h2" variant="headingMd">Copy your token now</Text>
-              <Badge tone="warning">Shown once</Badge>
-            </InlineStack>
-            <Text as="p" tone="subdued">Only its hash is stored. After leaving or dismissing, it cannot be retrieved. Save it in your secret manager now.</Text>
-            <TextField label="New token (shown once)" value={fetcher.data!.token!} readOnly autoComplete="off" />
-            <InlineStack gap="200" blockAlign="center">
-              <Button variant="primary" onClick={async () => {
-                try { await copyToken(fetcher.data!.token!); setCopyStatus("copied"); }
-                catch { setCopyStatus("failed"); }
-              }}>{copyStatus === "copied" ? "Copied" : "Copy token"}</Button>
-              <Button onClick={() => setDismissedToken(fetcher.data?.token)}>I have saved this token</Button>
-              <Text as="span" tone={copyStatus === "failed" ? "critical" : "subdued"} variant="bodySm" aria-live="polite">
-                {copyStatus === "copied" ? "Token copied." : copyStatus === "failed" ? "Copy failed. Select manually." : ""}
-              </Text>
-            </InlineStack>
-          </BlockStack></Card>
-        ) : null}
 
         <Layout>
           <Layout.Section>
@@ -249,8 +215,29 @@ export default function HeadlessApiPage() {
                       {scopes.map((scope) => <Checkbox key={scope} label={`${scope} — ${SCOPE_DESCRIPTIONS[scope] ?? ""}`} name="scopes" value={scope} checked={selectedScopes.includes(scope)} onChange={(checked) => setSelectedScopes((current) => checked ? [...current, scope] : current.filter((item) => item !== scope))} />)}
                       {!selectedScopes.length ? <Text as="p" tone="critical" variant="bodySm">Select at least one scope.</Text> : null}
                     </BlockStack>
-                    <TextField label="Expiry (optional, UTC)" name="expiresAt" value={expiresAt} onChange={setExpiresAt} autoComplete="off" placeholder="2027-01-01T00:00:00Z" helpText="Leave empty for no expiry. Expired tokens cannot be re-enabled." />
-                    <Button submit variant="primary" loading={busy} disabled={!access.active || activeCount >= 20 || !selectedScopes.length}>Generate token</Button>
+                    <TextField label="Expiry (optional, UTC)" name="expiresAt" value={expiresAt} onChange={setExpiresAt} autoComplete="off" placeholder="2027-01-01T00:00:00Z" helpText="Leave empty for no expiry. Expired tokens cannot be re-enabled." error={expiryError} />
+                    {createResult ? <Banner tone={createResult.ok ? "success" : "critical"}>{createResult.message}</Banner> : null}
+                    {justCreated ? (
+                      <Card><BlockStack gap="300">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text as="h2" variant="headingMd">Copy your token now</Text>
+                          <Badge tone="warning">Shown once</Badge>
+                        </InlineStack>
+                        <Text as="p" tone="subdued">Only its hash is stored. After leaving or dismissing, it cannot be retrieved. Save it in your secret manager now.</Text>
+                        <TextField label="New token (shown once)" value={createResult.token!} readOnly autoComplete="off" />
+                        <InlineStack gap="200" blockAlign="center">
+                          <Button variant="primary" onClick={async () => {
+                            try { await copyToken(createResult.token!); setCopyStatus("copied"); }
+                            catch { setCopyStatus("failed"); }
+                          }}>{copyStatus === "copied" ? "Copied" : "Copy token"}</Button>
+                          <Button onClick={() => setDismissedToken(createResult.token)}>I have saved this token</Button>
+                          <Text as="span" tone={copyStatus === "failed" ? "critical" : "subdued"} variant="bodySm" aria-live="polite">
+                            {copyStatus === "copied" ? "Token copied." : copyStatus === "failed" ? "Copy failed. Select manually." : ""}
+                          </Text>
+                        </InlineStack>
+                      </BlockStack></Card>
+                    ) : null}
+                    <Button submit variant="primary" loading={busy} disabled={!access.active || activeCount >= 20 || !selectedScopes.length || Boolean(expiryError)}>Generate token</Button>
                     {activeCount >= 20 ? <Text as="p" tone="critical" variant="bodySm">Limit reached. Disable or revoke an old token first.</Text> : null}
                   </FormLayout>
                 </fetcher.Form>
@@ -262,6 +249,7 @@ export default function HeadlessApiPage() {
                   <Badge>{`${tokens.length} total`}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">Only prefixes shown. Disable is reversible, revoke is permanent and clears API access immediately.</Text>
+                {tokenActionResult ? <Banner tone={tokenActionResult.ok ? "success" : "critical"}>{tokenActionResult.message}</Banner> : null}
                 <div className="headless-table__scroll">
                   {rows.length ? <DataTable columnContentTypes={Array.from({ length: 11 }, () => "text" as const)} headings={["Name", "Type", "Prefix", "Read scopes", "Allowed origins", "Status", "Created", "Expires", "Last used", "Revoked", "Actions"]} rows={rows} /> : (
                     <div className="headless-empty">

@@ -28,11 +28,10 @@ function PolarisLink({ url, external, children, ...props }: PolarisLinkProps) {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const pathname = new URL(request.url).pathname;
   const isPlansRoute = pathname.replace(/\/+$/, "") === "/app/plans";
-  const billingExempt = isPlansRoute || pathname.replace(/\/+$/, "") === "/app/headless-api";
-  const context = billingExempt
+  const context = isPlansRoute
     ? await authenticate.admin(request)
     : await requireActiveBilling(request);
-  const access = billingExempt ? NO_PLAN_ACCESS : accessForPlan("standard");
+  const access = isPlansRoute ? NO_PLAN_ACCESS : accessForPlan("standard");
 
   // eslint-disable-next-line no-undef
   return { apiKey: process.env.SHOPIFY_API_KEY || "", access, shop: context.session.shop };

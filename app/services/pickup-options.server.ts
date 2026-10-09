@@ -5,14 +5,17 @@ import {
   parsePostalPattern, postalPatternSpecificity, postalCodeLookupValues, validatePostalCode, type CartDeliveryItemInput,
 } from "../utils/delivery.server";
 import { isPickupDate, pickupAvailableDates, type PickupSchedule } from "../utils/pickup-schedule";
-import { matchDeliveryTarget, type DeliveryTargetRecord } from "../utils/targeting.server";
+import { locationTargetMode, matchesLocationTarget } from "../utils/location-targeting";
+import { MAX_SERVICE_AVAILABILITY_RULES, matchDeliveryTarget, type DeliveryTargetRecord } from "../utils/targeting.server";
 
 type PickupRule = PickupSchedule & {
   shopifyLocationId: string;
   pickupInstructions: string;
   pickupPhone: string;
-  serviceTargetMode: string;
-  serviceTargetValuesCsv: string;
+  pickupTargetMode?: string | null;
+  pickupTargetValuesCsv?: string | null;
+  serviceTargetMode?: string | null;
+  serviceTargetValuesCsv?: string | null;
 };
 type Admin = NonNullable<Parameters<typeof checkVariantInventory>[0]>;
 type Location = {
@@ -43,33 +46,16 @@ export async function getPickupOptions(input: {
   const serviceRules = prisma.serviceAvailabilityRule ? await prisma.serviceAvailabilityRule.findMany({
     where: { shop: input.shop, enabled: true },
     orderBy: [{ priority: "asc" }, { id: "asc" }],
-    take: 2_000,
+    take: MAX_SERVICE_AVAILABILITY_RULES + 1,
   }) : [];
-  const pickupAllowed = (item: CartDeliveryItemInput) => {
-    const matched = matchDeliveryTarget(serviceRules.map((rule): DeliveryTargetRecord => ({
-      ...rule,
-      requireValidPin: false,
-      processingDays: null,
-      transitDays: null,
-      excluded: false,
-      customSuccessMessage: null,
-    })), {
-      productId: item.productId,
-      vendor: item.productVendor,
-      tags: item.productTags,
-      collectionHandles: item.collectionHandles,
-      country: input.country,
-      timeZone: input.timeZone,
-      now: input.now,
-    });
-    return matched?.pickupAvailable ?? true;
-  };
   if (rules.length > 100) throw new Error("Pickup rules exceed limit");
+  if (serviceRules.length > MAX_SERVICE_AVAILABILITY_RULES) throw new Error("Service availability rules exceed the supported limit");
 
   let zoneId: number | null = null;
   const country = normalizeCountryCode(input.country);
   const postal = normalizePostalCode(country, input.postalCode ?? "");
-  const hasZoneRules = rules.some((rule) => rule.serviceTargetMode === "zone");
+  const hasZoneRules = rules.some((rule) => locationTargetMode(rule, "pickup") === "zone")
+    || serviceRules.some((rule) => rule.targetKind === "zone");
   const validPostalContext = Boolean(input.country && validatePostalCode(country, postal));
   const requires_postal_code = hasZoneRules && !validPostalContext;
   if (hasZoneRules && validPostalContext) {
@@ -99,16 +85,38 @@ export async function getPickupOptions(input: {
       zoneId = candidates[0]?.row.zoneId ?? null;
     }
   }
+  const pickupAllowed = (item: CartDeliveryItemInput) => {
+    const matched = matchDeliveryTarget(serviceRules.map((rule): DeliveryTargetRecord => ({
+      ...rule,
+      countryCode: null,
+      stateRegion: null,
+      inventoryMode: "any",
+      activationMode: "always",
+      activeFromLocal: null,
+      activeUntilLocal: null,
+      weekdaysCsv: "",
+      startTimeLocal: null,
+      endTimeLocal: null,
+      requireValidPin: false,
+      processingDays: null,
+      transitDays: null,
+      excluded: false,
+      customSuccessMessage: null,
+    })), {
+      productId: item.productId,
+      vendor: item.productVendor,
+      tags: item.productTags,
+      collectionHandles: item.collectionHandles,
+      zoneId,
+      country: input.country,
+      timeZone: input.timeZone,
+      now: input.now,
+    });
+    return matched?.pickupAvailable ?? true;
+  };
   const eligibleRules = rules.filter((rule) => input.items.every((item) => {
     if (!pickupAllowed(item)) return false;
-    const mode = rule.serviceTargetMode || "all";
-    const values = new Set(rule.serviceTargetValuesCsv.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
-    if (mode === "all") return true;
-    if (mode === "zone") return zoneId !== null && values.has(String(zoneId));
-    if (mode === "product") return Boolean(item.productId && values.has(item.productId.replace(/\D/g, "")));
-    if (mode === "collection") return (item.collectionHandles ?? []).some((value) => values.has(value.toLowerCase()));
-    if (mode === "tag") return (item.productTags ?? []).some((value) => values.has(value.toLowerCase()));
-    return false;
+    return matchesLocationTarget(rule, "pickup", { ...item, zoneId });
   }));
   const inventories = eligibleRules.length ? await Promise.all(aggregateCartDeliveryItems(input.items).map(async ({ item }) => {
     const inventory = await checkVariantInventory(input.admin, item.variantId!);

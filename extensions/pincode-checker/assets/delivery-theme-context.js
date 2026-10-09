@@ -10,8 +10,7 @@
   };
   const cartParams = async (params, signal) => {
     const items = await freshCart(signal);
-    // The current API marks 20 or more lines as incomplete. Never fall back to a single product.
-    if (!items.length || items.length >= 20) throw new Error('Unsupported cart context');
+    if (!items.length || items.length > 20) throw new Error('Unsupported cart context');
     const context = items.map((item) => {
       if (!/^\d+$/.test(String(item.product_id)) || !/^\d+$/.test(String(item.variant_id)) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 999) throw new Error('Invalid cart line');
       return { productId: String(item.product_id), variantId: `gid://shopify/ProductVariant/${item.variant_id}`, quantity: item.quantity };

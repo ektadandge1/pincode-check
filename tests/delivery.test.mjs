@@ -204,7 +204,7 @@ test("delivery calculations reject a schedule with all seven weekdays closed", (
   }), /cannot close all seven weekdays/);
 });
 
-test("cart parsing reports malformed and potentially truncated input", () => {
+test("cart parsing accepts 20 complete lines and rejects oversized input", () => {
   const malformed = parseCartDeliveryItems('[{"variantId":"gid://variant/1","quantity":"many"}]');
   assert.equal(malformed.error, "invalid_cart");
   assert.equal(malformed.complete, false);
@@ -217,7 +217,12 @@ test("cart parsing reports malformed and potentially truncated input", () => {
   const atLimit = parseCartDeliveryItems(JSON.stringify(limitPayload));
   assert.equal(atLimit.error, undefined);
   assert.equal(atLimit.items.length, 20);
-  assert.equal(atLimit.complete, false);
+  assert.equal(atLimit.complete, true);
+
+  const oversized = parseCartDeliveryItems(JSON.stringify([...limitPayload, limitPayload[0]]));
+  assert.equal(oversized.error, "cart_too_large");
+  assert.equal(oversized.complete, false);
+  assert.equal(oversized.items.length, 0);
 });
 
 test("duplicate cart variants aggregate quantities while preserving context", () => {

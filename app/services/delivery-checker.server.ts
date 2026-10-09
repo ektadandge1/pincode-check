@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import type { FulfillmentLocationRule } from "@prisma/client";
-import { selectFulfillmentLocation, selectedLocationOptions } from "../utils/location-selection";
+import { selectFulfillmentLocation } from "../utils/location-selection";
 import { checkVariantInventory, type VariantInventoryResult } from "../utils/variant-inventory";
 import { deliveryCacheEntry, readDeliveryCache, type DeliveryCacheEntry } from "../utils/delivery-check-cache";
 import { cartLocationOptions, commonCartShippingMethods } from "../utils/cart-location-options";
@@ -24,6 +24,7 @@ import {
 } from "../utils/delivery.server";
 import {
   deliveryTargetSuccessMessage,
+  MAX_SERVICE_AVAILABILITY_RULES,
   matchDeliveryTarget,
   productContextCacheKey,
   type DeliveryTargetRecord,
@@ -35,6 +36,7 @@ import {
   serializeShippingMethod,
   shippingMethodEligible,
 } from "../utils/shipping-method";
+import { matchesLocationTarget } from "../utils/location-targeting";
 import { STANDARD_FEATURES, type PlanFeatures } from "./plans.server";
 
 export type CheckDeliveryInput = {
@@ -74,6 +76,7 @@ export type DeliveryResult = {
   estimated_date_max?: string;
   estimated_date_label?: string;
   estimated_date_max_label?: string;
+  delivery_date_range?: string;
   dispatch_date?: string;
   dispatch_date_label?: string;
   min_lead_days?: number;
@@ -445,17 +448,6 @@ function matchesLocalDelivery(rule: FulfillmentLocationRule, country: string, po
   return rule.localDeliveryCountry === country && matchesPostalPatternsCsv(country, postalCode, rule.localDeliveryPostalCodesCsv);
 }
 
-function matchesServiceTarget(rule: FulfillmentLocationRule, input: CheckDeliveryInput, zoneId: number | null): boolean {
-  const mode = rule.serviceTargetMode || "all";
-  if (mode === "all") return true;
-  const values = new Set(String(rule.serviceTargetValuesCsv || "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
-  if (mode === "zone") return zoneId !== null && values.has(String(zoneId));
-  if (mode === "product") return Boolean(input.productId && values.has(String(input.productId).replace(/\D/g, "")));
-  if (mode === "collection") return (input.collectionHandles ?? []).some((handle) => values.has(String(handle).toLowerCase()));
-  if (mode === "tag") return (input.productTags ?? []).some((tag) => values.has(String(tag).toLowerCase()));
-  return false;
-}
-
 function parseBoolean(value: string | null | undefined): boolean {
   return value === "1" || value === "true";
 }
@@ -501,15 +493,25 @@ async function loadServiceAvailabilityRules(shopKey: string): Promise<DeliveryTa
   const records = await prisma.serviceAvailabilityRule.findMany({
     where: { shop: shopKey, enabled: true },
     orderBy: [{ priority: "asc" }, { id: "asc" }],
-    take: 2_000,
+    take: MAX_SERVICE_AVAILABILITY_RULES + 1,
   });
+  if (records.length > MAX_SERVICE_AVAILABILITY_RULES) throw new Error("Service availability rules exceed the supported limit");
   return records.map((record) => ({
-    ...record,
-    requireValidPin: false,
-    processingDays: null,
-    transitDays: null,
-    excluded: false,
-    customSuccessMessage: null,
+      ...record,
+      countryCode: null,
+      stateRegion: null,
+      inventoryMode: "any",
+      activationMode: "always",
+      activeFromLocal: null,
+      activeUntilLocal: null,
+      weekdaysCsv: "",
+      startTimeLocal: null,
+      endTimeLocal: null,
+      requireValidPin: false,
+      processingDays: null,
+      transitDays: null,
+      excluded: false,
+      customSuccessMessage: null,
   }));
 }
 
@@ -518,6 +520,7 @@ function productContextFromInput(
   options: {
     country?: string | null;
     state?: string | null;
+    zoneId?: number | null;
     inventoryStatus?: InventoryStatus | null;
     timeZone?: string;
   } = {},
@@ -529,6 +532,7 @@ function productContextFromInput(
     vendor: input.productVendor ?? null,
     country: options.country ?? input.country ?? null,
     state: options.state ?? null,
+    zoneId: options.zoneId ?? null,
     inventoryStatus: options.inventoryStatus ?? null,
     timeZone: options.timeZone ?? "UTC",
   };
@@ -596,6 +600,9 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
   disable_add_to_cart: boolean;
   require_valid_pin: boolean;
   matched_target: string | null;
+  shipping_available: boolean;
+  local_delivery_available: boolean;
+  pickup_available: boolean;
   message: string;
   reason?: "variant_required" | "inventory_unavailable" | "target_excluded";
 }> {
@@ -603,10 +610,21 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
   const settings = await getShopSettings(input.shop);
   const features = input.features ?? STANDARD_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
+  const serviceTargets = features.targeting ? await loadServiceAvailabilityRules(shopKey) : [];
+  const serviceTarget = matchDeliveryTarget(serviceTargets, productContextFromInput(input, {
+    country: input.country ? normalizeCountryCode(input.country) : null,
+    timeZone: settings.timeZone,
+  }));
+  const serviceAvailability = {
+    shipping_available: serviceTarget?.shippingAvailable ?? true,
+    local_delivery_available: serviceTarget?.localDeliveryAvailable ?? true,
+    pickup_available: serviceTarget?.pickupAvailable ?? true,
+  };
   const quantity = Math.max(1, Math.floor(input.quantity ?? 1));
   const { status, reason } = await inventoryForTargeting(input, targets, quantity, settings.timeZone);
   if (reason) {
     return {
+      ...serviceAvailability,
       disable_add_to_cart: true,
       require_valid_pin: true,
       matched_target: null,
@@ -626,6 +644,7 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
 
   if (policy.matchedTarget?.excluded) {
     return {
+      ...serviceAvailability,
       disable_add_to_cart: features.cartProtection && settings.disableAddToCart,
       require_valid_pin: policy.requireValidPin,
       matched_target: policy.matchedTarget.name,
@@ -635,6 +654,7 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
   }
 
   return {
+    ...serviceAvailability,
     disable_add_to_cart: features.cartProtection && settings.disableAddToCart,
     require_valid_pin: policy.requireValidPin,
     matched_target: policy.matchedTarget?.name ?? null,
@@ -668,14 +688,17 @@ export async function getGeneralDeliveryEstimate(input: CheckDeliveryInput) {
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
   const features = input.features ?? STANDARD_FEATURES;
-  const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
-  return generalDeliveryEstimate(input, settings, targets);
+  const [targets, serviceTargets] = features.targeting
+    ? await Promise.all([loadDeliveryTargets(shopKey), loadServiceAvailabilityRules(shopKey)])
+    : [[], []];
+  return generalDeliveryEstimate(input, settings, targets, serviceTargets);
 }
 
 async function generalDeliveryEstimate(
   input: CheckDeliveryInput,
   settings: Awaited<ReturnType<typeof getShopSettings>>,
   targets: DeliveryTargetRecord[],
+  serviceTargets: DeliveryTargetRecord[] = [],
 ) {
   const quantity = Math.max(1, Math.floor(input.quantity ?? 1));
   const { status, reason } = await inventoryForTargeting(input, targets, quantity, settings.timeZone);
@@ -685,6 +708,15 @@ async function generalDeliveryEstimate(
     inventoryStatus: status,
     timeZone: settings.timeZone,
   }));
+  const serviceTarget = matchDeliveryTarget(serviceTargets, productContextFromInput(input, {
+    country: input.country ? normalizeCountryCode(input.country) : null,
+    inventoryStatus: status,
+    timeZone: settings.timeZone,
+  }));
+
+  if (serviceTarget && !serviceTarget.shippingAvailable) {
+    return { enabled: false, shipping_available: false, matched_target: matchedTarget?.name ?? null, matched_service_target: serviceTarget.name, reason: "service_unavailable" };
+  }
 
   if (input.requireTarget && !matchedTarget) {
     return { enabled: false, matched_target: null };
@@ -739,7 +771,9 @@ export async function getProductCardDeliveryEstimates(
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
   const features = input.features ?? STANDARD_FEATURES;
-  const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
+  const [targets, serviceTargets] = features.targeting
+    ? await Promise.all([loadDeliveryTargets(shopKey), loadServiceAvailabilityRules(shopKey)])
+    : [[], []];
 
   return Promise.all(items.map(async (item) => {
     const estimate = await generalDeliveryEstimate({
@@ -748,7 +782,7 @@ export async function getProductCardDeliveryEstimates(
       productVendor: item.productVendor,
       productTags: item.productTags,
       collectionHandles: item.collectionHandles,
-    }, settings, targets);
+    }, settings, targets, serviceTargets);
 
     return {
       key: item.key,
@@ -896,16 +930,19 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     ? await findPatternMatch(shopKey, country, normalizedPostalCode, generation)
     : null);
   const localDeliveryRules = locationRules.filter((rule) => matchesLocalDelivery(rule, country, normalizedPostalCode, matchedPostalRecord?.zoneId ?? null)
-    && matchesServiceTarget(rule, input, matchedPostalRecord?.zoneId ?? null));
+    && matchesLocationTarget(rule, "local_delivery", { ...input, zoneId: matchedPostalRecord?.zoneId ?? null }));
   const localDeliveryCandidates = locationRules.filter((rule) => rule.localDeliveryEnabled);
+  const pickupRules = locationRules.filter((rule) => rule.pickupEnabled
+    && matchesLocationTarget(rule, "pickup", { ...input, zoneId: matchedPostalRecord?.zoneId ?? null }));
   const localDeliveryInventory = localDeliveryRules.length > 0;
+  const locationInventory = localDeliveryInventory || pickupRules.length > 0;
   let localDeliveryReason: DeliveryResult["local_delivery_reason"];
   if (!localDeliveryCandidates.length) localDeliveryReason = "not_configured";
   else if (!localDeliveryRules.length) localDeliveryReason = "not_in_zone";
 
   let inventory: VariantInventoryResult | null = null;
   let inventoryStatus: InventoryStatus | null = null;
-  if ((inventoryAware || inventoryTargeting || localDeliveryInventory) && input.variantId && input.admin) {
+  if ((inventoryAware || inventoryTargeting || locationInventory) && input.variantId && input.admin) {
     inventory = await checkVariantInventory(input.admin, input.variantId);
     inventoryStatus = inventory ? inventoryStatusFor(inventory, requestedQuantity) : null;
   }
@@ -940,6 +977,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const serviceTarget = matchDeliveryTarget(serviceTargets, productContextFromInput(input, {
     country,
     state: matchedPostalRecord?.state ?? null,
+    zoneId: matchedPostalRecord?.zoneId ?? null,
     inventoryStatus,
     timeZone: settings.timeZone,
   }));
@@ -973,7 +1011,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     pinPolicy.matchedTarget?.name ?? "",
   ].join("|");
   const disableAddToCart = features.cartProtection && settings.disableAddToCart;
-  const cached = cacheGenerations.get(shopKey) === generation && !inventoryAware && !inventoryTargeting && !localDeliveryInventory ? checkCache.get(cacheKey) : undefined;
+  const cached = cacheGenerations.get(shopKey) === generation && !inventoryAware && !inventoryTargeting && !locationInventory ? checkCache.get(cacheKey) : undefined;
   const cachedResult = cached ? readDeliveryCache(cached, Date.now()) : null;
   if (cachedResult) {
     if (features.analytics && input.trackAnalytics !== false) await trackSearchEvent(input, cachedResult);
@@ -983,8 +1021,10 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const holidays = parseCsvToStringSet(settings.holidayCsv);
   const weekendDays = parseWeekendDays(settings.weekendDaysCsv);
   let selectedLocation: FulfillmentLocationRule | null = null;
+  let selectedLocalDeliveryLocation: FulfillmentLocationRule | null = null;
+  let selectedPickupLocation: FulfillmentLocationRule | null = null;
 
-  if (inventoryAware || localDeliveryInventory) {
+  if (inventoryAware || locationInventory) {
     if (!input.variantId) {
       return withPinPolicy(
         {
@@ -1018,13 +1058,21 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
     }
 
     if (inventory) {
-      selectedLocation = selectFulfillmentLocation(
+      selectedLocalDeliveryLocation = selectFulfillmentLocation(
         localDeliveryRules,
         inventory.levels,
         requestedQuantity,
         inventory.continueSelling,
         settings.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
       );
+      selectedPickupLocation = selectFulfillmentLocation(
+        pickupRules,
+        inventory.levels,
+        requestedQuantity,
+        inventory.continueSelling,
+        settings.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
+      );
+      selectedLocation = selectedLocalDeliveryLocation ?? selectedPickupLocation;
       if (inventoryAware) selectedLocation ??= selectFulfillmentLocation(
         locationRules, inventory.levels, requestedQuantity, inventory.continueSelling,
         settings.locationPriorityMode === "highest_stock" ? "highest_stock" : "manual",
@@ -1048,14 +1096,19 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
         pinPolicy.matchedTarget?.name ?? null,
       );
     }
-    if (localDeliveryRules.length && !selectedLocation) localDeliveryReason = "no_location_stock";
+    if (localDeliveryRules.length && !selectedLocalDeliveryLocation) localDeliveryReason = "no_location_stock";
   }
 
-  const locationOptions = selectedLocationOptions(
-    selectedLocation,
-    selectedLocation ? Boolean(serviceTarget?.localDeliveryAvailable ?? true) && matchesLocalDelivery(selectedLocation, country, normalizedPostalCode, matchedPostalRecord?.zoneId ?? null) && matchesServiceTarget(selectedLocation, input, matchedPostalRecord?.zoneId ?? null) : false,
-    selectedLocation ? Boolean(serviceTarget?.pickupAvailable ?? true) && selectedLocation.pickupEnabled && matchesServiceTarget(selectedLocation, input, matchedPostalRecord?.zoneId ?? null) : false,
-  );
+  const localDeliveryAvailable = Boolean(selectedLocalDeliveryLocation && (serviceTarget?.localDeliveryAvailable ?? true));
+  const pickupAvailable = Boolean(selectedPickupLocation && (serviceTarget?.pickupAvailable ?? true));
+  const displayedLocation = selectedLocalDeliveryLocation ?? selectedPickupLocation ?? selectedLocation;
+  const locationOptions = {
+    fulfillment_location_id: displayedLocation?.shopifyLocationId,
+    fulfillment_location_name: displayedLocation?.name,
+    local_delivery_available: localDeliveryAvailable,
+    pickup_available: pickupAvailable,
+    pickup_instructions: pickupAvailable ? selectedPickupLocation?.pickupInstructions || undefined : undefined,
+  };
   if (localDeliveryRules.length && !locationOptions.local_delivery_available && localDeliveryReason === undefined) {
     localDeliveryReason = "no_location_stock";
   }
@@ -1105,6 +1158,23 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   }
 
   if (deliveryDays === null) {
+    const localDeliveryDates = localDeliveryAvailable && selectedLocalDeliveryLocation ? (() => {
+      const localProcessingDays = selectedLocalDeliveryLocation.processingDays ?? settings.processingDays;
+      const localTransitDays = selectedLocalDeliveryLocation.transitDays ?? settings.fallbackDays;
+      const earliest = computeDeliveryDetails({ processingDays: localProcessingDays, transitDays: localTransitDays, cutoffHour24: settings.cutoffHour24, holidays, weekendDays, timeZone: settings.timeZone });
+      const latest = settings.deliveryWindowDays > 0
+        ? computeDeliveryDetails({ processingDays: localProcessingDays, transitDays: localTransitDays + settings.deliveryWindowDays, cutoffHour24: settings.cutoffHour24, holidays, weekendDays, timeZone: settings.timeZone })
+        : earliest;
+      const earliestLabel = formatReadableDate(earliest.estimatedDate, settings.locale, settings.timeZone, settings.dateFormat);
+      const latestLabel = formatReadableDate(latest.estimatedDate, settings.locale, settings.timeZone, settings.dateFormat);
+      return {
+        estimated_date: formatIsoDateInZone(earliest.estimatedDate, settings.timeZone),
+        estimated_date_max: formatIsoDateInZone(latest.estimatedDate, settings.timeZone),
+        estimated_date_label: earliestLabel,
+        estimated_date_max_label: latestLabel,
+        delivery_date_range: earliestLabel === latestLabel ? earliestLabel : `${earliestLabel} to ${latestLabel}`,
+      };
+    })() : {};
     const baseResult = {
       available: false,
       country,
@@ -1115,6 +1185,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
         ...locationOptions,
       } : {}),
       ...(localDeliveryReason ? { local_delivery_reason: localDeliveryReason } : {}),
+      ...localDeliveryDates,
       disable_add_to_cart: disableAddToCart,
       message: renderDeliveryMessage(features.customMessages ? settings.unavailableMessage : DEFAULT_SETTINGS.unavailableMessage, {
         country,
@@ -1122,7 +1193,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
       }),
     } satisfies DeliveryResult;
     const result = withPinPolicy(baseResult, pinPolicy.requireValidPin, pinPolicy.matchedTarget?.name ?? null);
-    if (!inventoryAware && !inventoryTargeting && !localDeliveryInventory) {
+    if (!inventoryAware && !inventoryTargeting && !locationInventory) {
       setCachedResult(shopKey, generation, cacheKey, result);
     }
     if (features.analytics && input.trackAnalytics !== false) await trackSearchEvent(input, result);
@@ -1327,6 +1398,9 @@ export async function checkCartDeliveryPolicy(
     return {
       disable_add_to_cart: true,
       require_valid_pin: true,
+      shipping_available: false,
+      local_delivery_available: false,
+      pickup_available: false,
       matched_target: null,
       reason: complete ? "invalid_cart" : "cart_incomplete",
       cart_complete: false,
@@ -1341,6 +1415,9 @@ export async function checkCartDeliveryPolicy(
   return {
     disable_add_to_cart: policies.some((policy) => policy.disable_add_to_cart),
     require_valid_pin: requireValidPin,
+    shipping_available: policies.every((policy) => policy.shipping_available),
+    local_delivery_available: policies.every((policy) => policy.local_delivery_available),
+    pickup_available: policies.every((policy) => policy.pickup_available),
     matched_target: null,
     ...(failure ? { reason: failure.reason } : {}),
     cart_complete: true,

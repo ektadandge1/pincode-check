@@ -633,7 +633,7 @@ export default function StorefrontCustomizationPage() {
                         </div>
                       </div>
                     ) : null}
-                    {selectedEtaSections.includes("countdown") && (previewExperienceMode === "automatic" || previewChecked || Boolean(previewSavedPostal)) ? <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
+                    {form.countdownEnabled && (previewExperienceMode === "automatic" || previewChecked || Boolean(previewSavedPostal)) ? <div className="incode-custom-preview__countdown" style={{ background: form.storefrontCountdownBackground, color: form.storefrontCountdownTextColor }}>
                       <strong>🔥 {form.storefrontCountdownTitle} 🔥</strong>
                       <div>
                         {[["07", "Hours"], ["27", "Minutes"], ["46", "Seconds"]].map(([value, label]) => (

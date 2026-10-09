@@ -17,16 +17,16 @@ Status: **Not approved for launch by this document.** All items start unverified
 
 ## Prerequisites
 
-- [ ] Release owner releases TOML scopes `read_products,read_inventory,read_locations,read_orders,write_app_proxy`, obtains applicable protected customer data approval, and verifies reauthorization on an existing install.
+- [ ] Release owner releases TOML scopes `read_products,read_inventory,read_locations,read_orders,read_themes,write_app_proxy`, obtains applicable protected customer data and theme access approval, and verifies reauthorization on an existing install.
 - [ ] In Partner Dashboard, declare protected customer data use for `read_orders`: authenticated merchants can view live order customer name, email, phone, and shipping address for pickup/delivery fulfillment; the app does not persist those Shopify order records.
 - [ ] Final HTTPS domain, OAuth redirects, app proxy, app handle, compliance topics and uninstall webhook match the released Shopify configuration. No example URLs or temporary tunnels remain.
 - [ ] Production secrets are supplied through the host's secret manager. Support email and legal business identity are real; public support/privacy pages are reachable and match the data inventory.
-- [ ] Production environment has `NODE_ENV=production`, `APP_ENV=production`, billing test `false`, billing required `true`, dev bypass `false` or unset. Run `node scripts/check-env.mjs` against deployment-injected values without loading a developer `.env`. Resolve warnings with infrastructure evidence.
+- [ ] Production environment has `NODE_ENV=production`, `APP_ENV=production`, billing required `true`, dev bypass `false` or unset, and valid Partner API billing credentials. Run `node scripts/check-env.mjs` against deployment-injected values without loading a developer `.env`. Resolve warnings with infrastructure evidence.
 - [ ] SQLite uses an absolute `file:` path on a persistent writable volume and a single app instance. Verify volume survives restart/redeploy and has adequate capacity, restricted access and monitoring. Do not use an ephemeral container filesystem or horizontal replicas for this SQLite launch.
 - [ ] Document backup frequency, encrypted retention/access, restore test, rollback and redaction-aware backup restoration. Define how inactive-shop analytics are aged out; current 90-day cleanup is opportunistic, not a guaranteed maximum.
 - [ ] Release owner reviews migrations and runs the approved production migration procedure during deployment. This implementation task does not run migrations or deploy.
 - [ ] Run `npm test`, `npm run typecheck`, `npm run lint`, `npm run build` and `shopify app build` on the release tree. Record results and investigate failures, including concurrent/unrelated changes.
-- [ ] Separate non-production test installation uses test billing and dev bypass `false` to exercise real Shopify approval flows without real charges. Public production retains safe enforced flags; coordinate reviewer access with current Shopify guidance.
+- [ ] Separate non-production test installation uses Shopify App Pricing no-charge testing and dev bypass `false` to exercise the hosted selection and approval flow. Public production retains safe enforced flags; coordinate reviewer access with current Shopify guidance.
 
 ## Functional Matrix
 
@@ -36,7 +36,7 @@ Record Pass/Fail/Blocked with sanitized evidence for every row on the release ca
 | --- | --- | --- |
 | Install/auth | Fresh install, existing-install scope update, Chrome incognito, expired session, reinstall | Embedded admin opens, required scopes granted, no redirect loop or cross-shop data |
 | Billing | Test approval/trial, decline, duplicate submit, return redirect, cancel, expiry, reinstall | One intended charge; no unauthorized paid access; admin redirects to Plans, proxy/API return 402 when inactive |
-| Production billing | Missing/test-enabled/required-disabled/bypass-enabled settings using isolated fixtures | CLI nonzero; runtime rejects unsafe production config, including NODE_ENV production with APP_ENV development |
+| Production billing | Missing Partner API credentials, required-disabled, or bypass-enabled settings using isolated fixtures | CLI nonzero; runtime rejects unsafe production config, including NODE_ENV production with APP_ENV development |
 | Postal coverage | Exact/range/wildcard, overlapping zone priorities, countries, invalid/unavailable input | Correct specificity and serviceability, safe validation and isolated shop data |
 | Imports | CSV success/errors/export, raw failed rows, manual Google Sheet sync | Accurate counts/errors, shop isolation and no unintended customer data imported |
 | Targeting | Product/collection/tag, disabled/excluded/scheduled rule, tampered client context | Authoritative product context and intended precedence; no forged targeting bypass |

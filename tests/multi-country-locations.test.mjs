@@ -69,3 +69,33 @@ test("local delivery works when general inventory-aware estimates are disabled",
   ], false);
   assert.equal((await check("IN", "400001")).local_delivery_available, true);
 });
+
+test("pickup-only locations are selected without enabling inventory-aware shipping", async () => {
+  const pickupRule = { ...rule(1, "", ""), localDeliveryEnabled: false };
+  const result = await fixture([pickupRule], [{ country: "IN", postalCode: "400001", zoneId: null, serviceable: true, deliveryDays: 2 }], false)("IN", "400001");
+  assert.equal(result.pickup_available, true);
+  assert.equal(result.local_delivery_available, false);
+  assert.equal(result.fulfillment_location_id, "gid://shopify/Location/1");
+});
+
+test("local delivery returns dates even without separate shipping coverage", async () => {
+  const result = await fixture([rule(1, "IN", "400*")], [], false)("IN", "400001");
+  assert.equal(result.available, false);
+  assert.equal(result.local_delivery_available, true);
+  assert.ok(result.estimated_date);
+  assert.ok(result.estimated_date_max);
+  assert.ok(result.delivery_date_range);
+});
+
+test("local delivery and pickup use independent location audiences", async () => {
+  const check = fixture([{
+    ...rule(1, "US", "100*"),
+    localDeliveryTargetMode: "product",
+    localDeliveryTargetValuesCsv: "2",
+    pickupTargetMode: "product",
+    pickupTargetValuesCsv: "1",
+  }]);
+  const result = await check("US", "10001");
+  assert.equal(result.local_delivery_available, false);
+  assert.equal(result.pickup_available, true);
+});

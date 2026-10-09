@@ -8,6 +8,9 @@ process.env.SHOPIFY_API_SECRET ||= "headless-verification-not-a-secret";
 process.env.SHOPIFY_APP_URL ||= "https://headless-verification.example";
 process.env.SCOPES ||= "read_products";
 process.env.SHOPIFY_BILLING_REQUIRED = "true";
+process.env.SHOPIFY_PARTNER_ORG_ID = "98765";
+process.env.SHOPIFY_PARTNER_API_ACCESS_TOKEN = "headless-verification-partner-token";
+process.env.SHOPIFY_APP_GID = "gid://shopify/App/123456";
 
 const prisma = (await import("../app/db.server.ts")).default;
 const shop = `headless-verify-${randomUUID()}.myshopify.com`;
@@ -26,19 +29,26 @@ globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     assert.ok(installed, "Shopify called before the synthetic installation existed");
+    if (url.hostname === "partners.shopify.com") {
+      assert.equal(url.pathname, "/98765/api/2026-07/graphql.json");
+      assert.equal(request.headers.get("X-Shopify-Access-Token"), "headless-verification-partner-token");
+      const { query, variables } = await request.json();
+      assert.ok(query.includes("query ActiveSubscription"));
+      assert.deepEqual(variables, { appId: "gid://shopify/App/123456", shopId: "gid://shopify/Shop/1" });
+      mockCalls.billing += 1;
+      return Response.json({ data: { activeSubscription: {
+        billingPeriod: "MONTHLY", cancelAtEndOfCycle: false, trialEndsAt: null,
+        currentBillingCycle: { startTime: new Date().toISOString(), endTime: new Date(Date.now() + 86_400_000).toISOString() },
+      } } });
+    }
     assert.equal(url.hostname, shop);
     assert.equal(url.protocol, "https:");
     assert.match(url.pathname, /^\/admin\/api\/[^/]+\/graphql\.json$/);
     assert.equal(request.method, "POST");
     assert.equal(request.headers.get("X-Shopify-Access-Token"), "headless-verification-offline-access-token");
     const { query, variables } = await request.json();
-    if (query.includes("query ActiveAppSubscriptions")) {
-      mockCalls.billing += 1;
-      return Response.json({ data: { currentAppInstallation: { activeSubscriptions: [{
-        id: "gid://shopify/AppSubscription/1", name: "Standard", status: "ACTIVE", test: false,
-        trialDays: 7, createdAt: new Date().toISOString(),
-        currentPeriodEnd: new Date(Date.now() + 86_400_000).toISOString(),
-      }] } } });
+    if (query.includes("query ShopBillingIdentity")) {
+      return Response.json({ data: { shop: { id: "gid://shopify/Shop/1" } } });
     }
     if (query.includes("query VariantInventoryForEdd")) {
       assert.equal(variables?.id, "gid://shopify/ProductVariant/420", "Inventory must receive a normalized variant GID");
@@ -69,7 +79,7 @@ globalThis.fetch = async (input, init) => {
 
 try {
   const { handleHeadlessRequest } = await import("../app/services/headless-api.server.ts");
-  const { generateHeadlessToken } = await import("../app/utils/headless-tokens.ts");
+  const { generateHeadlessToken } = await import("../app/utils/headless-tokens.server.ts");
   assert.equal(await prisma.session.count({ where: { shop } }), 0);
 
   async function createToken(type, overrides = {}) {

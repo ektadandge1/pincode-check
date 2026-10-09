@@ -10,8 +10,10 @@ const fixture = {
   DATABASE_URL: "file:/data/incode.sqlite",
   SHOPIFY_API_KEY: "fixture-client-id", SHOPIFY_API_SECRET: "fixture-secret-not-real",
   SHOPIFY_APP_URL: "https://incode.fixture-shop.dev", SHOPIFY_APP_HANDLE: "incode-track",
+  SHOPIFY_APP_GID: "gid://shopify/App/123456", SHOPIFY_PARTNER_ORG_ID: "98765",
+  SHOPIFY_PARTNER_API_ACCESS_TOKEN: "fixture-partner-token-not-real",
   SHOPIFY_BILLING_REQUIRED: "true",
-  SCOPES: "read_products,read_inventory,read_locations,read_orders,write_app_proxy",
+  SCOPES: "read_products,read_inventory,read_locations,read_orders,read_themes,write_app_proxy",
   SUPPORT_EMAIL: "support@fixture-shop.dev", LEGAL_BUSINESS_NAME: "Fixture Business",
 };
 function check(overrides = {}) {
@@ -44,7 +46,7 @@ test("rejects unsafe billing, environment markers and unused permissions", () =>
     { SHOPIFY_BILLING_REQUIRED: "false" }, { SHOPIFY_BILLING_DEV_BYPASS: "true" },
     { SHOPIFY_BILLING_DEV_BYPASS: "yes" },
     ...["read_shipping", "write_orders"].map((scope) => ({ SCOPES: `${fixture.SCOPES},${scope}` })),
-    ...["read_products", "read_inventory", "read_locations", "read_orders", "write_app_proxy"].map((scope) => ({ SCOPES: fixture.SCOPES.split(",").filter((value) => value !== scope).join(",") })),
+    ...["read_products", "read_inventory", "read_locations", "read_orders", "read_themes", "write_app_proxy"].map((scope) => ({ SCOPES: fixture.SCOPES.split(",").filter((value) => value !== scope).join(",") })),
   ]) assert.equal(check(overrides).status, 1, JSON.stringify(overrides));
   assert.equal(check({ SHOPIFY_BILLING_DEV_BYPASS: "false" }).status, 0);
 });
@@ -57,6 +59,8 @@ test("rejects placeholders, malformed URLs, tunnel URLs and URLs containing secr
   }
   assert.equal(check({ SUPPORT_EMAIL: "support@example.com" }).status, 1);
   assert.equal(check({ SHOPIFY_API_SECRET: "your-shopify-client-secret" }).status, 1);
+  assert.equal(check({ SHOPIFY_APP_GID: "not-an-app-gid" }).status, 1);
+  assert.equal(check({ SHOPIFY_PARTNER_ORG_ID: "partner-org" }).status, 1);
 });
 test("SQLite paths warn without disclosure; unsupported and in-memory databases fail", () => {
   for (const url of ["file:./dev.sqlite", "file:/tmp/private-path.sqlite"]) {

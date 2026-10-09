@@ -4,7 +4,8 @@ const warnings = [];
 const env = process.env;
 const required = [
   "NODE_ENV", "APP_ENV", "DATABASE_URL", "SHOPIFY_API_KEY", "SHOPIFY_API_SECRET",
-  "SHOPIFY_APP_URL", "SHOPIFY_APP_HANDLE",
+  "SHOPIFY_APP_URL", "SHOPIFY_APP_HANDLE", "SHOPIFY_APP_GID",
+  "SHOPIFY_PARTNER_ORG_ID", "SHOPIFY_PARTNER_API_ACCESS_TOKEN",
   "SHOPIFY_BILLING_REQUIRED", "SCOPES", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME",
 ];
 
@@ -33,15 +34,17 @@ try {
   errors.push("SHOPIFY_APP_URL must be a valid production HTTPS origin.");
 }
 
-for (const name of ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_APP_HANDLE", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME"]) {
+for (const name of ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_APP_HANDLE", "SHOPIFY_PARTNER_API_ACCESS_TOKEN", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME"]) {
   if (/your[- _]|example\.(com|org|net)|change[- _]?me|placeholder/i.test(env[name] || "")) {
     errors.push(`${name} must not contain an example placeholder.`);
   }
 }
+if (!/^gid:\/\/shopify\/App\/\d+$/.test(env.SHOPIFY_APP_GID || "")) errors.push("SHOPIFY_APP_GID must be a Shopify App GID.");
+if (!/^\d+$/.test(env.SHOPIFY_PARTNER_ORG_ID || "")) errors.push("SHOPIFY_PARTNER_ORG_ID must be numeric.");
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.SUPPORT_EMAIL || "")) errors.push("SUPPORT_EMAIL must be a valid email address.");
 
 const scopes = new Set((env.SCOPES || "").split(",").map((scope) => scope.trim()));
-for (const scope of ["read_products", "read_inventory", "read_locations", "read_orders", "write_app_proxy"]) {
+for (const scope of ["read_products", "read_inventory", "read_locations", "read_orders", "read_themes", "write_app_proxy"]) {
   if (!scopes.has(scope)) errors.push(`SCOPES must include ${scope}.`);
 }
 if (["read_shipping", "write_orders"].some((scope) => scopes.has(scope))) {

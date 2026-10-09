@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useRevalidator } from "react-router";
 import {
   Badge,
   BlockStack,
@@ -17,11 +18,13 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { requireActiveBilling } from "../services/billing.server";
 import { resolvePlanAccess } from "../services/plan-access.server";
+import { isPublishedThemeEmbedEnabled } from "../services/theme-embed.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await requireActiveBilling(request);
   const shop = session.shop;
   const access = await resolvePlanAccess({ shop, admin });
+  const appHandle = process.env.SHOPIFY_APP_HANDLE || "incode-track";
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - 30);
 
@@ -49,6 +52,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shop,
     access,
+    embedEnabled: await isPublishedThemeEmbedEnabled(admin, appHandle, "delivery-checker-embed"),
   };
 };
 
@@ -70,20 +74,30 @@ function MetricCard({ label, value, detail }: { label: string; value: string | n
 
 export default function Index() {
   const data = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
   const completedSteps = Number(data.settingsConfigured) + Number(data.rules > 0);
   const progress = Math.round((completedSteps / 2) * 100);
   const shopHandle = data.shop.replace(/\.myshopify\.com$/i, "");
-  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?template=product&addAppBlockId=${data.apiKey}/delivery-checker&target=mainSection`;
+  const appEmbedId = encodeURIComponent(`${data.apiKey}/delivery-checker-embed`);
+  const appEmbedUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=${appEmbedId}`;
+
+  useEffect(() => {
+    const refreshStatus = () => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") revalidator.revalidate();
+    };
+    window.addEventListener("focus", refreshStatus);
+    document.addEventListener("visibilitychange", refreshStatus);
+    return () => {
+      window.removeEventListener("focus", refreshStatus);
+      document.removeEventListener("visibilitychange", refreshStatus);
+    };
+  }, [revalidator]);
 
   return (
     <Page title="Overview" subtitle="Control delivery promises shoppers can trust.">
       <BlockStack gap="500">
         <div className="incode-hero">
           <BlockStack gap="400">
-            <div className="incode-brand-lockup">
-              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width="48" height="48" />
-              <span className="incode-hero__eyebrow">ETADeliverPickup</span>
-            </div>
             <BlockStack gap="200">
               <Text as="h1" variant="heading2xl">Turn delivery certainty into more completed carts.</Text>
               <div className="incode-hero__copy">
@@ -93,9 +107,10 @@ export default function Index() {
                 </Text>
               </div>
             </BlockStack>
-            <InlineStack gap="300">
-              <Button url="/app/delivery-settings" variant="primary">Manage delivery coverage</Button>
-              <Button url={themeEditorUrl} external variant="secondary">Open Theme Editor</Button>
+            <InlineStack gap="300" blockAlign="center">
+              {data.embedEnabled
+                ? <Badge tone="success">Active</Badge>
+                : <Button url={appEmbedUrl} external target="_blank" variant="primary">Enable app</Button>}
             </InlineStack>
           </BlockStack>
         </div>
@@ -146,7 +161,7 @@ export default function Index() {
                     <Text as="h3" fontWeight="semibold">Publish the storefront block</Text>
                     <Text as="p" tone="subdued">Manual final step, shown separately from the two automated checks. Add the checker to your published product template and test a serviceable and an unavailable code.</Text>
                   </BlockStack>
-                  <Button url={themeEditorUrl} external size="slim">Open editor</Button>
+                  <Button url={appEmbedUrl} external target="_blank" size="slim">Enable app</Button>
                 </div>
               </BlockStack>
             </Card>

@@ -104,6 +104,12 @@ test("targeting requires every item and uses product, collection and tag matches
   assert.equal((await fixture({ rules: [rule(1, { serviceTargetMode: "unknown" })] }).get()).pickup_locations.length, 0);
 });
 
+test("pickup uses its own location audience", async () => {
+  const restricted = fixture({ rules: [rule(1, { serviceTargetMode: "all", pickupTargetMode: "product", pickupTargetValuesCsv: "2" })] });
+  assert.deepEqual((await restricted.get({ items: [item(1)] })).pickup_locations, []);
+  assert.equal((await restricted.get({ items: [item(2)] })).pickup_locations.length, 1);
+});
+
 test("zone targeting needs valid postal context and real enabled shop-owned zone matching", async () => {
   const rules = [rule(1, { serviceTargetMode: "zone", serviceTargetValuesCsv: "7" }), rule(2)];
   const exact = { zoneId: 7, zoneGroup: { enabled: true, shop } };
@@ -173,11 +179,11 @@ test("signed proxy branch follows billing and canonical targeting, requires comp
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(body.pickup_locations.map((location) => location.id), [id(2)]);
   assert.equal((await fixture({ access: false }).proxy()).response.status, 402);
-  for (const count of [20, 21]) {
-    const result = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(count).fill(item(1))) });
-    assert.equal(result.response.status, 400);
-    assert.equal(result.body.cart_complete, false);
-  }
+  const completeCart = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(20).fill(item(1))) });
+  assert.equal(completeCart.response.status, 200);
+  const oversizedCart = await proxy({ surface: "cart", cartItems: JSON.stringify(Array(21).fill(item(1))) });
+  assert.equal(oversizedCart.response.status, 400);
+  assert.equal(oversizedCart.body.cart_complete, false);
   assert.equal((await proxy({ pickup_location_id: "2", pickup_date: "invalid" })).response.status, 400);
   assert.equal((await proxy({ variantId: "abc1" })).response.status, 400);
   assert.equal((await proxy({ qty: "NaN" })).response.status, 400);

@@ -498,6 +498,18 @@
       return new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short' }).format(parsed);
     };
 
+    const mobileJourneyDate = (value) => String(value || '').split(/\s+-\s+/).map((part) => {
+      const comma = part.indexOf(',');
+      return comma >= 0 ? part.slice(comma + 1).trim() : part.trim();
+    }).join(' - ');
+
+    const setJourneyDate = (element, value) => {
+      if (!element) return;
+      const label = String(value || '');
+      element.textContent = label;
+      element.dataset.mobileDate = mobileJourneyDate(label);
+    };
+
     const countryFlag = (value) => {
       const code = String(value || '').trim().toUpperCase();
       return /^[A-Z]{2}$/.test(code)
@@ -512,14 +524,14 @@
 
     const renderJourney = (data) => {
       if (!journey || root.dataset.showJourney !== 'true' || !data || data.available !== true) return;
-      if (journeyOrder) journeyOrder.textContent = root.dataset.journeyToday;
-      if (journeyDispatch) journeyDispatch.textContent = data.dispatch_date_label || formatJourneyDate(data.dispatch_date) || root.dataset.journeyPreparing;
+      setJourneyDate(journeyOrder, root.dataset.journeyToday);
+      setJourneyDate(journeyDispatch, data.dispatch_date_label || formatJourneyDate(data.dispatch_date) || root.dataset.journeyPreparing);
       if (journeyDelivery) {
         const earliest = data.estimated_date_label || formatJourneyDate(data.estimated_date);
         const latest = data.estimated_date_max_label || formatJourneyDate(data.estimated_date_max);
-        journeyDelivery.textContent = earliest && latest && earliest !== latest
+        setJourneyDate(journeyDelivery, earliest && latest && earliest !== latest
           ? `${earliest} - ${latest}`
-          : earliest || latest || root.dataset.journeyCalculating;
+          : earliest || latest || root.dataset.journeyCalculating);
       }
       const journeyRange = journey.querySelector('[data-journey-range]');
       if (journeyRange) journeyRange.textContent = data.delivery_date_range || data.estimated_date_max_label || data.estimated_date_label || '';

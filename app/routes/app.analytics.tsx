@@ -70,7 +70,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     topCountries: topCounts(events.map((event) => event.country)),
     recent: events.slice(0, 25),
     sampleSize: events.length,
-    lastCheckAt: events[0]?.createdAt ?? null,
   };
 }
 
@@ -148,35 +147,6 @@ export default function AnalyticsPage() {
       primaryAction={<Button url="/app/delivery-settings?tab=coverage" variant="primary">Improve coverage</Button>}
     >
       <BlockStack gap="500">
-        <div className="incode-hero analytics-hero">
-          <BlockStack gap="300">
-            <InlineStack gap="200" blockAlign="center">
-              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width={40} height={40} />
-              <Badge tone="info">Masked regions only</Badge>
-              <Badge tone={data.total === 0 ? undefined : data.availabilityRate >= 80 ? "success" : "critical"}>
-                {data.total === 0 ? "Waiting for data" : `${data.availabilityRate}% serviceable`}
-              </Badge>
-            </InlineStack>
-            <InlineStack align="space-between" blockAlign="end" gap="400">
-              <BlockStack gap="100">
-                <Text as="h1" variant="heading2xl">Know exactly where delivery fails.</Text>
-                <div className="incode-hero__copy">
-                  <Text as="p" variant="bodyLg">
-                    {data.total === 0
-                      ? "Run your first product-page check to unlock coverage gaps."
-                      : `${data.total} checks recorded${data.lastCheckAt ? `, last ${formatDate(data.lastCheckAt)}` : ""}. Fix top unavailable regions first.`}
-                  </Text>
-                </div>
-              </BlockStack>
-              <InlineStack gap="200">
-                <Button url="/app/delivery-settings?tab=coverage" variant="primary">Add coverage</Button>
-                <Button url="/app/additional">Setup guide</Button>
-              </InlineStack>
-            </InlineStack>
-            <ProgressBar progress={data.availabilityRate} size="small" tone={data.total === 0 ? "primary" : data.availabilityRate >= 80 ? "success" : "critical"} />
-          </BlockStack>
-        </div>
-
         {data.total === 0 ? (
           <Banner title="Analytics will appear after your first delivery check" tone="info">
             Add the app block to a product page, publish the theme, and run one serviceable and one unavailable test lookup.

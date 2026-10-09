@@ -226,6 +226,11 @@ model FulfillmentLocationRule {
   pickupWeekdaysCsv           String   @default("0,1,2,3,4,5,6")
   pickupBlockedDatesCsv       String   @default("")
   pickupAdvanceDays           Int      @default(30)
+  localDeliveryTargetMode     String   @default("all")
+  localDeliveryTargetValuesCsv String  @default("")
+  pickupTargetMode            String   @default("all")
+  pickupTargetValuesCsv       String   @default("")
+  // Legacy shared targeting columns retained for data compatibility.
   serviceTargetMode           String   @default("all")
   serviceTargetValuesCsv      String   @default("")
   createdAt                   DateTime @default(now())

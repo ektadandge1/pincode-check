@@ -127,7 +127,7 @@ test('standalone cart checks use the shared fresh complete cart and fail closed 
   data.requests[1].resolve({ ok: true, json: async () => ({ available: false }) });
   await pending;
   assert.equal(data.nodes.get('.incode-availability__status').dataset.state, 'unavailable');
-  for (const cart of [[], Array.from({ length: 20 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 }))]) {
+  for (const cart of [[], Array.from({ length: 21 }, () => ({ product_id: 1, variant_id: 2, quantity: 1 }))]) {
     const invalid = fixture({ surface: 'cart', cart });
     await invalid.nodes.get('button').fire('click');
     assert.equal(invalid.requests.length, 1);

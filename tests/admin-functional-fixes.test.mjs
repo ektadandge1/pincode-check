@@ -22,19 +22,22 @@ test("countdown can be disabled and is owned by Delivery settings", () => {
 });
 
 test("location sections save independently", () => {
-  assert.match(locationsSource, /Each section saves independently/);
   assert.match(locationsSource, /name="section"/);
   assert.match(locationsSource, /value="status"/);
   assert.match(locationsSource, /value="routing"/);
   assert.match(locationsSource, /value="delivery"/);
   assert.match(locationsSource, /value="pickup"/);
-  assert.match(locationsSource, /value="targeting"/);
   assert.match(locationsSource, /section !== "all"/);
-  assert.match(locationsSource, />Save routing</);
-  assert.match(locationsSource, />Save delivery</);
-  assert.match(locationsSource, />Save pickup</);
-  assert.match(locationsSource, />Save targeting</);
-  assert.match(locationsSource, />Save status</);
+  assert.match(locationsSource, /Save routing/);
+  assert.match(locationsSource, /Save delivery/);
+  assert.match(locationsSource, /Save pickup/);
+  assert.match(locationsSource, /Save status/);
+  assert.match(locationsSource, /localDeliveryTargetMode/);
+  assert.match(locationsSource, /pickupTargetMode/);
+  assert.doesNotMatch(locationsSource, /value="targeting"/);
+  assert.match(locationsSource, /savedData\.values/);
+  assert.doesNotMatch(locationsSource, /LOCATION_SECTION_FIELDS/);
+  assert.match(locationsSource, /if \(!saved \|\| saved\.id !== location\.id\) return \[location\.id, existing\]/);
 });
 
 test("google sheet sync uses the unsaved field value", () => {
@@ -110,6 +113,7 @@ function locationFixture({ existing = null } = {}) {
     "../services/plan-access.server": { resolvePlanAccess: async () => ({ active: true, features: { inventory: true } }) },
     "../services/plans.server": { NO_PLAN_ACCESS: {} },
     "../services/delivery-checker.server": { clearDeliveryCheckCaches: () => {} },
+    "../services/shopify-target-suggestions.server": { loadShopifyTargetSuggestionsForKind: async () => [{ label: "Verified", value: "10" }] },
     "../utils/delivery.server": load("app/utils/delivery.server.ts"),
     "../utils/countries": load("app/utils/countries.ts"),
   };
@@ -186,4 +190,122 @@ test("scoped delivery save validates only its own section", async () => {
     localDeliveryZoneIdsCsv: "",
   });
   assert.equal(good.ok, true);
+  assert.deepEqual(good.saved, {
+    locationId: "gid://shopify/Location/123",
+    section: "delivery",
+    values: {
+      enabled: true,
+      localDeliveryEnabled: true,
+      localDeliveryCountry: "US",
+      localDeliveryPostalCodesCsv: "10001",
+      localDeliveryCoverageMode: "postal",
+      localDeliveryZoneIdsCsv: "",
+      localDeliveryTargetMode: "all",
+      localDeliveryTargetValuesCsv: "",
+    },
+  });
+});
+
+test("turning services off ignores stale hidden settings and preserves their configuration", async () => {
+  const existing = { enabled: true, pickupEnabled: true, localDeliveryEnabled: true, priority: 100, processingDays: null, transitDays: null };
+  const delivery = locationFixture({ existing });
+  const deliveryResult = await delivery.submit({
+    section: "delivery",
+    localDeliveryEnabled: "",
+    localDeliveryCoverageMode: "invalid",
+    localDeliveryCountry: "XX",
+    localDeliveryPostalCodesCsv: "invalid pattern",
+    localDeliveryZoneIdsCsv: "foreign",
+  });
+  assert.equal(deliveryResult.ok, true);
+  assert.equal(delivery.writes[0].update.localDeliveryEnabled, false);
+  assert.equal("localDeliveryCountry" in delivery.writes[0].update, false);
+  assert.equal(deliveryResult.saved.values.localDeliveryEnabled, false);
+
+  const pickup = locationFixture({ existing });
+  assert.equal((await pickup.submit({
+    section: "pickup",
+    pickupEnabled: "",
+    pickupPreparationDays: "invalid",
+    pickupAdvanceDays: "invalid",
+    pickupWeekdaysCsv: "",
+    pickupBlockedDatesCsv: "invalid",
+  })).ok, true);
+  assert.equal(pickup.writes[0].update.pickupEnabled, false);
+  assert.equal("pickupPreparationDays" in pickup.writes[0].update, false);
+});
+
+test("location audience rejects forged Shopify targets", async () => {
+  const f = locationFixture({ existing: null });
+  const result = await f.submit({ section: "targeting", serviceTargetMode: "product", serviceTargetValuesCsv: "999" });
+  assert.equal(result.ok, false);
+  assert.equal(f.writes.length, 0);
+
+  const valid = locationFixture({ existing: null });
+  assert.equal((await valid.submit({ section: "targeting", serviceTargetMode: "product", serviceTargetValuesCsv: "10" })).ok, true);
+  assert.equal(valid.writes[0].create.serviceTargetValuesCsv, "10");
+});
+
+test("location audience persists selection removal and switching back to all products", async () => {
+  const existing = { enabled: true, pickupEnabled: true, localDeliveryEnabled: false, priority: 100, processingDays: null, transitDays: null };
+  const reduced = locationFixture({ existing });
+  assert.equal((await reduced.submit({ section: "targeting", serviceTargetMode: "product", serviceTargetValuesCsv: "10" })).ok, true);
+  assert.deepEqual(reduced.writes[0].update, {
+    name: "Scoped Store",
+    localDeliveryTargetMode: "product",
+    localDeliveryTargetValuesCsv: "10",
+    pickupTargetMode: "product",
+    pickupTargetValuesCsv: "10",
+    serviceTargetMode: "product",
+    serviceTargetValuesCsv: "10",
+  });
+
+  const cleared = locationFixture({ existing });
+  assert.equal((await cleared.submit({ section: "targeting", serviceTargetMode: "all", serviceTargetValuesCsv: "" })).ok, true);
+  assert.deepEqual(cleared.writes[0].update, {
+    name: "Scoped Store",
+    localDeliveryTargetMode: "all",
+    localDeliveryTargetValuesCsv: "",
+    pickupTargetMode: "all",
+    pickupTargetValuesCsv: "",
+    serviceTargetMode: "all",
+    serviceTargetValuesCsv: "",
+  });
+});
+
+test("local delivery and pickup audiences save independently", async () => {
+  const delivery = locationFixture({ existing: { enabled: true, pickupEnabled: true, localDeliveryEnabled: true } });
+  assert.equal((await delivery.submit({
+    section: "delivery",
+    localDeliveryEnabled: "on",
+    localDeliveryCoverageMode: "postal",
+    localDeliveryCountry: "US",
+    localDeliveryPostalCodesCsv: "10001",
+    localDeliveryTargetMode: "product",
+    localDeliveryTargetValuesCsv: "10",
+  })).ok, true);
+  assert.equal(delivery.writes[0].update.localDeliveryTargetMode, "product");
+  assert.equal(delivery.writes[0].update.localDeliveryTargetValuesCsv, "10");
+  assert.equal("pickupTargetMode" in delivery.writes[0].update, false);
+
+  const pickup = locationFixture({ existing: { enabled: true, pickupEnabled: true, localDeliveryEnabled: true } });
+  assert.equal((await pickup.submit({
+    section: "pickup",
+    pickupEnabled: "on",
+    pickupPreparationDays: "2",
+    pickupAdvanceDays: "30",
+    pickupWeekdaysCsv: "1,2,3",
+    pickupTargetMode: "product",
+    pickupTargetValuesCsv: "10",
+  })).ok, true);
+  assert.equal(pickup.writes[0].update.pickupTargetMode, "product");
+  assert.equal(pickup.writes[0].update.pickupTargetValuesCsv, "10");
+  assert.equal("localDeliveryTargetMode" in pickup.writes[0].update, false);
+});
+
+test("location audience uses one canonical multi-select with removable selections", () => {
+  assert.match(locationsSource, /<Autocomplete\s+allowMultiple/);
+  assert.match(locationsSource, /name=\{name\} value=\{value\}/);
+  assert.match(locationsSource, /selected\.filter\(\(item\) => item !== selectedValue\)/);
+  assert.match(locationsSource, />Clear all</);
 });

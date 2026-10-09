@@ -37,48 +37,11 @@
     const matches = [...value.matchAll(new RegExp(`(?:^|[^A-Z0-9])(${pattern})(?=$|[^A-Z0-9])`, 'g'))].map((match) => match[1]);
     return matches.length === 1 ? matches[0] : '';
   };
-  const placeAboveCheckout = (root) => {
-    if (root.dataset.surface !== 'cart' || root.dataset.checkoutPlacement === 'true') return true;
-    // Only the first cart block relocates; extra blocks stay in place so two
-    // blocks can never ping-pong each other above the checkout button.
-    const first = document.querySelectorAll('[data-template="service-tabs"][data-surface="cart"]')[0];
-    if (first && first !== root) return true;
-    const mount = root.closest?.('.shopify-block') || root;
-    if (mount.dataset.checkoutPlacement === 'true') {
-      root.dataset.checkoutPlacement = 'true';
-      return true;
-    }
-    const controls = [...document.querySelectorAll('button[name="checkout"], input[name="checkout"], [data-cart-checkout], .cart__checkout-button, [href$="/checkout"]')];
-    const checkout = controls.find((control) => !root.contains?.(control) && control.offsetParent !== null)
-      || controls.find((control) => !root.contains?.(control));
-    if (!checkout) return false;
-    const anchor = checkout.closest?.('.cart__ctas, [data-cart-actions]') || checkout;
-    if (!anchor.parentNode || mount === anchor || mount.contains?.(anchor)) return false;
-    if (mount.nextSibling === anchor) {
-      root.dataset.checkoutPlacement = 'true';
-      mount.dataset.checkoutPlacement = 'true';
-      return true;
-    }
-    anchor.parentNode.insertBefore(mount, anchor);
-    root.dataset.checkoutPlacement = 'true';
-    mount.dataset.checkoutPlacement = 'true';
-    return true;
-  };
-  const ensureCartPlacement = (root) => {
-    if (placeAboveCheckout(root) || root.dataset.surface !== 'cart') return;
-    let attempts = 0;
-    const retry = () => {
-      if (!root.isConnected || root.dataset.checkoutPlacement === 'true' || placeAboveCheckout(root)) return;
-      if (attempts++ < 8) setTimeout(retry, 100);
-    };
-    setTimeout(retry, 0);
-  };
   const initialize = () => {
     const helper = window.incodeThemeContext;
     if (!helper) return;
     document.querySelectorAll('[data-template="service-tabs"]').forEach((root) => {
       if (!root.isConnected) return;
-      ensureCartPlacement(root);
       if (root.dataset.serviceReady === 'true') return;
       root.dataset.serviceReady = 'true';
       const find = (selector) => root.querySelector(selector);
@@ -106,8 +69,8 @@
             <div data-pickup-filter class="ist-pickup-postal" hidden><label><span class="ist-sr">Pickup ZIP or postcode</span><input data-pickup-postal placeholder="ZIP / postcode" autocomplete="postal-code" maxlength="30" aria-describedby="${id}-pickup_postal-error">${error('pickup_postal')}</label><button type="button" data-filter>Apply</button></div>
             <fieldset class="ist-locations"><legend class="ist-sr">Choose a pickup location</legend><div data-locations></div></fieldset>
             <button type="button" data-retry class="ist-retry" hidden>Retry pickup locations</button>
-            <div data-pickup-details hidden>
-              <label><span class="ist-sr">Pickup date</span><select data-field="date" aria-label="Pickup date" aria-describedby="${id}-date-error"><option value="">Choose pickup date</option></select>${error('date')}</label>
+             <div data-pickup-details hidden>
+               <label><span class="ist-sr">Pickup date</span><div data-date-picker class="ist-date-picker"><button type="button" class="ist-date-trigger" data-date-trigger aria-haspopup="dialog" aria-expanded="false"><span data-date-label>Choose pickup date</span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></button><div data-date-popover class="ist-date-popover" role="dialog" aria-label="Choose pickup date" hidden><div class="ist-date-nav"><button type="button" data-date-prev aria-label="Previous month">&#8249;</button><strong data-date-month></strong><button type="button" data-date-next aria-label="Next month">&#8250;</button></div><div class="ist-date-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div data-date-grid class="ist-date-grid" role="grid"></div></div><select class="ist-date-native" data-field="date" aria-label="Pickup date" aria-describedby="${id}-date-error"><option value="">Choose pickup date</option></select></div>${error('date')}</label>
               <div class="ist-columns">${collector('first_name', 'First name', 'given-name')}${collector('last_name', 'Last name', 'family-name')}</div>
               ${collector('email', 'Collector email', 'email', 'email', 254)}
               ${collector('phone', 'Phone No', 'tel', 'tel', 50)}
@@ -149,7 +112,17 @@
       const address = find('[data-address]');
       const suggestions = find('[data-suggestions]');
        const details = find('[data-pickup-details]');
-       const fields = Object.fromEntries(['date', 'first_name', 'last_name', 'email', 'phone'].map((name) => [name, find(`[data-field="${name}"]`)]));
+        const fields = Object.fromEntries(['date', 'first_name', 'last_name', 'email', 'phone'].map((name) => [name, find(`[data-field="${name}"]`)]));
+        const datePicker = find('[data-date-picker]');
+        const dateTrigger = find('[data-date-trigger]');
+        const dateLabel = find('[data-date-label]');
+        const datePopover = find('[data-date-popover]');
+        const dateMonth = find('[data-date-month]');
+        const dateGrid = find('[data-date-grid]');
+        const datePrev = find('[data-date-prev]');
+        const dateNext = find('[data-date-next]');
+        let availablePickupDates = [];
+        let calendarMonth = null;
        const deliveryDetails = find('[data-delivery-details]');
        const deliveryFields = Object.fromEntries(['date', 'first_name', 'last_name', 'email', 'phone'].map((name) => [name, find(`[data-delivery-field="${name}"]`)]));
       let service = 'shipping';
@@ -158,6 +131,7 @@
       let version = 0;
        let active;
        let suggestionActive;
+       let policyActive;
       let addressTimer;
       let pickupTimer;
       let disposed = false;
@@ -170,14 +144,76 @@
       if (savedCountry && [...country.options || []].some((option) => option.value === savedCountry)) country.value = savedCountry;
       if (pickupDisplay === 'customer-postal' && savedPostal) pickupPostal.value = savedPostal;
        const errorFields = { ...fields, ...Object.fromEntries(Object.entries(deliveryFields).map(([name, input]) => [`delivery_${name}`, input])), address, pickup_postal: pickupPostal };
-      const fieldError = (name, message = '') => {
-        const input = errorFields[name];
-        const error = find(`[data-error="${name}"]`);
-        input.setAttribute('aria-invalid', String(Boolean(message)));
-        error.textContent = message;
-        error.hidden = !message;
-      };
-      const clearErrors = () => Object.keys(errorFields).forEach((name) => fieldError(name));
+       const fieldError = (name, message = '') => {
+         const input = errorFields[name];
+         const error = find(`[data-error="${name}"]`);
+         input.setAttribute('aria-invalid', String(Boolean(message)));
+         error.textContent = message;
+         error.hidden = !message;
+       };
+       const dateParts = (value) => {
+         const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+         return match ? { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) } : null;
+       };
+       const dateText = (value) => {
+         const parts = dateParts(value);
+         if (!parts) return 'Choose pickup date';
+         try {
+           return new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`));
+         } catch {
+           return value;
+         }
+       };
+       const closeDatePicker = () => {
+         if (!datePopover) return;
+         datePopover.hidden = true;
+         dateTrigger?.setAttribute('aria-expanded', 'false');
+       };
+       const renderDateCalendar = () => {
+         if (!dateGrid || !calendarMonth) return;
+         dateGrid.replaceChildren();
+         const first = new Date(Date.UTC(calendarMonth.year, calendarMonth.month - 1, 1));
+         const startDay = first.getUTCDay();
+         const daysInMonth = new Date(Date.UTC(calendarMonth.year, calendarMonth.month, 0)).getUTCDate();
+         if (dateMonth) {
+           dateMonth.textContent = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(first);
+         }
+         for (let index = 0; index < startDay; index++) {
+           const empty = document.createElement('span');
+           empty.className = 'ist-date-empty';
+           empty.setAttribute('aria-hidden', 'true');
+           dateGrid.append(empty);
+         }
+         for (let day = 1; day <= daysInMonth; day++) {
+           const value = `${calendarMonth.year}-${String(calendarMonth.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+           const button = document.createElement('button');
+           button.type = 'button';
+           button.className = 'ist-date-day';
+           button.textContent = String(day);
+           button.setAttribute('role', 'gridcell');
+           button.setAttribute('aria-label', dateText(value));
+           button.disabled = !availablePickupDates.includes(value);
+           if (value === fields.date.value) button.dataset.selected = 'true';
+           button.addEventListener('click', () => {
+             fields.date.value = value;
+             fields.date.dispatchEvent(new Event('change', { bubbles: true }));
+             closeDatePicker();
+           }, options);
+           dateGrid.append(button);
+         }
+         const firstMonth = dateParts(availablePickupDates[0]);
+         const lastMonth = dateParts(availablePickupDates[availablePickupDates.length - 1]);
+         const currentMonth = calendarMonth.year * 12 + calendarMonth.month;
+         if (datePrev) datePrev.disabled = !firstMonth || currentMonth <= firstMonth.year * 12 + firstMonth.month;
+         if (dateNext) dateNext.disabled = !lastMonth || currentMonth >= lastMonth.year * 12 + lastMonth.month;
+       };
+       const resetDatePicker = () => {
+         if (!dateLabel) return;
+         dateLabel.textContent = 'Choose pickup date';
+         closeDatePicker();
+         renderDateCalendar();
+       };
+       const clearErrors = () => Object.keys(errorFields).forEach((name) => fieldError(name));
        const setDeliveryStatus = (text = '', state = '') => {
          deliveryStatus.textContent = text;
          deliveryStatus.dataset.state = state;
@@ -252,12 +288,13 @@
         setDeliveryStatus();
         if (reset) {
           clearErrors();
-          locations = [];
-          selected = '';
-          find('[data-locations]').replaceChildren();
-           details.hidden = true;
-           fields.date.value = '';
-           deliveryDetails.hidden = true;
+            locations = [];
+            selected = '';
+            find('[data-locations]').replaceChildren();
+            details.hidden = true;
+            fields.date.value = '';
+            resetDatePicker();
+            deliveryDetails.hidden = true;
            Object.values(deliveryFields).forEach((field) => { field.value = ''; });
         }
         if (cart) {
@@ -283,15 +320,30 @@
           if (suggestionActive === controller) suggestionActive = null;
         }
       };
-      const options = helper.watch(root, () => {
-        invalidate(true);
-        if (service === 'pickup' && (pickupDisplay === 'all' || savedPostal || pickupPostal.value.trim())) void run();
-      }, () => {
-        disposed = true;
-        invalidate(true);
-        delete root.dataset.serviceReady;
-      });
-      const params = async (signal, pickupSelection = false) => {
+       const options = helper.watch(root, () => {
+         invalidate(true);
+         void loadServiceAvailability();
+         if (service === 'pickup' && (pickupDisplay === 'all' || savedPostal || pickupPostal.value.trim())) void run();
+       }, () => {
+         disposed = true;
+         policyActive?.abort();
+         invalidate(true);
+         delete root.dataset.serviceReady;
+       });
+       dateTrigger?.addEventListener('click', () => {
+         if (!availablePickupDates.length || !datePopover) return;
+         datePopover.hidden = !datePopover.hidden;
+         dateTrigger.setAttribute('aria-expanded', String(!datePopover.hidden));
+       }, options);
+       const shiftCalendar = (amount) => {
+         if (!calendarMonth) return;
+         const next = new Date(Date.UTC(calendarMonth.year, calendarMonth.month - 1 + amount, 1));
+         calendarMonth = { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1 };
+         renderDateCalendar();
+       };
+       datePrev?.addEventListener('click', () => shiftCalendar(-1), options);
+       dateNext?.addEventListener('click', () => shiftCalendar(1), options);
+       const params = async (signal, pickupSelection = false) => {
         const query = new URLSearchParams({ surface: root.dataset.surface || 'product' });
         if (service === 'pickup') {
           query.set('service_options', '1');
@@ -356,17 +408,60 @@
         }
         return query;
       };
-      const request = async (query, signal) => {
-        const response = await fetch(`/apps/delivery-checker?${query}`, { signal, cache: 'no-store', headers: { Accept: 'application/json' } });
-        const data = await response.json();
-        if (!response.ok || !data || typeof data !== 'object') throw new Error(data?.message || 'Unable to check service options. Please retry.');
-        return data;
-      };
-      const renderDates = (location) => {
-        const dates = (location.available_dates || []).filter((date) => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date));
-        // Dropdown only contains server-approved dates, so blocked dates never display to the customer.
-        const select = fields.date;
-        select.replaceChildren();
+       const request = async (query, signal) => {
+         const response = await fetch(`/apps/delivery-checker?${query}`, { signal, cache: 'no-store', headers: { Accept: 'application/json' } });
+         const data = await response.json();
+         if (!response.ok || !data || typeof data !== 'object') throw new Error(data?.message || 'Unable to check service options. Please retry.');
+         return data;
+       };
+       const applyServiceAvailability = (data) => {
+         const fields = { shipping: 'shipping_available', delivery: 'local_delivery_available', pickup: 'pickup_available' };
+         for (const radio of radios) {
+           const available = data[fields[radio.value]] !== false;
+           radio.disabled = !available;
+           const label = radio.closest?.('label') || radio.parentElement;
+           if (label) label.hidden = !available;
+         }
+         const selected = radios.find((radio) => radio.value === service && !radio.disabled)
+           || radios.find((radio) => !radio.disabled);
+         radios.forEach((radio) => { radio.checked = radio === selected; });
+         if (!selected) {
+           panels.forEach((panel) => { panel.hidden = true; });
+           setStatus('No delivery services are available for these items.', 'error');
+           return;
+         }
+         if (selected.value === service) return;
+         service = selected.value;
+         panels.forEach((panel) => { panel.hidden = panel.dataset.panel !== service; });
+         if (service === 'pickup' && (pickupDisplay === 'all' || savedPostal)) void run();
+         if (service === 'delivery' && savedPostal) void run();
+       };
+       const loadServiceAvailability = async () => {
+         policyActive?.abort();
+         const controller = new AbortController();
+         policyActive = controller;
+         try {
+           const query = new URLSearchParams({ init: '1', surface: root.dataset.surface || 'product' });
+           if (cart) await helper.cartParams(query, controller.signal);
+           else {
+             const context = helper.productContext(root);
+             if (root.dataset.productId) query.set('productId', root.dataset.productId);
+             if (context.variantId) query.set('variantId', context.variantId);
+             query.set('qty', String(context.quantity));
+           }
+           const data = await request(query, controller.signal);
+           if (!disposed && policyActive === controller) applyServiceAvailability(data);
+         } catch (error) {
+           if (error.name !== 'AbortError') return;
+         } finally {
+           if (policyActive === controller) policyActive = null;
+         }
+       };
+       const renderDates = (location) => {
+         const dates = (location.available_dates || []).filter((date) => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date));
+         // The calendar only enables server-approved dates, so blocked dates never display as selectable.
+         const select = fields.date;
+         select.replaceChildren();
         const placeholder = document.createElement('option');
         placeholder.value = '';
         placeholder.textContent = dates.length ? 'Choose pickup date' : 'No pickup dates available';
@@ -380,10 +475,16 @@
             option.textContent = date;
           }
           select.append(option);
-        }
-        select.value = '';
-        select.dataset.availableDates = dates.join(',');
-      };
+         }
+         select.value = '';
+         select.dataset.availableDates = dates.join(',');
+         availablePickupDates = [...new Set(dates)].sort();
+         calendarMonth = dateParts(availablePickupDates[0]);
+         if (datePicker) datePicker.dataset.enhanced = 'true';
+         if (dateTrigger) dateTrigger.disabled = !availablePickupDates.length;
+         if (dateLabel) dateLabel.textContent = availablePickupDates.length ? 'Choose pickup date' : 'No pickup dates available';
+         renderDateCalendar();
+       };
       const renderLocations = (data, requestedPostal = false) => {
         if (!Array.isArray(data.pickup_locations)) throw new Error('Unable to load pickup locations. Please retry.');
         if (data.requires_postal_code === true && savedPostal && !requestedPostal) {
@@ -502,9 +603,9 @@
               attributes._incode_pickup_date = fields.date.value.trim();
               for (const name of ['first_name', 'last_name', 'email', 'phone']) attributes[`_incode_pickup_${name}`] = fields[name].value.trim();
             } else if (service === 'shipping') {
-              const shippingAvailable = data.available === true;
+              const shippingAvailable = data.enabled === true;
               if (!shippingAvailable) {
-                setShippingStatus('Shipping is not available for this postcode.', 'error');
+                setShippingStatus(data.message || 'Shipping is not available for this postcode.', 'error');
                 shippingResult.hidden = true;
                 return;
               }
@@ -577,7 +678,7 @@
         pickupTimer = setTimeout(() => { if (!disposed && service === 'pickup') void run(true); }, 300);
       };
        Object.entries(fields).forEach(([name, field]) => {
-         const changed = () => { invalidate(); fieldError(name); schedulePickup(); };
+         const changed = () => { invalidate(); if (name === 'date') { if (dateLabel) dateLabel.textContent = dateText(field.value); renderDateCalendar(); } fieldError(name); schedulePickup(); };
         field.addEventListener('input', changed, options);
         field.addEventListener('change', changed, options);
          field.addEventListener('blur', () => { pickupValidation(true, name); schedulePickup(); }, options);
@@ -626,9 +727,10 @@
       find('[data-filter]').addEventListener('click', () => run(), options);
       check.addEventListener('click', () => run(), options);
       shippingCheck.addEventListener('click', () => run(), options);
-      retry.hidden = true;
-      if (cart) invalidate(true);
-       if (savedPostal) {
+       retry.hidden = true;
+       if (cart) invalidate(true);
+       void loadServiceAvailability();
+        if (savedPostal) {
         shippingPostal.value = savedPostal;
         void run();
       }

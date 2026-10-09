@@ -67,8 +67,21 @@
    .incode-service-card__options [data-available='true'] b { color: #087443; }
    .incode-service-card__options [data-available='false'] { opacity: .78; }
    .incode-service-card__options [data-available='false'] b { color: #7c8490; }
-  .incode-service-card__location { color: #087443; font-size: 11px; }
-  .incode-service-card__pickup-copy { margin: 0; padding: 9px 10px; border-radius: 8px; background: #f6f8fb; color: #5d6673; font-size: 11px; }
+   .incode-service-card__location { color: #087443; font-size: 11px; }
+   .incode-service-card__pickup-copy { margin: 0; padding: 9px 10px; border-radius: 8px; background: #f6f8fb; color: #5d6673; font-size: 11px; }
+   .incode-service-card__forms { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e9ef; }
+   .incode-service-card__forms label { display: grid; gap: 5px; margin: 0; color: #586273; font-size: 11px; font-weight: 650; }
+   .incode-service-card__forms input { min-height: 42px; padding: 9px 11px; border: 1px solid #cfd6df; border-radius: 9px; background: #fff; color: #202733; font: inherit; font-size: 13px; }
+   .incode-service-card__forms input:focus-visible { outline: 2px solid var(--isc-accent); outline-offset: 2px; }
+   .incode-service-card__form-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+   .incode-service-card__form-back { justify-self: start; min-height: 0 !important; padding: 2px 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; color: #315f7e !important; font-size: 12px !important; text-decoration: underline; }
+   .incode-service-card__form-status { margin: 0; padding: 9px 10px; border-radius: 8px; background: #edf8f1; color: #12653b; font-size: 12px; }
+   .incode-service-card__forms [data-service-pickup-locations] { display: grid; gap: 6px; }
+   .incode-service-card__pickup-location { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; margin: 0; padding: 10px; border: 1px solid #d8e0e7; border-radius: 9px; background: #fff; color: #394454; cursor: pointer; }
+   .incode-service-card__pickup-location:has(input:checked) { border-color: #8fc9a8; background: #f3fbf5; box-shadow: inset 3px 0 #16a05d; }
+   .incode-service-card__pickup-location strong, .incode-service-card__pickup-location small { display: block; }
+   .incode-service-card__pickup-location strong { color: #202733; font-size: 12px; }
+   .incode-service-card__pickup-location small { margin-top: 2px; color: #697383; font-size: 11px; line-height: 1.35; }
   @media (max-width: 640px) {
     .incode-service-card { margin: 14px auto; padding: 14px; border-radius: min(var(--isc-radius), 14px); }
     .incode-service-card__form { grid-template-columns: 1fr; }
@@ -78,6 +91,7 @@
     .incode-service-card__options { grid-template-columns: 1fr; }
     .incode-service-card__eta { grid-template-columns: 30px minmax(0, 1fr); }
     .incode-service-card__eta > b { grid-column: 2; }
+    .incode-service-card__form-columns { grid-template-columns: minmax(0, 1fr); }
   }
   @container (max-width: 580px) {
     .incode-service-card__form { grid-template-columns: minmax(0, 1fr); }
@@ -179,6 +193,25 @@
 [data-template="service-tabs"] [data-country] { display: none !important; }
 [data-template="service-tabs"] [data-pickup-details] { margin-top: 12px; }
 [data-template="service-tabs"] [data-pickup-details] > label { margin: 10px 0; }
+[data-template="service-tabs"] .ist-date-picker { position: relative; }
+[data-template="service-tabs"] .ist-date-trigger { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid #cfd6df; border-radius: 10px; background: #fff; color: #25282c; text-align: left; }
+[data-template="service-tabs"] .ist-date-trigger:hover { border-color: #397da8; background: #f8fbfd; transform: none; }
+[data-template="service-tabs"] .ist-date-trigger:disabled { cursor: not-allowed; opacity: .62; }
+[data-template="service-tabs"] .ist-date-trigger svg { width: 18px; height: 18px; flex: 0 0 auto; stroke: #1d5f8a; stroke-width: 1.8; }
+[data-template="service-tabs"] .ist-date-popover { position: absolute; z-index: 10; top: calc(100% + 7px); right: 0; left: 0; padding: 12px; border: 1px solid #d8e0e7; border-radius: 13px; background: #fff; box-shadow: 0 16px 34px rgba(20, 34, 48, .16); }
+[data-template="service-tabs"] .ist-date-nav { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 6px; align-items: center; margin-bottom: 10px; }
+[data-template="service-tabs"] .ist-date-nav strong { color: #1f2933; font-size: 13px; text-align: center; }
+[data-template="service-tabs"] .ist-date-nav button { min-height: 32px; padding: 0; border: 0; border-radius: 8px; background: #f1f5f8; color: #1d5f8a; font-size: 22px; line-height: 1; }
+[data-template="service-tabs"] .ist-date-nav button:hover { background: #e4eff5; transform: none; }
+[data-template="service-tabs"] .ist-date-nav button:disabled { visibility: hidden; }
+[data-template="service-tabs"] .ist-date-weekdays, [data-template="service-tabs"] .ist-date-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+[data-template="service-tabs"] .ist-date-weekdays { margin-bottom: 4px; color: #75808b; font-size: 10px; font-weight: 700; text-align: center; text-transform: uppercase; }
+[data-template="service-tabs"] .ist-date-day, [data-template="service-tabs"] .ist-date-empty { min-height: 34px; }
+[data-template="service-tabs"] .ist-date-day { min-width: 0; padding: 0; border: 1px solid transparent; border-radius: 8px; background: #fff; color: #27333e; font-size: 12px; }
+[data-template="service-tabs"] .ist-date-day:not(:disabled):hover { border-color: #397da8; background: #edf6fa; color: #174c6d; transform: none; }
+[data-template="service-tabs"] .ist-date-day:disabled { background: #f7f8fa; color: #c2c8ce; cursor: not-allowed; }
+[data-template="service-tabs"] .ist-date-day[data-selected="true"] { border-color: #1d5f8a; background: #1d5f8a; color: #fff; font-weight: 700; }
+[data-template="service-tabs"] .ist-date-picker[data-enhanced="true"] .ist-date-native { position: absolute; width: 1px !important; height: 1px !important; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 [data-template="service-tabs"] [data-delivery-details] { margin-top: 12px; }
 [data-template="service-tabs"] [data-delivery-details] > label { margin: 10px 0; }
 [data-template="service-tabs"] [data-delivery-field="date"] { background: #f7f9fb; color: #59616a; }

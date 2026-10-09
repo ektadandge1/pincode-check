@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Autocomplete,
   Badge,
   Banner,
   BlockStack,
@@ -11,8 +12,8 @@ import {
   InlineStack,
   Layout,
   Page,
-  ProgressBar,
   Select,
+  Tag,
   Text,
   TextField,
 } from "@shopify/polaris";
@@ -20,9 +21,23 @@ import prisma from "../db.server";
 import { requireActiveBilling } from "../services/billing.server";
 import { clearDeliveryCheckCaches } from "../services/delivery-checker.server";
 import { resolvePlanAccess } from "../services/plan-access.server";
-import { normalizeTargetKind, normalizeTargetValue } from "../utils/targeting.server";
+import { loadShopifyTargetSuggestions, loadShopifyTargetSuggestionsForKind, type TargetSuggestion } from "../services/shopify-target-suggestions.server";
+import { MAX_SERVICE_AVAILABILITY_RULES, MAX_TARGET_VALUES_PER_RULE, normalizeTargetKind, normalizeTargetValue, serializeTargetValues } from "../utils/targeting.server";
 
 type ActionData = { ok: boolean; message: string };
+const MAX_RULE_TARGETS = 100;
+
+function storedTargetValues(value: string): string[] {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  if (!raw.startsWith("[")) return [raw];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string") ? [...new Set(parsed)] : [];
+  } catch {
+    return [];
+  }
+}
 
 function parseBool(value: FormDataEntryValue | null): boolean {
   return ["1", "true", "on"].includes(String(value ?? "").toLowerCase());
@@ -31,10 +46,22 @@ function parseBool(value: FormDataEntryValue | null): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await requireActiveBilling(request);
   const access = await resolvePlanAccess({ shop: session.shop, admin });
-  const rules = await prisma.serviceAvailabilityRule.findMany({
-    where: { shop: session.shop },
-    orderBy: [{ priority: "asc" }, { id: "asc" }],
-  });
+  const [rules, zones, catalogResult] = await Promise.all([
+    prisma.serviceAvailabilityRule.findMany({
+      where: { shop: session.shop },
+      orderBy: [{ priority: "asc" }, { id: "asc" }],
+      take: MAX_SERVICE_AVAILABILITY_RULES + 1,
+    }),
+    prisma.zone.findMany({
+      where: { shop: session.shop, enabled: true },
+      orderBy: [{ priority: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, country: true },
+    }),
+    loadShopifyTargetSuggestions(admin)
+      .then((suggestions) => ({ suggestions, error: null }))
+      .catch((error: unknown) => ({ suggestions: { product: [], collection: [], vendor: [], tag: [] }, error: error instanceof Error ? error.message : "Unable to load Shopify catalog suggestions." })),
+  ]);
+  if (rules.length > MAX_SERVICE_AVAILABILITY_RULES) throw new Error("Service availability rules exceed the supported limit");
   const editParam = new URL(request.url).searchParams.get("edit");
   const editId = Number(editParam ?? 0);
   const editingRule = Number.isSafeInteger(editId) && editId > 0 ? rules.find((rule) => rule.id === editId) ?? null : null;
@@ -43,6 +70,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     rules,
     editingRule,
     editNotFound: editParam !== null && !editingRule,
+    targetSuggestions: {
+      ...catalogResult.suggestions,
+      zone: zones.map((zone) => ({ label: `${zone.name}${zone.country ? ` · ${zone.country}` : ""}`, value: String(zone.id) })),
+    },
+    catalogError: catalogResult.error,
   };
 }
 
@@ -73,10 +105,37 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const name = String(formData.get("name") ?? "").trim();
   const kind = normalizeTargetKind(String(formData.get("targetKind") ?? ""));
-  const value = kind ? normalizeTargetValue(kind, String(formData.get("targetValue") ?? "")) : null;
+  let rawValues: unknown = [String(formData.get("targetValue") ?? "")];
+  if (formData.has("targetValues")) {
+    try {
+      rawValues = JSON.parse(String(formData.get("targetValues") ?? ""));
+    } catch {
+      rawValues = null;
+    }
+  }
+  const submittedValues = Array.isArray(rawValues) && rawValues.every((value) => typeof value === "string") ? rawValues : [];
+  const values = kind ? [...new Set(submittedValues.map((value) => normalizeTargetValue(kind, value)).filter((value): value is string => Boolean(value)))] : [];
   const priority = Number(formData.get("priority") ?? 100);
   if (!name || name.length > 60) return { ok: false, message: "Rule name is required and must be 60 characters or fewer." } satisfies ActionData;
-  if (!kind || !value) return { ok: false, message: "Choose a valid target and enter its product ID, collection handle, vendor, or tag." } satisfies ActionData;
+  if (!kind || !submittedValues.length || submittedValues.length > MAX_TARGET_VALUES_PER_RULE || values.length !== new Set(submittedValues).size) {
+    return { ok: false, message: `Choose 1 to ${MAX_TARGET_VALUES_PER_RULE} valid products, collections, vendors, tags, or delivery zones.` } satisfies ActionData;
+  }
+  if (kind === "zone") {
+    const zoneIds = values.map(Number);
+    const ownedZones = await prisma.zone.count({ where: { shop: session.shop, enabled: true, id: { in: zoneIds } } });
+    if (ownedZones !== zoneIds.length) return { ok: false, message: "One or more delivery zones are unavailable. Refresh and choose again." } satisfies ActionData;
+  }
+  if (kind !== "zone") {
+    try {
+      const suggestions = await loadShopifyTargetSuggestionsForKind(admin, kind);
+      const allowed = new Set(suggestions.map((suggestion) => suggestion.value));
+      if (values.some((value) => !allowed.has(value))) {
+        return { ok: false, message: `One or more selected ${kind} targets no longer exist in this Shopify store. Refresh and choose again.` } satisfies ActionData;
+      }
+    } catch {
+      return { ok: false, message: "Shopify could not verify the selected target. Refresh and try again." } satisfies ActionData;
+    }
+  }
   if (!Number.isInteger(priority) || priority < 0 || priority > 9999) return { ok: false, message: "Priority must be an integer from 0 to 9999." } satisfies ActionData;
   if (id && (!Number.isSafeInteger(id) || id <= 0)) return { ok: false, message: "Invalid service rule." } satisfies ActionData;
 
@@ -86,27 +145,42 @@ export async function action({ request }: ActionFunctionArgs) {
     shop: session.shop,
     name,
     targetKind: kind,
-    targetValue: value,
+    targetValue: serializeTargetValues(kind, values),
     priority,
     shippingAvailable: parseBool(formData.get("shippingAvailable")),
     localDeliveryAvailable: parseBool(formData.get("localDeliveryAvailable")),
     pickupAvailable: parseBool(formData.get("pickupAvailable")),
+    countryCode: null,
+    stateRegion: null,
+    inventoryMode: "any",
+    activationMode: "always",
+    activeFromLocal: null,
+    activeUntilLocal: null,
+    weekdaysCsv: "",
+    startTimeLocal: null,
+    endTimeLocal: null,
   };
   if (id) {
     const existing = await prisma.serviceAvailabilityRule.findFirst({ where: { id, shop: session.shop } });
     if (!existing) return { ok: false, message: "Service rule not found." } satisfies ActionData;
     await prisma.serviceAvailabilityRule.update({ where: { id }, data });
   } else {
+    const ruleCount = await prisma.serviceAvailabilityRule.count({ where: { shop: session.shop } });
+    if (ruleCount >= MAX_SERVICE_AVAILABILITY_RULES) return { ok: false, message: "Service rule limit reached. Delete an unused rule before creating another." } satisfies ActionData;
     await prisma.serviceAvailabilityRule.create({ data: { ...data, enabled: true } });
   }
   clearDeliveryCheckCaches(session.shop);
   return { ok: true, message: `Service rule "${name}" ${id ? "updated" : "created"}.` } satisfies ActionData;
 }
 
+export function shouldRevalidate({ actionResult, defaultShouldRevalidate }: { actionResult?: ActionData; defaultShouldRevalidate: boolean }) {
+  return actionResult?.ok === false ? false : defaultShouldRevalidate;
+}
+
 const EMPTY_FORM = {
   name: "",
   targetKind: "product",
-  targetValue: "",
+  targetValues: [] as string[],
   priority: "100",
   shippingAvailable: true,
   localDeliveryAvailable: true,
@@ -120,22 +194,25 @@ const SERVICE_META = [
 ] as const;
 
 export default function ServiceRulesPage() {
-  const { access, rules, editingRule, editNotFound } = useLoaderData<typeof loader>();
+  const { access, rules, editingRule, editNotFound, targetSuggestions, catalogError } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
   const [form, setForm] = useState(EMPTY_FORM);
+  const [targetSearch, setTargetSearch] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => {
-    setForm(editingRule ? {
+    const next = editingRule ? {
       name: editingRule.name,
       targetKind: editingRule.targetKind,
-      targetValue: editingRule.targetValue,
+      targetValues: storedTargetValues(editingRule.targetValue),
       priority: String(editingRule.priority),
       shippingAvailable: editingRule.shippingAvailable,
       localDeliveryAvailable: editingRule.localDeliveryAvailable,
       pickupAvailable: editingRule.pickupAvailable,
-    } : EMPTY_FORM);
-  }, [editingRule]);
+    } : EMPTY_FORM;
+    setForm(next);
+    setTargetSearch("");
+  }, [editingRule, targetSuggestions]);
   const saving = navigation.state !== "idle";
   const pendingIntent = String(navigation.formData?.get("intent") ?? "");
   const pendingId = Number(navigation.formData?.get("id") ?? 0);
@@ -145,13 +222,16 @@ export default function ServiceRulesPage() {
     + Number(!rule.shippingAvailable)
     + Number(!rule.localDeliveryAvailable)
     + Number(!rule.pickupAvailable), 0);
-  const targetHelp = form.targetKind === "product"
-    ? "Enter the numeric Shopify product ID."
-    : form.targetKind === "collection"
-      ? "Enter the collection handle, for example sale-items."
-      : form.targetKind === "vendor"
-        ? "Enter the vendor name."
-        : "Enter the exact product tag.";
+  const suggestions = (targetSuggestions[form.targetKind as keyof typeof targetSuggestions] ?? []) as TargetSuggestion[];
+  const normalizedTargetSearch = targetSearch.trim().toLowerCase();
+  const targetOptions = suggestions
+    .filter((option) => !normalizedTargetSearch || `${option.label} ${option.value}`.toLowerCase().includes(normalizedTargetSearch))
+    .slice(0, 100);
+  for (const targetValue of form.targetValues) {
+    if (!targetOptions.some((option) => option.value === targetValue)) {
+      targetOptions.unshift(suggestions.find((option) => option.value === targetValue) ?? { label: `Current value · ${targetValue}`, value: targetValue });
+    }
+  }
 
   const visibleRules = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -169,31 +249,9 @@ export default function ServiceRulesPage() {
       titleMetadata={<Badge tone={access.features.targeting ? "success" : "info"}>{access.features.targeting ? "Standard" : "Subscription required"}</Badge>}
     >
       <BlockStack gap="500">
-        <div className="incode-hero service-hero">
-          <BlockStack gap="300">
-            <InlineStack gap="200" blockAlign="center">
-              <img src="/eta-deliver-pickup-logo.svg" alt="ETADeliverPickup logo" width={40} height={40} />
-              <Badge tone="info">Independent from date rules</Badge>
-              <Badge tone="success">{`${enabledRules}/${rules.length} enabled`}</Badge>
-            </InlineStack>
-            <InlineStack align="space-between" blockAlign="end" gap="400">
-              <BlockStack gap="100">
-                <Text as="h1" variant="heading2xl">Show the right service for every product.</Text>
-                <div className="incode-hero__copy">
-                  <Text as="p" variant="bodyLg">Match one catalog group, then allow only the services shoppers can actually use. Lower priority wins on overlap.</Text>
-                </div>
-              </BlockStack>
-              <InlineStack gap="200">
-                <Button url="/app/locations" variant="secondary">Delivery & pickup</Button>
-                <Button url="/app/delivery-settings?tab=products" variant="primary">Product date rules</Button>
-              </InlineStack>
-            </InlineStack>
-            <ProgressBar progress={rules.length ? Math.round((enabledRules / rules.length) * 100) : 0} size="small" tone="primary" />
-          </BlockStack>
-        </div>
-
         {actionData ? <Banner tone={actionData.ok ? "success" : "critical"} title={actionData.ok ? "Service rules updated" : "Could not update service rules"}>{actionData.message}</Banner> : null}
         {editNotFound ? <Banner tone="warning" title="Service rule not found" action={{ content: "Clear edit link", url: "/app/service-rules" }}>The requested rule is unavailable or does not belong to this shop. No changes were made.</Banner> : null}
+        {catalogError ? <Banner tone="critical" title="Shopify target suggestions are unavailable">{catalogError} Refresh the page before creating a rule.</Banner> : null}
         <Banner tone="info" title="Dates stay untouched">
           These rules only show or hide Shipping, Local delivery and Pickup. Processing days, transit days, messages and PIN protection stay under Delivery settings → Product rules.
         </Banner>
@@ -222,11 +280,48 @@ export default function ServiceRulesPage() {
                     <FormLayout>
                       <FormLayout.Group>
                         <TextField label="Rule name" name="name" value={form.name} onChange={(name) => setForm((current) => ({ ...current, name }))} maxLength={60} autoComplete="off" placeholder="Bulky furniture — pickup only" />
-                        <TextField label="Priority" name="priority" type="number" min={0} max={9999} value={form.priority} onChange={(priority) => setForm((current) => ({ ...current, priority }))} helpText="Lower wins when multiple rules match." autoComplete="off" />
+                        <TextField label="Priority" name="priority" type="number" min={0} max={9999} value={form.priority} onChange={(priority) => setForm((current) => ({ ...current, priority }))} helpText="Lower wins between rules of the same target type." autoComplete="off" />
                       </FormLayout.Group>
                       <FormLayout.Group>
-                        <Select label="Match" name="targetKind" value={form.targetKind} onChange={(targetKind) => setForm((current) => ({ ...current, targetKind, targetValue: "" }))} options={[{ label: "Product", value: "product" }, { label: "Collection", value: "collection" }, { label: "Vendor", value: "vendor" }, { label: "Product tag", value: "tag" }]} />
-                        <TextField label="Target value" name="targetValue" value={form.targetValue} onChange={(targetValue) => setForm((current) => ({ ...current, targetValue }))} helpText={targetHelp} autoComplete="off" placeholder={form.targetKind === "product" ? "1234567890" : form.targetKind === "collection" ? "sale-items" : form.targetKind === "vendor" ? "Acme" : "bulky"} />
+                        <Select
+                          label="Match"
+                          name="targetKind"
+                          value={form.targetKind}
+                          onChange={(targetKind) => {
+                            setForm((current) => ({ ...current, targetKind, targetValues: [] }));
+                            setTargetSearch("");
+                          }}
+                          options={[{ label: "Product", value: "product" }, { label: "Collection", value: "collection" }, { label: "Vendor", value: "vendor" }, { label: "Product tag", value: "tag" }, { label: "Delivery zone", value: "zone" }]}
+                        />
+                        <div>
+                          <Autocomplete
+                            allowMultiple
+                            options={targetOptions}
+                            selected={form.targetValues}
+                            onSelect={(selected) => {
+                              setForm((current) => ({ ...current, targetValues: selected.slice(0, MAX_RULE_TARGETS) }));
+                              setTargetSearch("");
+                            }}
+                            emptyState={suggestions.length ? "No matching targets." : `No ${form.targetKind === "zone" ? "enabled zones" : `${form.targetKind}s`} found.`}
+                            textField={
+                              <Autocomplete.TextField
+                                label="Targets"
+                                value={targetSearch}
+                                onChange={setTargetSearch}
+                                placeholder={`Search ${form.targetKind === "zone" ? "delivery zones" : `${form.targetKind}s`}`}
+                                autoComplete="off"
+                                requiredIndicator
+                                helpText={`Select up to ${MAX_RULE_TARGETS}. The rule applies when any selected target matches.`}
+                              />
+                            }
+                          />
+                          <input type="hidden" name="targetValues" value={JSON.stringify(form.targetValues)} />
+                          {form.targetValues.length ? <div className="service-target-tags">
+                            {form.targetValues.map((targetValue) => <Tag key={targetValue} onRemove={() => setForm((current) => ({ ...current, targetValues: current.targetValues.filter((value) => value !== targetValue) }))}>
+                              {suggestions.find((option) => option.value === targetValue)?.label ?? targetValue}
+                            </Tag>)}
+                          </div> : null}
+                        </div>
                       </FormLayout.Group>
                     </FormLayout>
                     <div className="service-toggles">
@@ -234,7 +329,16 @@ export default function ServiceRulesPage() {
                         const active = form[service.key];
                         return (
                           <label key={service.key} className={`service-toggle${active ? " is-on" : " is-off"}`}>
-                            <input type="checkbox" name={service.key} value="1" checked={active} onChange={(event) => setForm((current) => ({ ...current, [service.key]: event.currentTarget.checked }))} />
+                            <input
+                              type="checkbox"
+                              name={service.key}
+                              value="1"
+                              checked={active}
+                              onChange={(event) => {
+                                const checked = event.currentTarget.checked;
+                                setForm((current) => ({ ...current, [service.key]: checked }));
+                              }}
+                            />
                             <span className="service-toggle__icon">{service.icon}</span>
                             <span><strong>{service.title}</strong><small>{service.desc}</small></span>
                             <span className={`service-toggle__state${active ? " is-on" : ""}`}>{active ? "ON" : "OFF"}</span>
@@ -252,7 +356,7 @@ export default function ServiceRulesPage() {
                       </InlineStack>
                     </div>
                     <InlineStack gap="200">
-                      <Button submit variant="primary" loading={savePending} disabled={!access.features.targeting || saving}>{editingRule ? "Save service rule" : "Create service rule"}</Button>
+                      <Button submit variant="primary" loading={savePending} disabled={!access.features.targeting || saving || !form.targetValues.length || Boolean(catalogError && form.targetKind !== "zone")}>{editingRule ? "Save service rule" : "Create service rule"}</Button>
                       {editingRule ? <Button url="/app/service-rules" disabled={saving}>Cancel</Button> : null}
                     </InlineStack>
                   </BlockStack>
@@ -263,7 +367,7 @@ export default function ServiceRulesPage() {
                 <InlineStack align="space-between" blockAlign="end" gap="300" wrap>
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingLg">Configured service rules</Text>
-                    <Text as="p" tone="subdued">Lower priority numbers win. Toggle instantly without deleting.</Text>
+                    <Text as="p" tone="subdued">The most specific target type wins, then the lower priority number. Toggle instantly without deleting.</Text>
                   </BlockStack>
                   <InlineStack gap="200" blockAlign="center">
                     <Badge tone={enabledRules ? "success" : "info"}>{`${enabledRules} enabled`}</Badge>
@@ -276,7 +380,7 @@ export default function ServiceRulesPage() {
                       <span className="service-rule-card__priority" title="Priority">#{rule.priority}</span>
                       <BlockStack gap="100">
                         <InlineStack gap="200" blockAlign="center"><Text as="h3" variant="headingMd">{rule.name}</Text>{rule.enabled ? <Badge tone="success">Enabled</Badge> : <Badge>Disabled</Badge>}</InlineStack>
-                        <Text as="p" tone="subdued">{rule.targetKind}: {rule.targetValue}</Text>
+                        <Text as="p" tone="subdued">{rule.targetKind}: {storedTargetValues(rule.targetValue).map((value) => targetSuggestions[rule.targetKind as keyof typeof targetSuggestions]?.find((option) => option.value === value)?.label ?? value).join(", ")}</Text>
                         <InlineStack gap="200" wrap>
                           <Badge tone={rule.shippingAvailable ? "success" : undefined}>{`Shipping ${rule.shippingAvailable ? "on" : "off"}`}</Badge>
                           <Badge tone={rule.localDeliveryAvailable ? "success" : undefined}>{`Delivery ${rule.localDeliveryAvailable ? "on" : "off"}`}</Badge>
@@ -305,7 +409,7 @@ export default function ServiceRulesPage() {
             <BlockStack gap="400">
               <Card><BlockStack gap="200">
                 <Text as="h2" variant="headingMd">How priority works</Text>
-                <Text as="p" tone="subdued">Example: Priority 10 bulky-tag blocks Shipping, Priority 100 default allows all. Product matching both uses Priority 10.</Text>
+                <Text as="p" tone="subdued">Specificity order is Product, Collection, Vendor, Tag, then Zone. Between rules of the same type, the lower priority number wins.</Text>
               </BlockStack></Card>
               <Card><BlockStack gap="200">
                 <Text as="h2" variant="headingMd">Real-store test</Text>

@@ -12,16 +12,33 @@
       const result = root.querySelector('.incode-service-card__result');
       const local = root.querySelector('[data-service-local]');
       const pickup = root.querySelector('[data-service-pickup]');
+      const options = root.querySelector('.incode-service-card__options');
+      if (!root.querySelector('[data-service-forms]')) root.insertAdjacentHTML?.('beforeend', `<div class="incode-service-card__forms" data-service-forms hidden><button type="button" class="incode-service-card__form-back" data-service-form-back>Back to delivery options</button><div data-service-form="local" hidden><p class="incode-service-card__form-status" data-service-local-form-status></p><label><span>Delivery date</span><input data-service-local-date readonly></label><div class="incode-service-card__form-columns"><label><span>First name</span><input data-service-local-field="first_name" autocomplete="given-name"></label><label><span>Last name</span><input data-service-local-field="last_name" autocomplete="family-name"></label></div><label><span>Email</span><input data-service-local-field="email" type="email" autocomplete="email"></label><label><span>Phone Number</span><input data-service-local-field="phone" type="tel" autocomplete="tel"></label></div><div data-service-form="pickup" hidden><p class="incode-service-card__form-status" data-service-pickup-form-status></p><div data-service-pickup-locations></div><label><span>Choose pickup date</span><input data-service-pickup-date type="date"></label><div class="incode-service-card__form-columns"><label><span>First name</span><input data-service-pickup-field="first_name" autocomplete="given-name"></label><label><span>Last name</span><input data-service-pickup-field="last_name" autocomplete="family-name"></label></div><label><span>Collector email</span><input data-service-pickup-field="email" type="email" autocomplete="email"></label><label><span>Phone No</span><input data-service-pickup-field="phone" type="tel" autocomplete="tel"></label></div></div>`);
+      const forms = root.querySelector('[data-service-forms]');
+      const localForm = root.querySelector('[data-service-form="local"]');
+      const pickupForm = root.querySelector('[data-service-form="pickup"]');
+      const localFormStatus = root.querySelector('[data-service-local-form-status]');
+      const pickupFormStatus = root.querySelector('[data-service-pickup-form-status]');
+      const localDate = root.querySelector('[data-service-local-date]');
+      const pickupLocations = root.querySelector('[data-service-pickup-locations]');
+      const pickupDate = root.querySelector('[data-service-pickup-date]');
+      const back = root.querySelector('[data-service-form-back]');
       const eta = root.querySelector('[data-service-eta]');
       const cartItems = root.querySelector('[data-service-cart-items]');
       let version = 0;
       let active = null;
+      let formActive = null;
+      let latestData = null;
       const invalidate = () => {
         version += 1;
         active?.abort();
+        formActive?.abort();
         active = null;
+        formActive = null;
         button.disabled = false;
         result.hidden = true;
+        if (forms) forms.hidden = true;
+        if (options) options.hidden = false;
         setStatus('', '');
       };
       const eventOptions = window.incodeThemeContext.watch(root, invalidate, invalidate);
@@ -51,6 +68,7 @@
         else delete status.dataset.state;
       };
       const render = (data) => {
+        latestData = data;
         result.hidden = false;
         root.querySelector('[data-result-destination]').textContent = `Checked for ${data.postal_code || postal.value.trim()}`;
         root.querySelector('[data-result-availability]').textContent = data.available ? '✓ Delivery available' : 'Delivery unavailable';
@@ -74,6 +92,68 @@
         const pickupCopy = root.querySelector('[data-service-pickup-copy]');
         pickupCopy.hidden = !data.pickup_instructions;
         pickupCopy.textContent = data.pickup_instructions || '';
+      };
+      const showForm = (kind) => {
+        if (!forms || !options || (kind === 'local' && local?.dataset.available !== 'true') || (kind === 'pickup' && pickup?.dataset.available !== 'true')) return;
+        forms.hidden = false;
+        options.hidden = true;
+        localForm.hidden = kind !== 'local';
+        pickupForm.hidden = kind !== 'pickup';
+        if (kind === 'local') {
+          localFormStatus.textContent = 'Local delivery is available.';
+          localDate.value = latestData?.delivery_date_range || latestData?.estimated_date_max_label || latestData?.estimated_date_label || '';
+          return;
+        }
+        pickupFormStatus.textContent = 'Loading pickup locations...';
+        void loadPickupLocations();
+      };
+      const renderPickupLocations = (data) => {
+        pickupLocations.replaceChildren();
+        const locations = Array.isArray(data.pickup_locations) ? data.pickup_locations : [];
+        for (const location of locations) {
+          const label = document.createElement('label');
+          label.className = 'incode-service-card__pickup-location';
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = `${root.id}-pickup-location`;
+          radio.value = String(location.id);
+          const copy = document.createElement('span');
+          const title = document.createElement('strong');
+          title.textContent = location.name || 'Pickup location';
+          const address = document.createElement('small');
+          address.textContent = [location.address1, location.address2, location.city, location.province, location.postal_code].filter(Boolean).join(', ');
+          copy.append(title, address);
+          radio.addEventListener('change', () => {
+            const dates = Array.isArray(location.available_dates) ? location.available_dates.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)) : [];
+            pickupDate.value = '';
+            pickupDate.disabled = !dates.length;
+            pickupDate.min = dates[0] || '';
+            pickupDate.max = dates[dates.length - 1] || '';
+            pickupDate.dataset.availableDates = dates.join(',');
+          }, eventOptions);
+          label.append(radio, copy);
+          pickupLocations.append(label);
+        }
+        pickupFormStatus.textContent = locations.length ? 'Choose a pickup location and date.' : (data.message || 'No pickup locations are available.');
+      };
+      const loadPickupLocations = async () => {
+        formActive?.abort();
+        const controller = new AbortController();
+        formActive = controller;
+        try {
+          const query = params();
+          query.set('service_options', '1');
+          if (root.dataset.surface === 'cart') await window.incodeThemeContext.cartParams(query, controller.signal);
+          const response = await fetch(`/apps/delivery-checker?${query.toString()}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.message || 'Unable to load pickup locations.');
+          if (controller.signal.aborted || !root.isConnected) return;
+          renderPickupLocations(data);
+        } catch (error) {
+          if (error.name !== 'AbortError') pickupFormStatus.textContent = error.message || 'Unable to load pickup locations.';
+        } finally {
+          if (formActive === controller) formActive = null;
+        }
       };
       const check = async () => {
         invalidate();
@@ -110,7 +190,17 @@
           if (current === version) { button.disabled = false; active = null; }
         }
       };
+      for (const [node, label] of [[local, 'Choose local delivery'], [pickup, 'Choose store pickup']]) {
+        node?.setAttribute?.('role', 'button');
+        node?.setAttribute?.('aria-label', label);
+        if (node) node.tabIndex = 0;
+      }
       button.addEventListener('click', check, eventOptions);
+      local?.addEventListener('click', () => showForm('local'), eventOptions);
+      pickup?.addEventListener('click', () => showForm('pickup'), eventOptions);
+      local?.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showForm('local'); } }, eventOptions);
+      pickup?.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showForm('pickup'); } }, eventOptions);
+      back?.addEventListener('click', () => { forms.hidden = true; options.hidden = false; localForm.hidden = true; pickupForm.hidden = true; }, eventOptions);
       postal.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); check(); } }, eventOptions);
       postal.addEventListener('input', invalidate, eventOptions);
       country.addEventListener('change', () => { invalidate(); flag(); }, eventOptions);
