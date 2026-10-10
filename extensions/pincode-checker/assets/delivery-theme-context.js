@@ -187,6 +187,27 @@
     if (intentOwner === owner) return invalidateEstimate(owner).write;
     return attributeQueue;
   };
+  const contextWatchers = new Set();
+  let contextObserver;
+  let contextPoll;
+  const checkAllContexts = () => {
+    if (document.visibilityState === 'hidden') return;
+    for (const check of [...contextWatchers]) check();
+  };
+  const startContextWatcher = () => {
+    if (!contextObserver) {
+      contextObserver = new MutationObserver(checkAllContexts);
+      contextObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['value', 'data-product-id', 'data-initial-variant'] });
+    }
+    if (!contextPoll && typeof setInterval === 'function') contextPoll = setInterval(checkAllContexts, 500);
+  };
+  const stopContextWatcher = () => {
+    if (contextWatchers.size) return;
+    contextObserver?.disconnect?.();
+    contextObserver = undefined;
+    if (contextPoll) clearInterval(contextPoll);
+    contextPoll = undefined;
+  };
   const watch = (root, invalidate, cleanup) => {
     const controller = new AbortController();
     const options = { signal: controller.signal };
@@ -225,18 +246,23 @@
     };
     let previous = context();
     let disposed = false;
-    let poll;
-    const dispose = () => { if (disposed) return; disposed = true; controller.abort(); observer.disconnect(); if (poll) clearInterval(poll); cleanup(); };
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      controller.abort();
+      contextWatchers.delete(check);
+      stopContextWatcher();
+      cleanup();
+    };
     const check = () => {
       if (disposed) return;
       if (!root.isConnected) { dispose(); return; }
       const next = context();
       if (previous !== next) { previous = next; invalidate(); }
     };
-    const observer = new MutationObserver(check);
-    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['value', 'data-product-id', 'data-initial-variant'] });
-    // Native .value assignments do not emit DOM mutations or change events.
-    if (typeof setInterval === 'function') poll = setInterval(check, 500);
+    contextWatchers.add(check);
+    // One shared observer and fallback poll cover every app block on the page.
+    startContextWatcher();
     window.addEventListener?.('popstate', check, options);
     document.addEventListener('shopify:section:unload', (event) => { if (event.target?.contains?.(root)) dispose(); }, options);
     return options;

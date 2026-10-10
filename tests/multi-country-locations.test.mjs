@@ -3,11 +3,12 @@ import test from "node:test";
 import { injectedServer } from "./helpers/injected-server.mjs";
 import { STANDARD_FEATURES } from "../app/services/plans.server.ts";
 
-function fixture(rules, records = [], inventoryAwareEnabled = true) {
+function fixture(rules, records = [], inventoryAwareEnabled = true, serviceRules = []) {
   const prisma = {
     deliverySetting: { findUnique: async () => ({ inventoryAwareEnabled, cutoffHour24: 14, processingDays: 0, deliveryWindowDays: 2, dateFormat: "weekday_day_month", timeZone: "UTC", locale: "en", fallbackDays: 5, courierTimeoutMs: 2000, retryCount: 1, courierEnabled: false, dbFallbackEnabled: true, holidaysCsv: "", weekendDaysCsv: "0", disableAddToCart: false, requireValidPin: false, successMessage: "Available", unavailableMessage: "Unavailable", codAvailableMessage: "COD", codUnavailableMessage: "Prepaid", deliveryChargeMessage: "" }) },
     deliveryTarget: { findMany: async () => [] },
     fulfillmentLocationRule: { findMany: async () => rules },
+    serviceAvailabilityRule: { findMany: async () => serviceRules },
     shippingMethodRule: { findMany: async () => [] },
     postalCode: {
       findFirst: async ({ where }) => records.find((row) => row.country === where.country && (typeof where.postalCode === "string" ? row.postalCode === where.postalCode : where.postalCode.in.includes(row.postalCode))) ?? null,
@@ -96,6 +97,28 @@ test("local delivery and pickup use independent location audiences", async () =>
     pickupTargetValuesCsv: "1",
   }]);
   const result = await check("US", "10001");
+  assert.equal(result.local_delivery_available, false);
+  assert.equal(result.pickup_available, true);
+});
+
+test("local delivery and pickup enforce independent assigned service rules", async () => {
+  const serviceRule = (id, productId) => ({
+    id,
+    shop: "countries.myshopify.com",
+    name: `Rule ${id}`,
+    targetKind: "product",
+    targetValue: productId,
+    shippingAvailable: true,
+    localDeliveryAvailable: true,
+    pickupAvailable: true,
+    enabled: true,
+    priority: id,
+  });
+  const result = await fixture([{
+    ...rule(1, "US", "100*"),
+    localDeliveryServiceRuleId: 2,
+    pickupServiceRuleId: 1,
+  }], [], false, [serviceRule(1, "1"), serviceRule(2, "2")])("US", "10001");
   assert.equal(result.local_delivery_available, false);
   assert.equal(result.pickup_available, true);
 });

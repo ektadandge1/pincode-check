@@ -3,7 +3,7 @@ import { Link, Outlet, useLoaderData, useNavigation, useRouteError } from "react
 import { NavMenu } from "@shopify/app-bridge-react";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { AppProvider as PolarisProvider } from "@shopify/polaris";
-import type { AnchorHTMLAttributes, ReactNode } from "react";
+import { useEffect, useState, type AnchorHTMLAttributes, type ReactNode } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 
@@ -37,10 +37,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { apiKey: process.env.SHOPIFY_API_KEY || "", access, shop: context.session.shop };
 };
 
+export function shouldRevalidate() {
+  // Child routes enforce authentication and billing; this layout data is static
+  // for the lifetime of the embedded document.
+  return false;
+}
+
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const navigating = navigation.state !== "idle";
+  const navigating = navigation.state === "loading";
+  const [showLoading, setShowLoading] = useState(false);
+  useEffect(() => {
+    if (!navigating) {
+      setShowLoading(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowLoading(true), 160);
+    return () => clearTimeout(timer);
+  }, [navigating]);
 
   return (
     <ShopifyAppProvider embedded apiKey={apiKey}>
@@ -58,10 +73,16 @@ export default function App() {
           <a href="/app/plans">Plans</a>
           <a href="/app/additional">Setup guide</a>
         </NavMenu>
-        <div className={`incode-route-progress${navigating ? " is-active" : ""}`} aria-hidden={!navigating}>
+        <div className={`incode-route-progress${showLoading ? " is-active" : ""}`} aria-hidden={!showLoading}>
           <span />
         </div>
-        <div className="incode-admin-shell">
+        {showLoading ? (
+          <div className="incode-route-loading" role="status" aria-live="polite">
+            <span aria-hidden="true" />
+            Loading page
+          </div>
+        ) : null}
+        <div className="incode-admin-shell" aria-busy={navigating}>
           <Outlet />
         </div>
       </PolarisProvider>

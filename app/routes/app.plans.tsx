@@ -53,24 +53,22 @@ export default function PlansPage() {
   const data = useLoaderData<typeof loader>();
 
   return (
-    <Page title="Plans and billing" subtitle="Simple Shopify billing with one complete plan.">
+    <Page title="Plans and billing" subtitle="Manage your subscription.">
       <BlockStack gap="500">
         {data.hasActiveSubscription ? (
           <Banner title="Your Standard plan is active" tone="success">
-            {data.returnedPlanHandle
-              ? "Shopify approved the subscription. All delivery tools are now available."
-              : "All delivery tools are available. Charges are managed through your Shopify invoice."}
+            All features are available.
           </Banner>
         ) : data.returnedPlanHandle ? (
           <Banner title="The subscription was not activated" tone="warning">
-            Shopify did not return an active subscription. If you cancelled the approval, you can start again below. If you approved it, refresh once or review Shopify billing.
+            Try again or check Shopify billing.
           </Banner>
         ) : (
           <Banner title="Activate ETADeliverPickup" tone="info">
             Start your 7-day trial, then pay $9 USD every 30 days through Shopify.
           </Banner>
         )}
-        {!data.pricingUrl ? <Banner title="Billing is not configured" tone="critical">Add the Shopify App Pricing handle to SHOPIFY_APP_HANDLE.</Banner> : null}
+        {!data.pricingUrl ? <Banner title="Billing is not configured" tone="critical">Contact support to finish billing setup.</Banner> : null}
         {!data.billingRequired ? (
           <Banner title="Billing enforcement is disabled" tone="warning">
             Paid routes are currently available without an active subscription.
@@ -100,9 +98,7 @@ export default function PlansPage() {
                 </List>
                 {data.hasActiveSubscription ? (
                   <BlockStack gap="200">
-                    <Text as="p" tone="subdued">Subscription status: {data.subscriptionStatus}</Text>
-                    <Button url={data.billingManagementUrl} external target="_blank" fullWidth>Manage subscription in Shopify</Button>
-                    <Text as="p" tone="subdued" variant="bodySm">Review charges or cancel the subscription securely from Shopify billing.</Text>
+                  <Button url={data.billingManagementUrl} external target="_blank" fullWidth>Manage subscription in Shopify</Button>
                   </BlockStack>
                 ) : (
                   <Button url={data.pricingUrl ?? undefined} external target="_top" variant="primary" disabled={!data.pricingUrl} fullWidth>
@@ -116,10 +112,8 @@ export default function PlansPage() {
 
         <Card>
           <BlockStack gap="200">
-            <Text as="h2" variant="headingMd">Billing transparency</Text>
-            <Text as="p" tone="subdued">
-              Shopify hosts plan selection and subscription approval, manages the free trial, and adds recurring charges to your Shopify invoice. No external payment provider is used.
-            </Text>
+            <Text as="h2" variant="headingMd">Shopify billing</Text>
+            <Text as="p" tone="subdued">Shopify manages your trial, charges, and cancellation.</Text>
           </BlockStack>
         </Card>
       </BlockStack>

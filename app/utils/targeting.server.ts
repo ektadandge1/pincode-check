@@ -310,6 +310,21 @@ export function matchDeliveryTarget(
   return matches[0];
 }
 
+export function matchesAssignedServiceRule(
+  targets: DeliveryTargetRecord[],
+  assignedRuleId: number | null | undefined,
+  service: "local_delivery" | "pickup",
+  context: ProductTargetContext,
+): boolean {
+  if (assignedRuleId === null || assignedRuleId === undefined) return true;
+  const assigned = targets.find((target) => target.id === assignedRuleId);
+  if (!assigned) return false;
+  const matched = matchDeliveryTarget([assigned], context);
+  return service === "local_delivery"
+    ? matched?.localDeliveryAvailable === true
+    : matched?.pickupAvailable === true;
+}
+
 export function deliveryTargetSuccessMessage(
   target: DeliveryTargetRecord | null,
   globalMessage: string,

@@ -15,7 +15,7 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 const load = injectedServer({});
 
-function fixture({ location = { id, name: "Canonical Shopify store", address: { address1: "123 Main St", address2: "Suite 2", city: "Boston", province: "Massachusetts", provinceCode: "MA", zip: "02108", country: "United States", countryCode: "US", phone: "+1 555 123 4567" }, isActive: true, fulfillsOnlineOrders: true }, lookupError = false, scope = "", orders = [] } = {}) {
+function fixture({ location = { id, name: "Canonical Shopify store", address: { address1: "123 Main St", address2: "Suite 2", city: "Boston", province: "Massachusetts", provinceCode: "MA", zip: "02108", country: "United States", countryCode: "US", phone: "+1 555 123 4567" }, isActive: true, fulfillsOnlineOrders: true }, lookupError = false, scope = "", orders = [], serviceRule = null } = {}) {
   const writes = [];
   const lookups = [];
   const invalidated = [];
@@ -28,7 +28,7 @@ function fixture({ location = { id, name: "Canonical Shopify store", address: { 
     } });
   } };
   const mocks = {
-    "../db.server": { fulfillmentLocationRule: { upsert: async (args) => writes.push(args), findMany: async () => [], findUnique: async () => ({ localDeliveryCoverageMode: "zone", localDeliveryZoneIdsCsv: "27", localDeliveryCountry: "", localDeliveryPostalCodesCsv: "" }) }, deliverySetting: { findUnique: async () => null }, zone: { findMany: async () => [] } },
+    "../db.server": { fulfillmentLocationRule: { upsert: async (args) => writes.push(args), findMany: async () => [], findUnique: async () => ({ localDeliveryCoverageMode: "zone", localDeliveryZoneIdsCsv: "27", localDeliveryCountry: "", localDeliveryPostalCodesCsv: "" }) }, deliverySetting: { findUnique: async () => null }, zone: { findMany: async () => [] }, serviceAvailabilityRule: { findMany: async () => serviceRule ? [serviceRule] : [], findFirst: async ({ where }) => serviceRule && where.shop === shop && where.id === serviceRule.id && (!where.enabled || serviceRule.enabled) && (!where.pickupAvailable || serviceRule.pickupAvailable) && (!where.localDeliveryAvailable || serviceRule.localDeliveryAvailable) ? serviceRule : null } },
     "../services/billing.server": { requireActiveBilling: async () => ({ admin, session: { shop, scope } }) },
     "../services/plan-access.server": { resolvePlanAccess: async () => ({ active: true, features: { inventory: true } }) },
     "../services/plans.server": { NO_PLAN_ACCESS: {} },
@@ -68,6 +68,7 @@ test("pickup save uses the authenticated shop and canonical Shopify name for cre
        pickupAdvanceDays: "30",
        pickupTargetMode: "all",
        pickupTargetValuesCsv: "",
+       pickupServiceRuleId: "",
     },
   });
   assert.deepEqual(f.lookups[0].options.variables, { id });
@@ -225,14 +226,11 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   }
   assert.doesNotMatch(source, /label="Preview style"/);
   assert.doesNotMatch(source, /label="Block icons"/);
-  assert.match(source, /Set Shipping coverage/);
+  assert.doesNotMatch(source, /Set Shipping coverage/);
   assert.match(source, /Storefront setup/);
   assert.match(source, /Add to Product/);
   assert.match(source, /Add to Cart/);
    assert.doesNotMatch(source, /<Text as="h2" variant="headingMd">Service setup/);
-   assert.doesNotMatch(source, /Set up Shipping/);
-   assert.doesNotMatch(source, /Set up delivery/);
-   assert.doesNotMatch(source, /Set up pickup/);
    assert.doesNotMatch(source, /Audience and zones only filter a service; they do not enable it/);
   assert.match(source, /settings\/locations/);
   assert.match(source, /function BlockedDatesPicker/);
@@ -242,7 +240,7 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   assert.doesNotMatch(source, /label="Blocked pickup dates"/);
   assert.match(source, /function LocationSettingsSection/);
   assert.match(source, /Routing & timing/);
-  assert.match(source, /incode-setup-rail/);
+  assert.doesNotMatch(source, /incode-setup-rail/);
   assert.match(source, /name="localDeliveryZoneIdsCsv"/);
   assert.match(source, /One or more delivery zones are unavailable/);
   assert.match(source, />Locations</);
@@ -253,7 +251,7 @@ test("locations admin stays focused on actionable delivery and pickup settings",
   assert.match(source, /Pickup customer details/);
   assert.match(source, /Delivery customer details/);
   assert.match(source, /Delivery orders/);
-  assert.match(source, /Customer data is read live and is not copied into the app database/);
+  assert.match(source, /Customer data is not stored/);
   assert.match(source, /Search locations/);
    assert.match(source, /Save status/);
    assert.match(source, /Save routing/);
@@ -265,8 +263,10 @@ test("locations admin stays focused on actionable delivery and pickup settings",
    assert.match(source, /valuesName="pickupTargetValuesCsv"/);
     assert.doesNotMatch(source, /title="Audience"/);
     assert.doesNotMatch(source, /Only selected delivery zones/);
-   assert.match(source, /Location selection/);
-    assert.match(source, /Save strategy/);
+  assert.match(source, /Location selection/);
+  assert.match(source, /forms\[location\.id\] \?\? locationForm\(location\)/);
+  assert.doesNotMatch(source, /const form = forms\[location\.id\];/);
+  assert.match(source, /Save strategy/);
   assert.match(source, /name="section"/);
   assert.match(source, /name="pickupEnabledState"/);
   assert.match(source, /name="localDeliveryEnabledState"/);
@@ -290,6 +290,26 @@ test("only the submitted location section displays a saving indicator", () => {
   assert.match(source, /<details id=\{id\} className="incode-location-section" open>/);
   assert.equal((source.match(/<LocationSettingsSection/g) || []).length, 3);
   assert.doesNotMatch(source, /openSection/);
+});
+
+test("local delivery and pickup expose independent service-rule selectors", () => {
+  assert.match(source, /name="localDeliveryServiceRuleId"/);
+  assert.match(source, /name="pickupServiceRuleId"/);
+  assert.match(source, /localDeliveryServiceRuleId !== saved\.localDeliveryServiceRuleId/);
+  assert.match(source, /pickupServiceRuleId !== saved\.pickupServiceRuleId/);
+});
+
+test("pickup saves only an active shop-owned pickup service rule", async () => {
+  const selected = { id: 9, name: "Pickup products", enabled: true, pickupAvailable: true, localDeliveryAvailable: false, priority: 1 };
+  const valid = fixture({ serviceRule: selected });
+  assert.equal((await valid.submit({ section: "pickup", pickupServiceRuleId: "9" })).ok, true);
+  assert.equal(valid.writes[0].create.pickupServiceRuleId, 9);
+  assert.equal(valid.writes[0].update.pickupServiceRuleId, 9);
+
+  const forged = fixture();
+  const result = await forged.submit({ section: "pickup", pickupServiceRuleId: "9" });
+  assert.equal(result.ok, false);
+  assert.equal(forged.writes.length, 0);
 });
 
 test("one-click pickup enablement verifies Shopify status and activates the location", async () => {

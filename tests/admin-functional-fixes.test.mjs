@@ -52,6 +52,19 @@ test("delivery settings disables conflicting actions while saving", () => {
   assert.match(deliverySource, /disabled=\{pageBusy\}/);
 });
 
+test("deleting a zone also deletes its postal coverage rules", () => {
+  const deleteZoneAction = deliverySource.slice(
+    deliverySource.indexOf('if (intent === "delete_zone")'),
+    deliverySource.indexOf('if (intent === "toggle_zone")'),
+  );
+  assert.match(deleteZoneAction, /tx\.postalCode\.deleteMany/);
+  assert.match(deleteZoneAction, /\{ zoneId \}/);
+  assert.match(deleteZoneAction, /\{ zoneId: null, zone: zone\.name \}/);
+  assert.doesNotMatch(deleteZoneAction, /tx\.postalCode\.updateMany/);
+  assert.match(deliverySource, /and its .* postal/);
+  assert.doesNotMatch(deliverySource, /Deletion blocked to prevent reactivating rules/);
+});
+
 test("catalog failures are exposed instead of empty lists", () => {
   assert.match(deliverySource, /let catalogError = ""/);
   assert.match(deliverySource, /Product catalog unavailable/);
@@ -202,6 +215,7 @@ test("scoped delivery save validates only its own section", async () => {
       localDeliveryZoneIdsCsv: "",
       localDeliveryTargetMode: "all",
       localDeliveryTargetValuesCsv: "",
+      localDeliveryServiceRuleId: "",
     },
   });
 });

@@ -84,6 +84,7 @@ test("a calculation that finishes after invalidation cannot repopulate the old r
 
 test("delivery settings pagination stops querying exhausted catalog connections and deduplicates nodes", async () => {
   const source = await readFile(new URL("../app/routes/app.delivery-settings.tsx", import.meta.url), "utf8");
+  assert.match(source, /activeTabId === "products"/);
   assert.match(source, /page < 20 && \(loadCollections \|\| loadProducts\)/);
   assert.doesNotMatch(source, /@include\(if: \$load(?:Collections|Products)\)/);
   assert.match(source, /new Map\(collections\.map\(\(collection\) => \[collection\.id, collection\]\)\)/);

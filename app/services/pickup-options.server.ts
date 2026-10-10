@@ -7,7 +7,7 @@ import {
 } from "../utils/delivery.server";
 import { isPickupDate, pickupAvailableDates, type PickupSchedule } from "../utils/pickup-schedule";
 import { locationTargetMode, matchesLocationTarget } from "../utils/location-targeting";
-import { MAX_SERVICE_AVAILABILITY_RULES, matchDeliveryTarget, type DeliveryTargetRecord } from "../utils/targeting.server";
+import { MAX_SERVICE_AVAILABILITY_RULES, matchDeliveryTarget, matchesAssignedServiceRule, type DeliveryTargetRecord } from "../utils/targeting.server";
 
 type PickupRule = PickupSchedule & {
   shopifyLocationId: string;
@@ -15,6 +15,7 @@ type PickupRule = PickupSchedule & {
   pickupPhone: string;
   pickupTargetMode?: string | null;
   pickupTargetValuesCsv?: string | null;
+  pickupServiceRuleId?: number | null;
   serviceTargetMode?: string | null;
   serviceTargetValuesCsv?: string | null;
 };
@@ -86,8 +87,7 @@ export async function getPickupOptions(input: {
       zoneId = candidates[0]?.row.zoneId ?? null;
     }
   }
-  const pickupAllowed = (item: CartDeliveryItemInput) => {
-    const matched = matchDeliveryTarget(serviceRules.map((rule): DeliveryTargetRecord => ({
+  const mappedServiceRules = serviceRules.map((rule): DeliveryTargetRecord => ({
       ...rule,
       countryCode: null,
       stateRegion: null,
@@ -103,7 +103,8 @@ export async function getPickupOptions(input: {
       transitDays: null,
       excluded: false,
       customSuccessMessage: null,
-    })), {
+    }));
+  const serviceContext = (item: CartDeliveryItemInput) => ({
       productId: item.productId,
       vendor: item.productVendor,
       tags: item.productTags,
@@ -113,11 +114,14 @@ export async function getPickupOptions(input: {
       timeZone: input.timeZone,
       now: input.now,
     });
+  const pickupAllowed = (item: CartDeliveryItemInput) => {
+    const matched = matchDeliveryTarget(mappedServiceRules, serviceContext(item));
     return matched?.pickupAvailable ?? true;
   };
   const eligibleRules = rules.filter((rule) => input.items.every((item) => {
     if (!pickupAllowed(item)) return false;
-    return matchesLocationTarget(rule, "pickup", { ...item, zoneId });
+    return matchesLocationTarget(rule, "pickup", { ...item, zoneId })
+      && matchesAssignedServiceRule(mappedServiceRules, rule.pickupServiceRuleId, "pickup", serviceContext(item));
   }));
   const inventories = eligibleRules.length ? await mapCartDeliveryItems(input.items, async ({ item }) => {
     const inventory = await checkVariantInventory(input.admin, item.variantId!);

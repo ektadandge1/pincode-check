@@ -28,6 +28,7 @@ import {
   deliveryTargetSuccessMessage,
   MAX_SERVICE_AVAILABILITY_RULES,
   matchDeliveryTarget,
+  matchesAssignedServiceRule,
   productContextCacheKey,
   type DeliveryTargetRecord,
   type ProductEstimateBatchItem,
@@ -931,11 +932,19 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   const matchedPostalRecord = exactMatch ?? (features.patterns
     ? await findPatternMatch(shopKey, country, normalizedPostalCode, generation)
     : null);
+  const locationServiceContext = productContextFromInput(input, {
+    country,
+    state: matchedPostalRecord?.state ?? null,
+    zoneId: matchedPostalRecord?.zoneId ?? null,
+    timeZone: settings.timeZone,
+  });
   const localDeliveryRules = locationRules.filter((rule) => matchesLocalDelivery(rule, country, normalizedPostalCode, matchedPostalRecord?.zoneId ?? null)
-    && matchesLocationTarget(rule, "local_delivery", { ...input, zoneId: matchedPostalRecord?.zoneId ?? null }));
+    && matchesLocationTarget(rule, "local_delivery", { ...input, zoneId: matchedPostalRecord?.zoneId ?? null })
+    && matchesAssignedServiceRule(serviceTargets, rule.localDeliveryServiceRuleId, "local_delivery", locationServiceContext));
   const localDeliveryCandidates = locationRules.filter((rule) => rule.localDeliveryEnabled);
   const pickupRules = locationRules.filter((rule) => rule.pickupEnabled
-    && matchesLocationTarget(rule, "pickup", { ...input, zoneId: matchedPostalRecord?.zoneId ?? null }));
+    && matchesLocationTarget(rule, "pickup", { ...input, zoneId: matchedPostalRecord?.zoneId ?? null })
+    && matchesAssignedServiceRule(serviceTargets, rule.pickupServiceRuleId, "pickup", locationServiceContext));
   const localDeliveryInventory = localDeliveryRules.length > 0;
   const locationInventory = localDeliveryInventory || pickupRules.length > 0;
   let localDeliveryReason: DeliveryResult["local_delivery_reason"];

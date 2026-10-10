@@ -13,10 +13,10 @@ type ActionData = ActionResult & { intent: string };
 const NO_STORE = { "Cache-Control": "no-store" };
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
-  "delivery:check": "Single PIN/ZIP availability + dates",
-  "delivery:estimate": "General estimate without PIN",
-  "delivery:batch": "Up to 50 product-card estimates",
-  "delivery:methods": "Configured shipping methods",
+  "delivery:check": "Check availability and dates",
+  "delivery:estimate": "Estimate without a postal code",
+  "delivery:batch": "Check up to 50 products",
+  "delivery:methods": "View shipping methods",
 };
 
 function expiryValidationError(value: string): string | undefined {
@@ -188,7 +188,7 @@ export default function HeadlessApiPage() {
   });
 
   return (
-    <Page title="Headless API" subtitle="ETADeliverPickup read-only API for headless storefronts. Create, test, rotate and revoke safely.">
+    <Page title="Headless API" subtitle="Manage API tokens for custom storefronts.">
       <BlockStack gap="500">
         {!access.active ? <Banner tone="warning" action={{ content: "View plans", url: "/app/plans" }}>An active plan is required to create or enable tokens. You can still disable or revoke existing tokens.</Banner> : null}
 
@@ -202,20 +202,20 @@ export default function HeadlessApiPage() {
                       <Text as="h2" variant="headingMd">Create token</Text>
                       <Badge>{`${activeCount}/20 active`}</Badge>
                     </InlineStack>
-                    <TextField label="Token name" name="name" value={name} onChange={setName} autoComplete="off" maxLength={100} requiredIndicator helpText="Example: hydrogen-storefront-prod. 1-100 characters." />
-                    <Select label="Token type" name="tokenType" value={tokenType} onChange={(value) => { setTokenType(value); setOrigins(""); }} options={[{ label: "Public (browser) — origin locked", value: "public" }, { label: "Private (server only) — never in browser", value: "private" }]} />
+                    <TextField label="Token name" name="name" value={name} onChange={setName} autoComplete="off" maxLength={100} requiredIndicator helpText="Example: Production storefront" />
+                    <Select label="Token type" name="tokenType" value={tokenType} onChange={(value) => { setTokenType(value); setOrigins(""); }} options={[{ label: "Public — browser apps", value: "public" }, { label: "Private — servers", value: "private" }]} />
                     {tokenType === "public" ? (
-                      <Banner tone="info">Public tokens are visible to shoppers. Lock exact HTTPS origins. Never use a private token in browser code.</Banner>
+                      <Banner tone="info">Public tokens must use approved websites.</Banner>
                     ) : (
-                      <Banner tone="warning">Private tokens have full read access from your server. Keep them in server env, never commit to git or expose to browser.</Banner>
+                      <Banner tone="warning">Keep private tokens on your server.</Banner>
                     )}
-                    {tokenType === "public" ? <TextField label="Allowed origins" name="allowedOrigins" value={origins} onChange={setOrigins} autoComplete="off" multiline={3} requiredIndicator placeholder={"https://mystore.com\nhttps://www.mystore.com"} helpText="Exact HTTPS origins, comma or newline separated. No paths, slashes or wildcards. http://localhost allowed for dev." /> : <Text as="p" tone="subdued">Private tokens have no allowed origins and are for server-to-server use only.</Text>}
+                    {tokenType === "public" ? <TextField label="Allowed websites" name="allowedOrigins" value={origins} onChange={setOrigins} autoComplete="off" multiline={3} requiredIndicator placeholder={"https://mystore.com\nhttps://www.mystore.com"} helpText="Enter one HTTPS website per line." /> : null}
                     <BlockStack gap="100">
-                      <Text as="h3" variant="headingSm">Read scopes — least privilege</Text>
+                      <Text as="h3" variant="headingSm">Permissions</Text>
                       {scopes.map((scope) => <Checkbox key={scope} label={`${scope} — ${SCOPE_DESCRIPTIONS[scope] ?? ""}`} name="scopes" value={scope} checked={selectedScopes.includes(scope)} onChange={(checked) => setSelectedScopes((current) => checked ? [...current, scope] : current.filter((item) => item !== scope))} />)}
                       {!selectedScopes.length ? <Text as="p" tone="critical" variant="bodySm">Select at least one scope.</Text> : null}
                     </BlockStack>
-                    <TextField label="Expiry (optional, UTC)" name="expiresAt" value={expiresAt} onChange={setExpiresAt} autoComplete="off" placeholder="2027-01-01T00:00:00Z" helpText="Leave empty for no expiry. Expired tokens cannot be re-enabled." error={expiryError} />
+                    <TextField label="Expiry (optional, UTC)" name="expiresAt" value={expiresAt} onChange={setExpiresAt} autoComplete="off" placeholder="2027-01-01T00:00:00Z" helpText="Leave blank for no expiry." error={expiryError} />
                     {createResult ? <Banner tone={createResult.ok ? "success" : "critical"}>{createResult.message}</Banner> : null}
                     {justCreated ? (
                       <Card><BlockStack gap="300">
@@ -223,7 +223,7 @@ export default function HeadlessApiPage() {
                           <Text as="h2" variant="headingMd">Copy your token now</Text>
                           <Badge tone="warning">Shown once</Badge>
                         </InlineStack>
-                        <Text as="p" tone="subdued">Only its hash is stored. After leaving or dismissing, it cannot be retrieved. Save it in your secret manager now.</Text>
+                        <Text as="p" tone="subdued">This token is shown once. Save it securely.</Text>
                         <TextField label="New token (shown once)" value={createResult.token!} readOnly autoComplete="off" />
                         <InlineStack gap="200" blockAlign="center">
                           <Button variant="primary" onClick={async () => {
@@ -248,13 +248,13 @@ export default function HeadlessApiPage() {
                   <Text as="h2" variant="headingMd">Tokens</Text>
                   <Badge>{`${tokens.length} total`}</Badge>
                 </InlineStack>
-                <Text as="p" tone="subdued">Only prefixes shown. Disable is reversible, revoke is permanent and clears API access immediately.</Text>
+                <Text as="p" tone="subdued">Disable temporarily or revoke permanently.</Text>
                 {tokenActionResult ? <Banner tone={tokenActionResult.ok ? "success" : "critical"}>{tokenActionResult.message}</Banner> : null}
                 <div className="headless-table__scroll">
                   {rows.length ? <DataTable columnContentTypes={Array.from({ length: 11 }, () => "text" as const)} headings={["Name", "Type", "Prefix", "Read scopes", "Allowed origins", "Status", "Created", "Expires", "Last used", "Revoked", "Actions"]} rows={rows} /> : (
                     <div className="headless-empty">
                       <Text as="p" variant="headingMd">No tokens yet</Text>
-                      <Text as="p" tone="subdued">Create your first public token for Hydrogen / custom storefront, or private token for your server.</Text>
+                      <Text as="p" tone="subdued">Create a token to connect your storefront or server.</Text>
                     </div>
                   )}
                 </div>
@@ -265,19 +265,18 @@ export default function HeadlessApiPage() {
           <Layout.Section variant="oneThird">
             <BlockStack gap="400">
               <Card><BlockStack gap="300">
-                <Text as="h2" variant="headingMd">Test in real store</Text>
-                <Text as="p" tone="subdued">Replace TOKEN, ORIGIN shop and PIN. Must return 200 with availability.</Text>
+                <Text as="h2" variant="headingMd">Test a token</Text>
+                <Text as="p" tone="subdued">Send a test request from your storefront or server.</Text>
                 <code className="incode-code">POST /api/v1/public/delivery/check + Bearer TOKEN + Origin: https://mystore.com + country IN postal_code 400001</code>
                 <code className="incode-code">POST /api/v1/private/delivery/check + Bearer TOKEN from server, same JSON body</code>
-                <Text as="p" tone="subdued" variant="bodySm">Public: origin must match Allowed origins. Private: call from server only, no Origin needed. 401 = bad/revoked, 403 = origin/scope denied, 429 = rate limited.</Text>
               </BlockStack></Card>
               <Card><BlockStack gap="200">
                 <Text as="h2" variant="headingMd">Rotation checklist</Text>
-                <Text as="p" tone="subdued">1. Create replacement with same scopes. 2. Deploy integration. 3. Verify 200s. 4. Revoke old. Never edit live token in place.</Text>
+                <Text as="p" tone="subdued">Create a replacement, update your integration, test it, then revoke the old token.</Text>
               </BlockStack></Card>
               <Card><BlockStack gap="200">
                 <Text as="h2" variant="headingMd">Limits</Text>
-                <Text as="p" tone="subdued">20 active per shop. Expiry is UTC and permanent. Disabled + expired do not count. Revoked clears immediately across uninstall-safe storage.</Text>
+                <Text as="p" tone="subdued">Up to 20 active tokens. Expired and revoked tokens cannot be enabled again.</Text>
               </BlockStack></Card>
             </BlockStack>
           </Layout.Section>

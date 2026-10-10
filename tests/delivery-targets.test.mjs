@@ -5,6 +5,7 @@ import {
   deliveryTargetSuccessMessage,
   isDeliveryTargetActive,
   matchDeliveryTarget,
+  matchesAssignedServiceRule,
   normalizeTargetValue,
   parseTargetValues,
   parseListParam,
@@ -34,6 +35,26 @@ test("matches any value in a multi-target service rule", () => {
     assert.equal(matchDeliveryTarget([target], entry.matching)?.id, target.id, entry.kind);
     assert.equal(matchDeliveryTarget([target], entry.missing), null, entry.kind);
   }
+});
+
+test("assigned service rules are exact additional gates", () => {
+  const deliveryRule = conditionalTarget({
+    id: 41,
+    localDeliveryAvailable: true,
+    pickupAvailable: false,
+  });
+  const otherRule = conditionalTarget({
+    id: 42,
+    targetValue: "999",
+    localDeliveryAvailable: true,
+    pickupAvailable: true,
+  });
+  const context = { productId: "123456" };
+  assert.equal(matchesAssignedServiceRule([deliveryRule, otherRule], null, "local_delivery", context), true);
+  assert.equal(matchesAssignedServiceRule([deliveryRule, otherRule], 41, "local_delivery", context), true);
+  assert.equal(matchesAssignedServiceRule([deliveryRule, otherRule], 41, "pickup", context), false);
+  assert.equal(matchesAssignedServiceRule([deliveryRule, otherRule], 42, "local_delivery", context), false);
+  assert.equal(matchesAssignedServiceRule([deliveryRule], 999, "local_delivery", context), false);
 });
 
 function conditionalTarget(overrides = {}) {

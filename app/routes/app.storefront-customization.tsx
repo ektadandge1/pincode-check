@@ -369,7 +369,7 @@ export default function StorefrontCustomizationPage() {
   const placementButtonLabel = () => "Add delivery availability";
 
   return (
-      <Page title="Storefront style" subtitle="Create a polished delivery availability experience that matches your brand.">
+      <Page title="Storefront style" subtitle="Match the delivery block to your store.">
       <fetcher.Form method="post">
         <BlockStack gap="500">
           {fetcher.data ? <Banner tone={fetcher.data.ok ? "success" : "critical"}>{fetcher.data.message}</Banner> : null}
@@ -379,15 +379,15 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">Delivery availability block</Text>
-                      <Text as="p" tone="subdued">Use one block for every customer. Logged-in customers are checked using their saved address, while guests can enter their ZIP or PIN manually.</Text>
+                      <Text as="h2" variant="headingLg">Add the block</Text>
+                      <Text as="p" tone="subdued">Add it to product or cart pages.</Text>
                     </BlockStack>
                     <BlockStack gap="200">
-                      <Text as="h3" variant="headingMd">Add it where shoppers decide</Text>
+                      <Text as="h3" variant="headingMd">Placement</Text>
                       <div className="incode-placement-grid">
                         {([
-                          ["product", "Product page", "Below product details or near Add to Cart"],
-                          ["cart", "Cart page", "Confirm delivery before checkout"],
+                          ["product", "Product page", "Near Add to Cart"],
+                          ["cart", "Cart page", "Before checkout"],
                         ] as const).map(([template, label, description]) => (
                           <div key={template} className={`incode-placement-card${previewSurface === template ? " is-selected" : ""}`}>
                             <button type="button" onClick={() => { setPreviewSurface(template); setPreviewChecked(false); }}>
@@ -401,14 +401,12 @@ export default function StorefrontCustomizationPage() {
                         ))}
                       </div>
                     </BlockStack>
-                    <Banner tone="info">Logged-in customers with a default address are checked automatically. Guests enter a ZIP or PIN manually. No IP location is used.</Banner>
                   </BlockStack>
                 </Card>
                 <Card>
                   <BlockStack gap="300">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">1. Choose a starting design</Text>
-                      <Text as="p" tone="subdued">Pick a layout first, then adjust each shopper-facing surface below.</Text>
+                      <Text as="h2" variant="headingLg">Design</Text>
                     </BlockStack>
                     <Select label="Storefront template" name="storefrontTemplate" options={TEMPLATE_OPTIONS} value={form.storefrontTemplate} onChange={applyTemplate} />
                     <InlineStack align="end">
@@ -420,8 +418,7 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">2. Typography</Text>
-                      <Text as="p" tone="subdued">Use a confident type system without changing your theme code.</Text>
+                      <Text as="h2" variant="headingLg">Text</Text>
                     </BlockStack>
                     <FormLayout.Group condensed>
                       <Select label="Font family" name="storefrontFontFamily" options={FONT_OPTIONS} value={form.storefrontFontFamily} onChange={(value) => update("storefrontFontFamily", value)} />
@@ -434,8 +431,7 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">3. Checker and country selector</Text>
-                      <Text as="p" tone="subdued">Controls the ZIP-code card, country dropdown, input, and Check button.</Text>
+                      <Text as="h2" variant="headingLg">Checker</Text>
                     </BlockStack>
                     <div className="incode-color-grid">
                       {([
@@ -461,8 +457,7 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">4. Delivery result and journey</Text>
-                      <Text as="p" tone="subdued">Style the result strip and order milestones shown after a successful ZIP-code check.</Text>
+                      <Text as="h2" variant="headingLg">Delivery result</Text>
                     </BlockStack>
                     <div className="incode-color-grid">
                       {([
@@ -479,13 +474,13 @@ export default function StorefrontCustomizationPage() {
                       ))}
                     </div>
                     <FormLayout.Group condensed>
-                      <Select label="Storefront service and journey icons" name="storefrontIconStyle" options={ICON_OPTIONS} value={form.storefrontIconStyle} onChange={(value) => update("storefrontIconStyle", value)} helpText="This style controls delivery journey steps and Local delivery / Store pickup icons." />
+                      <Select label="Icons" name="storefrontIconStyle" options={ICON_OPTIONS} value={form.storefrontIconStyle} onChange={(value) => update("storefrontIconStyle", value)} />
                       <Select label="Animation" name="storefrontAnimation" options={ANIMATION_OPTIONS} value={form.storefrontAnimation} onChange={(value) => update("storefrontAnimation", value)} />
                       <Select label="Icon connector" name="storefrontJourneyLineStyle" options={LINE_OPTIONS} value={form.storefrontJourneyLineStyle} onChange={(value) => update("storefrontJourneyLineStyle", value)} />
                     </FormLayout.Group>
                     <BlockStack gap="200">
-                      <Text as="h3" variant="headingSm">Delivery content to display</Text>
-                       <Text as="p" tone="subdued">Choose the delivery-date content shown after a successful check. At least one section must remain selected.</Text>
+                      <Text as="h3" variant="headingSm">Show</Text>
+                       <Text as="p" tone="subdued">Select at least one option.</Text>
                       <InlineStack gap="400" wrap>
                         <Checkbox label="Delivery date" checked={selectedEtaSections.includes("date")} onChange={(checked) => toggleEtaSection("date", checked)} />
                         <Checkbox label="Delivery journey" checked={selectedEtaSections.includes("journey")} onChange={(checked) => toggleEtaSection("journey", checked)} />
@@ -497,11 +492,11 @@ export default function StorefrontCustomizationPage() {
                 <Card>
                   <BlockStack gap="400">
                     <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">5. Countdown timer</Text>
-                      <Text as="p" tone="subdued">Customize the cutoff timer independently. Enable “Show cutoff countdown” in the theme block to display it.</Text>
+                      <Text as="h2" variant="headingLg">Countdown</Text>
+                      <Text as="p" tone="subdued">Style the cutoff countdown.</Text>
                     </BlockStack>
-                     <Banner tone="info" action={{ content: "Manage countdown visibility", url: "/app/delivery-settings?tab=optional#countdown" }}>Countdown visibility, audience, and storefront surfaces are controlled from Delivery settings. This page only controls its appearance.</Banner>
-                     <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" helpText="Used whenever the countdown is enabled in Delivery settings." />
+                     <Banner tone="info" action={{ content: "Manage visibility", url: "/app/delivery-settings?tab=optional#countdown" }}>Visibility is managed in Delivery settings.</Banner>
+                      <TextField label="Countdown heading" name="storefrontCountdownTitle" value={form.storefrontCountdownTitle} onChange={(value) => update("storefrontCountdownTitle", value)} maxLength={80} autoComplete="off" />
                     <div className="incode-color-grid">
                       {([
                         ["storefrontCountdownBackground", "Panel background"],
@@ -520,7 +515,7 @@ export default function StorefrontCustomizationPage() {
                   <BlockStack gap="300">
                     <BlockStack gap="100">
                       <Text as="h2" variant="headingLg">Advanced CSS</Text>
-                      <Text as="p" tone="subdued">Optional CSS for advanced visual adjustments. External URLs, imports, and scripts are blocked. Arbitrary JavaScript is intentionally not supported.</Text>
+                      <Text as="p" tone="subdued">Optional CSS. External files and scripts are blocked.</Text>
                     </BlockStack>
                     <TextField
                       label="Custom CSS"
@@ -547,9 +542,7 @@ export default function StorefrontCustomizationPage() {
                     <span className="incode-preview-live">SIMULATED</span>
                   </InlineStack>
                   <InlineStack gap="200" wrap>
-                    <Badge tone="info">{previewExperienceMode === "checker" ? "ZIP check required" : "Automatic estimate"}</Badge>
                     <Badge>{previewLabel}</Badge>
-                    <Badge tone="success">{`Saved ZIP ${previewSavedPostal}`}</Badge>
                   </InlineStack>
                   <div className="incode-preview-tabs" role="tablist" aria-label="Preview page type">
                     {STOREFRONT_SURFACES.map(([label, template]) => (
@@ -643,7 +636,7 @@ export default function StorefrontCustomizationPage() {
                       <strong>Get it by Oct 6th - Oct 8th</strong>
                     </div> : null}
                   </div>
-                  <Text as="p" tone="subdued" variant="bodySm">Illustrative {previewLabel.toLowerCase()} preview with sample dates, not verified delivery results or an exact theme rendering. Shared shop styles apply to the main delivery widget; the independent Local delivery & pickup block has its own Theme Editor appearance settings. Save changes here, then save placement in your theme to publish it.</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Sample preview only. Your theme may look different.</Text>
                 </BlockStack>
               </Card>
             </Layout.Section>

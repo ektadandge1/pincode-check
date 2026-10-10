@@ -1,7 +1,11 @@
-import { getActiveAppSubscriptions, isBillingRequired } from "./billing.server";
+import {
+  clearBillingStatusCache,
+  getCachedBillingStatus,
+  isBillingRequired,
+} from "./billing.server";
 import { accessForPlan, NO_PLAN_ACCESS, type PlanAccess } from "./plans.server";
 
-type AdminClient = Parameters<typeof getActiveAppSubscriptions>[0];
+type AdminClient = Parameters<typeof getCachedBillingStatus>[0]["admin"];
 const cache = new Map<string, { expiresAt: number; access: PlanAccess }>();
 
 export async function resolvePlanAccess({
@@ -18,7 +22,7 @@ export async function resolvePlanAccess({
   const cached = cache.get(shop);
   if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.access;
 
-  const access = (await getActiveAppSubscriptions(admin)).length
+  const access = await getCachedBillingStatus({ shop, admin, forceRefresh })
     ? accessForPlan("standard")
     : NO_PLAN_ACCESS;
   cache.set(shop, {
@@ -30,4 +34,5 @@ export async function resolvePlanAccess({
 
 export function clearPlanAccessCache(shop: string): void {
   cache.delete(shop);
+  clearBillingStatusCache(shop);
 }

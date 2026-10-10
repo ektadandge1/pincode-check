@@ -52,6 +52,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where,
       orderBy: { createdAt: "desc" },
       take: 1000,
+      select: {
+        id: true,
+        country: true,
+        postalCode: true,
+        available: true,
+        deliveryDays: true,
+        source: true,
+        createdAt: true,
+      },
     }),
     prisma.postalCodeSearchEvent.count({ where }),
     prisma.postalCodeSearchEvent.count({ where: { ...where, available: true } }),
@@ -143,21 +152,21 @@ export default function AnalyticsPage() {
   return (
     <Page
       title="Delivery analytics"
-      subtitle="ETADeliverPickup privacy-safe insights from real storefront delivery checks."
+      subtitle="See where shoppers check delivery."
       primaryAction={<Button url="/app/delivery-settings?tab=coverage" variant="primary">Improve coverage</Button>}
     >
       <BlockStack gap="500">
         {data.total === 0 ? (
-          <Banner title="Analytics will appear after your first delivery check" tone="info">
-            Add the app block to a product page, publish the theme, and run one serviceable and one unavailable test lookup.
+          <Banner title="No delivery checks yet" tone="info">
+            Publish the delivery block and run a test.
           </Banner>
         ) : null}
 
         <div className="incode-metrics">
-          <MetricCard label="All-time checks" value={data.total} detail="Masked postal regions only" tone="info" />
-          <MetricCard label="Serviceable" value={data.available} detail="Successful delivery matches" tone="success" />
-          <MetricCard label="Unavailable" value={data.unavailable} detail="Coverage opportunities" tone={data.unavailable > 0 ? "critical" : "success"} />
-          <MetricCard label="Availability rate" value={data.total ? `${data.availabilityRate}%` : "No data"} detail={data.total ? "Across all recorded checks" : "Waiting for the first check"} tone={data.total === 0 ? "info" : data.availabilityRate >= 80 ? "success" : "critical"} />
+          <MetricCard label="All-time checks" value={data.total} detail="Recorded checks" tone="info" />
+          <MetricCard label="Serviceable" value={data.available} detail="Available" tone="success" />
+          <MetricCard label="Unavailable" value={data.unavailable} detail="No delivery match" tone={data.unavailable > 0 ? "critical" : "success"} />
+          <MetricCard label="Availability rate" value={data.total ? `${data.availabilityRate}%` : "No data"} detail="Available checks" tone={data.total === 0 ? "info" : data.availabilityRate >= 80 ? "success" : "critical"} />
         </div>
 
         <Layout>
@@ -167,7 +176,7 @@ export default function AnalyticsPage() {
                 <InlineStack align="space-between" blockAlign="center" gap="300">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingLg">Recent delivery checks</Text>
-                    <Text as="p" tone="subdued">Newest 25 checks. Shopper postal codes remain masked, never full addresses.</Text>
+                    <Text as="p" tone="subdued">Latest 25 checks. Postal codes are masked.</Text>
                   </BlockStack>
                   <InlineStack gap="200" blockAlign="center">
                     <Badge>{`${filtered.length} shown`}</Badge>
@@ -191,8 +200,8 @@ export default function AnalyticsPage() {
                   <Box paddingBlock="800">
                     <BlockStack gap="200" inlineAlign="center">
                       <Text as="h3" variant="headingMd">{data.total === 0 ? "No checks recorded yet" : "No checks match filters"}</Text>
-                      <Text as="p" tone="subdued">{data.total === 0 ? "Storefront activity will appear here automatically." : "Clear search or choose All results."}</Text>
-                      {data.total === 0 ? <Button url="/app/additional" variant="primary">Open setup guide</Button> : <Button onClick={() => { setQuery(""); setResult("all"); }}>Clear filters</Button>}
+                      <Text as="p" tone="subdued">{data.total === 0 ? "Run a storefront delivery check." : "Clear the filters."}</Text>
+                      {data.total === 0 ? null : <Button onClick={() => { setQuery(""); setResult("all"); }}>Clear filters</Button>}
                     </BlockStack>
                   </Box>
                 )}
@@ -211,12 +220,12 @@ export default function AnalyticsPage() {
                   <ProgressBar progress={data.availabilityRate} size="small" tone={data.total === 0 ? "primary" : data.availabilityRate >= 80 ? "success" : "critical"} />
                   <Text as="p" tone="subdued">
                     {data.total === 0
-                      ? "Coverage health will appear after shoppers begin checking delivery."
+                      ? "Run a delivery check to see coverage health."
                       : data.availabilityRate >= 80
-                      ? "Most shopper locations receive a serviceable response."
-                      : "Review unavailable regions and add targeted coverage rules."}
+                      ? "Most checks are available."
+                      : "Add coverage for unavailable regions."}
                   </Text>
-                  <Button url="/app/delivery-settings?tab=coverage" fullWidth variant="primary">Fix coverage now</Button>
+                  <Button url="/app/delivery-settings?tab=coverage" fullWidth variant="primary">Review coverage</Button>
                 </BlockStack>
               </Card>
               <Card>
@@ -253,7 +262,7 @@ export default function AnalyticsPage() {
                       <DataTable columnContentTypes={["text", "numeric"]} headings={["Country", "Checks"]} rows={data.topCountries} increasedTableDensity />
                     </div>
                   ) : <Text as="p" tone="subdued">No country data yet.</Text>}
-                  <Text as="p" tone="subdued" variant="bodySm">Rankings use the latest {data.sampleSize} checks. Regions are masked, e.g. 400***.</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Latest {data.sampleSize} checks.</Text>
                 </BlockStack>
               </Card>
             </BlockStack>

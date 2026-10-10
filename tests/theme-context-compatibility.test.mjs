@@ -178,6 +178,20 @@ test('an explicitly invalid custom selection cannot reuse a previously checked v
   assert.equal(f.helper.productContext(widget).variantId, 'gid://shopify/ProductVariant/91');
 });
 
+test('multiple widgets share one document observer and one fallback poll', () => {
+  const f = fixture();
+  const first = root('42');
+  const second = root('43');
+  f.helper.watch(first, () => {}, () => {});
+  f.helper.watch(second, () => {}, () => {});
+  assert.equal(f.polls.size, 1);
+
+  first.isConnected = false;
+  second.isConnected = false;
+  f.mutate();
+  assert.equal(f.polls.size, 0);
+});
+
 test('narrow-column layout and motion/live announcements are constrained without redesigning cards', () => {
   const base = new URL('../extensions/pincode-checker/', import.meta.url);
   const css = readFileSync(new URL('assets/product-delivery-pickup.css', base), 'utf8');

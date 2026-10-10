@@ -127,12 +127,12 @@ const WEEKEND_OPTIONS = [
 ];
 
 const SETTINGS_TABS = [
-  { id: "coverage", label: "Coverage", description: "Start here: create zones, add postal rules, and review where you deliver." },
-  { id: "timing", label: "Delivery Timing", description: "Set preparation and transit defaults, then configure your business calendar and date display." },
-  { id: "products", label: "Product Rules", description: "Add exceptions for products, collections, vendors, or tags after setting your coverage and timing defaults." },
-  { id: "messages", label: "Messages", description: "Choose shopper-facing wording and review a sample before saving. Product rules can override the success message." },
-  { id: "optional", label: "Optional", description: "Add cart protection or a cutoff countdown only when your storefront needs them." },
-  { id: "imports", label: "Imports & Sync", description: "Add coverage in bulk with a CSV, a published Google Sheet, or pasted rows. Review import results here." },
+  { id: "coverage", label: "Coverage", description: "Add and manage delivery areas." },
+  { id: "timing", label: "Delivery Timing", description: "Set delivery dates and business days." },
+  { id: "products", label: "Product Rules", description: "Set exceptions for selected products." },
+  { id: "messages", label: "Messages", description: "Edit messages shown to shoppers." },
+  { id: "optional", label: "Optional", description: "Set cart protection and countdowns." },
+  { id: "imports", label: "Imports & Sync", description: "Import coverage in bulk." },
 ] as const;
 
 function withCurrentOption(options: Array<{ label: string; value: string }>, value: string) {
@@ -317,6 +317,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = session.shop;
   const access = await resolvePlanAccess({ shop, admin });
   const params = new URL(request.url).searchParams;
+  const activeTabId = SETTINGS_TABS.some((tab) => tab.id === params.get("tab"))
+    ? params.get("tab")
+    : SETTINGS_TABS[0].id;
   const coverageSearch = (params.get("coverageSearch") ?? "").trim().slice(0, 100);
   const coverageGroup = params.get("coverageGroup") ?? "all";
   const pageSize = 25;
@@ -329,52 +332,49 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { city: { contains: coverageSearch } }, { state: { contains: coverageSearch } }, { zone: { contains: coverageSearch } },
     ] } : {}),
   };
-  const coverageCount = await prisma.postalCode.count({ where: coverageWhere });
+  const settingPromise = prisma.deliverySetting.findUnique({ where: { shop } })
+    .then((setting) => setting ?? prisma.deliverySetting.findUnique({ where: { shop: "default" } }));
+  const [coverageCount, setting, zones, totalPatterns, patternCount, targetCount, unassignedCount, recentImports] = await Promise.all([
+    prisma.postalCode.count({ where: coverageWhere }),
+    settingPromise,
+    prisma.zone.findMany({
+      where: { shop },
+      orderBy: [{ priority: "asc" }, { name: "asc" }],
+      include: { _count: { select: { postalCodes: true } } },
+    }),
+    prisma.postalCode.count({ where: { shop } }),
+    prisma.postalCode.count({ where: { shop, patternType: { not: "exact" } } }),
+    prisma.deliveryTarget.count({ where: { shop } }),
+    prisma.postalCode.count({ where: { shop, zoneId: null, zone: null } }),
+    prisma.importJob.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+  ]);
   const coveragePage = Math.min(requestedPage("coveragePage"), Math.max(1, Math.ceil(coverageCount / pageSize)));
-
-  const setting =
-    (await prisma.deliverySetting.findUnique({ where: { shop } })) ??
-    (await prisma.deliverySetting.findUnique({ where: { shop: "default" } }));
-
-  const rows = await prisma.postalCode.findMany({
-    where: coverageWhere,
-    orderBy: [{ country: "asc" }, { patternType: "asc" }, { postalCode: "asc" }, { id: "asc" }],
-    skip: (coveragePage - 1) * pageSize,
-    take: pageSize,
-    include: {
-      zoneGroup: { select: { id: true, name: true, priority: true, enabled: true } },
-    },
-  });
-
-  const zones = await prisma.zone.findMany({
-    where: { shop },
-    orderBy: [{ priority: "asc" }, { name: "asc" }],
-    include: { _count: { select: { postalCodes: true } } },
-  });
-
-  const totalPatterns = await prisma.postalCode.count({ where: { shop } });
-  const patternCount = await prisma.postalCode.count({
-    where: { shop, patternType: { not: "exact" } },
-  });
-  const targetCount = await prisma.deliveryTarget.count({ where: { shop } });
   const targetPage = Math.min(requestedPage("targetPage"), Math.max(1, Math.ceil(targetCount / pageSize)));
-  const targets = await prisma.deliveryTarget.findMany({
-    where: { shop },
-    orderBy: [{ priority: "asc" }, { id: "asc" }],
-    skip: (targetPage - 1) * pageSize,
-    take: pageSize,
-  });
-  const unassignedCount = await prisma.postalCode.count({ where: { shop, zoneId: null, zone: null } });
-
-  const recentImports = await prisma.importJob.findMany({
-    where: { shop },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-  });
+  const [rows, targets] = await Promise.all([
+    prisma.postalCode.findMany({
+      where: coverageWhere,
+      orderBy: [{ country: "asc" }, { patternType: "asc" }, { postalCode: "asc" }, { id: "asc" }],
+      skip: (coveragePage - 1) * pageSize,
+      take: pageSize,
+      include: {
+        zoneGroup: { select: { id: true, name: true, priority: true, enabled: true } },
+      },
+    }),
+    prisma.deliveryTarget.findMany({
+      where: { shop },
+      orderBy: [{ priority: "asc" }, { id: "asc" }],
+      skip: (targetPage - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
   let collections: Array<{ id: string; title: string; handle: string }> = [];
   let products: Array<{ id: string; title: string; handle: string }> = [];
   let catalogError = "";
-  try {
+  if (activeTabId === "products") try {
     let collectionCursor: string | null = null;
     let productCursor: string | null = null;
     let loadCollections = true;
@@ -831,14 +831,19 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     requireFeature(access, "zones");
     const zoneId = Number(formData.get("zoneId") ?? 0);
     return prisma.$transaction(async (tx) => {
-      const zone = await tx.zone.findFirst({ where: { id: zoneId, shop }, include: { _count: { select: { postalCodes: true } } } });
+      const zone = await tx.zone.findFirst({ where: { id: zoneId, shop } });
       if (!zone) return { ok: false, message: "Zone not found." } satisfies ActionData;
-      if (!zone.enabled && zone._count.postalCodes > 0) {
-        return { ok: false, message: `Cannot delete disabled zone "${zone.name}" while it contains postal rules: detaching them could make them active again. Edit the zone and reassign or delete its rules first, then delete the empty zone.` } satisfies ActionData;
-      }
-      await tx.postalCode.updateMany({ where: { zoneId, shop }, data: { zoneId: null } });
+      const deletedRules = await tx.postalCode.deleteMany({
+        where: {
+          shop,
+          OR: [
+            { zoneId },
+            { zoneId: null, zone: zone.name },
+          ],
+        },
+      });
       await tx.zone.delete({ where: { id: zoneId } });
-      return { ok: true, message: `Zone "${zone.name}" deleted. Its postal rules were kept without this zone's enabled status or priority.`, intent: "delete_zone", zoneId } satisfies ActionData;
+      return { ok: true, message: `Zone "${zone.name}" and ${deletedRules.count} postal ${deletedRules.count === 1 ? "rule" : "rules"} deleted.`, intent: "delete_zone", zoneId } satisfies ActionData;
     }, { isolationLevel: "Serializable" });
   }
 
@@ -2034,16 +2039,15 @@ export default function DeliverySettingsPage() {
       <fetcher.Form
         method="post"
         onSubmit={(event) => {
-          if ((!zone.enabled && zone._count.postalCodes > 0) || !window.confirm(`Delete zone "${zone.name}"? Its ${zone._count.postalCodes} postal rules will be kept but detached from this zone. They will no longer inherit its enabled status or priority. Reassign or delete the rules first if you do not want them retained.`)) event.preventDefault();
+          if (!window.confirm(`Delete zone "${zone.name}" and its ${zone._count.postalCodes} postal ${zone._count.postalCodes === 1 ? "rule" : "rules"}? This cannot be undone.`)) event.preventDefault();
         }}
       >
         <input type="hidden" name="intent" value="delete_zone" />
         <input type="hidden" name="zoneId" value={zone.id} />
-        <Button submit size="slim" tone="critical" loading={isZoneActionSaving("delete_zone", zone.id)} disabled={!isAdvanced || pageBusy || (!zone.enabled && zone._count.postalCodes > 0)}>
+        <Button submit size="slim" tone="critical" loading={isZoneActionSaving("delete_zone", zone.id)} disabled={!isAdvanced || pageBusy}>
           Delete
         </Button>
       </fetcher.Form>
-      {!zone.enabled && zone._count.postalCodes > 0 ? <Text as="span" tone="subdued">Deletion blocked to prevent reactivating rules. Edit this zone to reassign or delete its rules first.</Text> : null}
     </InlineStack>,
   ]);
   const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -2134,45 +2138,17 @@ export default function DeliverySettingsPage() {
   return (
     <Page
       title="Delivery settings"
-      subtitle="Set coverage first, then refine delivery promises and the shopper experience."
+      subtitle="Manage coverage, timing, and messages."
       titleMetadata={
         <InlineStack gap="200">
           <Badge tone="info">{`${data.totalPatterns} rules`}</Badge>
           <Badge tone={data.zones.length > 0 ? "success" : undefined}>{`${data.zones.length} zones`}</Badge>
-          <Badge>{`${data.patternCount} range/wildcard`}</Badge>
-          <Badge tone={data.targetCount > 0 ? "success" : undefined}>{`${data.targetCount} targets`}</Badge>
-          <Badge tone={isAdvanced ? "success" : "info"}>{`${data.access.planName} plan`}</Badge>
         </InlineStack>
       }
     >
       {editingZone ? <ZoneEditor key={editingZone.id} zone={editingZone} zones={data.zones} deliveryOptions={data.access.features.deliveryOptions} onClose={() => setEditingZone(null)} onDirtyChange={setZoneDirty} /> : null}
       <div className="incode-delivery-settings">
       <BlockStack gap="400">
-        <Card>
-          <BlockStack gap="300">
-            <BlockStack gap="050">
-              <Text as="h2" variant="headingMd">Delivery availability</Text>
-              <Text as="p" tone="subdued">Add one block to show delivery availability, estimated dates, and available services. It automatically uses a logged-in customer&apos;s saved address or asks guests for their ZIP or PIN.</Text>
-            </BlockStack>
-            <div className="incode-storefront-experience is-recommended">
-              <div className="incode-storefront-experience__header">
-                <span className="incode-storefront-experience__icon" aria-hidden="true">&#10003;</span>
-                <div>
-                  <strong>Check delivery availability</strong>
-                  <Badge tone={data.totalPatterns > 0 ? "success" : "attention"}>
-                    {data.totalPatterns > 0 ? "Coverage ready" : "Add coverage first"}
-                  </Badge>
-                </div>
-              </div>
-              <p>One block handles both customers: logged-in customers are checked using their saved address, while guests can enter a ZIP or PIN manually.</p>
-              <InlineStack gap="200" wrap>
-                {data.totalPatterns > 0 ? null : <Button url={tabUrl("coverage")} size="slim">Add coverage</Button>}
-                <Button url={themeEditorUrl} external target="_blank" variant="primary" size="slim">Add delivery availability block</Button>
-              </InlineStack>
-            </div>
-            <Text as="p" tone="subdued">Add this single block from Shopify Admin → Online Store → Themes → Customize. No second delivery block is required.</Text>
-          </BlockStack>
-        </Card>
         <nav className="incode-delivery-settings__tabs" aria-label="Delivery settings sections">
           {SETTINGS_TABS.map((tab) => (
             <Link key={tab.id} to={tabUrl(tab.id)} preventScrollReset aria-current={activeTab.id === tab.id ? "page" : undefined}>
@@ -2212,10 +2188,7 @@ export default function DeliverySettingsPage() {
                     <Text as="h2" variant="headingMd">
                       Zones
                     </Text>
-                    <Text as="p" tone="subdued">
-                      Unlimited zones. Group ZIP codes, ranges, and wildcards.
-                      Lower priority numbers win when rules overlap.
-                    </Text>
+                    <Text as="p" tone="subdued">Group postal rules into zones. Lower numbers apply first.</Text>
                   </BlockStack>
                   <Badge tone="info">{`${data.zones.length} zones`}</Badge>
                 </InlineStack>
@@ -2276,21 +2249,15 @@ export default function DeliverySettingsPage() {
             </> : null}
             {activeTab.id === "products" ? <>
             <div id="targeting" className="incode-section-anchor" />
-            {data.targetCount === 0 ? (
-              <Banner title="Start with one simple rule" tone="info">
-                Choose what the rule matches, set an ETA override only if needed, then save. Leave the advanced conditions closed until you need them.
-              </Banner>
-            ) : null}
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" blockAlign="center" gap="300">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingMd">
-                      Product, collection, vendor, and tag ETA rules
+                      Product rules
                     </Text>
                     <Text as="p" tone="subdued">
-                      Set ETA overrides, exclusions, and add-to-cart policy. Product targets
-                      win over collection, vendor, then tag rules. Lowest priority wins.
+                      Set delivery exceptions for products, collections, vendors, or tags.
                     </Text>
                   </BlockStack>
                   <Badge tone="info">{`${data.targetCount} targets`}</Badge>
@@ -2580,10 +2547,7 @@ export default function DeliverySettingsPage() {
                 {targetCards.length > 0 ? (
                   <div className="incode-targeting__cards">{targetCards}</div>
                 ) : (
-                  <Text as="p" tone="subdued">
-                    No targeting rules yet. Add product, collection, vendor, or tag rules
-                    for custom ETAs, exclusions, or add-to-cart policy.
-                  </Text>
+                  <Text as="p" tone="subdued">No product rules yet.</Text>
                 )}
                 <InlineStack gap="200" blockAlign="center">
                   <Button disabled={data.targetPage <= 1} onClick={() => updateQuery({ targetPage: String(data.targetPage - 1) })}>Previous targets</Button>
@@ -2594,22 +2558,17 @@ export default function DeliverySettingsPage() {
             </Card>
 
             </> : null}
-            {activeTab.id !== "imports" ? <>
+            {activeTab.id !== "imports" && activeTab.id !== "coverage" ? <>
             <div id="behavior" className="incode-section-anchor" />
             <Card>
               <BlockStack gap="400">
                 <InlineStack align="space-between" gap="300" blockAlign="center">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingMd">
-                      {activeTab.id === "coverage" ? "Optional courier and coverage fallback" : activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "optional" ? "Cart protection" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
+                      {activeTab.id === "products" ? "Inventory behavior" : activeTab.id === "optional" ? "Cart protection" : activeTab.id === "messages" ? "Storefront wording" : "Timing defaults"}
                     </Text>
-                    <Text as="p" tone="subdued">
-                      Save applies all settings drafts, including changes made in other tabs. Coverage and product rules are saved separately.
-                    </Text>
+                    <Text as="p" tone="subdued">Saving includes changes from other settings tabs.</Text>
                   </BlockStack>
-                  <Badge tone={settings.courierEnabled ? "success" : "attention"}>
-                    {settings.courierEnabled ? "Courier enabled in draft" : settings.dbFallbackEnabled ? "Coverage fallback enabled in draft" : "Coverage fallback disabled in draft"}
-                  </Badge>
                 </InlineStack>
 
                 <fetcher.Form method="post" onSubmit={() => { submittedSettings.current = { ...settings }; }}>
@@ -2620,13 +2579,6 @@ export default function DeliverySettingsPage() {
                     <input key={key} type="hidden" name={key} value={String(value)} />
                   ))}
                   <FormLayout>
-                    {activeTab.id === "coverage" ? <>
-                      <Text as="p" tone="subdued">Courier lookup is optional and requires server-configured Shiprocket credentials. Saved coverage rules can be used when courier lookup is disabled or fails. These controls do not enable server-side checkout validation.</Text>
-                      <Checkbox label="Enable courier lookup" checked={settings.courierEnabled} disabled={!isAdvanced || !data.courierIntegrationAvailable} onChange={(value) => setSettings((current) => ({ ...current, courierEnabled: value }))} helpText={data.courierIntegrationAvailable ? "Credentials are configured; service availability is not verified here." : "Unavailable: server credentials have not been configured."} />
-                      <Checkbox label="Use saved coverage rules as fallback" checked={settings.dbFallbackEnabled} onChange={(value) => setSettings((current) => ({ ...current, dbFallbackEnabled: value }))} helpText="Shipping is available only when a matching postal code rule or delivery zone exists. Default transit days alone do not establish serviceability." />
-                      <TextField label="Courier timeout (milliseconds)" name="courierTimeoutMs" type="number" min={500} max={15000} value={settings.courierTimeoutMs} onChange={(value) => setSettings((current) => ({ ...current, courierTimeoutMs: value }))} autoComplete="off" />
-                      <TextField label="Courier retries" name="retryCount" type="number" min={0} max={3} value={settings.retryCount} onChange={(value) => setSettings((current) => ({ ...current, retryCount: value }))} autoComplete="off" />
-                    </> : null}
                     {activeTab.id === "timing" ? <>
                     <FormLayout.Group condensed>
                       <Select
@@ -2758,10 +2710,8 @@ export default function DeliverySettingsPage() {
                     <Card>
                       <BlockStack gap="300">
                         <BlockStack gap="100">
-                          <Text as="h3" variant="headingMd">General ETA message</Text>
-                          <Text as="p" tone="subdued">
-                            Dates are calculated from the real postal-code rule, cutoff, timezone, weekends, and holidays.
-                          </Text>
+                          <Text as="h3" variant="headingMd">Delivery message</Text>
+                          <Text as="p" tone="subdued">Shown when delivery is available.</Text>
                         </BlockStack>
                         <FormLayout.Group condensed>
                           <Select
@@ -2875,9 +2825,7 @@ export default function DeliverySettingsPage() {
                             </div>
                           ))}
                         </div>
-                        <Text as="p" tone="subdued">
-                          Sample US 10001 uses 3 transit days and does not apply cutoff, timezone, weekends, or holidays. The storefront calculates dates from the shopper&apos;s actual delivery rule and business calendar.
-                        </Text>
+                        <Text as="p" tone="subdued">Sample only. Storefront dates use the matching rule.</Text>
                       </BlockStack>
                     </Card>
 
@@ -2901,17 +2849,7 @@ export default function DeliverySettingsPage() {
                   </Text>
                   <Button onClick={downloadCsvTemplate}>Download CSV template</Button>
                 </InlineStack>
-                <Text as="p" tone="subdued">
-                  CSV columns: country, postal_code, delivery_days,
-                  serviceable, cod_available, delivery_charge, currency, city,
-                  state, zone, same_day, next_day, express.
-                  {" "}
-                  Up to <strong>100,000 rows per import.</strong>{" "}
-                  <code>postal_code</code> accepts exact codes, ranges
-                  (<code>10000-10999</code>), and wildcards (<code>123*</code>).
-                   The optional <code>zone</code> column auto-creates zones.
-                   Download the official blank template, add one delivery rule per row, and keep the column names unchanged.
-                 </Text>
+                <Text as="p" tone="subdued">Upload up to 100,000 rules. Use the template for codes, ranges, wildcards, and zones.</Text>
                 <DropZone
                   accept=".csv,text/csv"
                   allowMultiple={false}
@@ -2951,9 +2889,7 @@ export default function DeliverySettingsPage() {
                 <Text as="h2" variant="headingMd">
                   Google Sheet sync
                 </Text>
-                <Text as="p" tone="subdued">
-                  Paste a published Google Sheets CSV URL, then sync rows using the same import validation as CSV upload.
-                </Text>
+                <Text as="p" tone="subdued">Paste a published Google Sheets CSV link.</Text>
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="save_google_sheet" />
                   <FormLayout>
@@ -3045,10 +2981,6 @@ export default function DeliverySettingsPage() {
                     </Button>
                   ) : null}
                 </InlineStack>
-                <Text as="p" tone="subdued">
-                  Accepts exact postal codes, comma-separated postal codes, a range like
-                  10000-10999, or a wildcard prefix like 123* (or SW1A*). Unlimited rules.
-                </Text>
                 <fetcher.Form method="post">
                   <input type="hidden" name="intent" value="upsert_single_postal_code" />
                   {editingPostalRule ? <input type="hidden" name="postalRuleId" value={editingPostalRule.id} /> : null}
@@ -3056,7 +2988,6 @@ export default function DeliverySettingsPage() {
                   <FormLayout>
                     <div className="incode-postal-rule-form__section-heading">
                       <Text as="h3" variant="headingSm">Coverage basics</Text>
-                      <Text as="p" tone="subdued">Define where you deliver and the standard delivery promise.</Text>
                     </div>
                     <FormLayout.Group condensed>
                       <Select
@@ -3085,11 +3016,11 @@ export default function DeliverySettingsPage() {
                         requiredIndicator
                         helpText={
                           postalCodeForm.postalCode.includes("*")
-                            ? "Wildcard pattern detected."
+                            ? "Wildcard detected."
                             : postalCodeForm.postalCode.includes("-") &&
                                 !/^\d{5}-\d{4}$/.test(postalCodeForm.postalCode.trim())
-                              ? "Hyphen detected — will be saved as a range if both ends are valid."
-                            : "Exact code, comma-separated codes, range, or wildcard ending in *."
+                              ? "Range detected."
+                            : "Enter codes, a range, or a wildcard."
                         }
                       />
                       <TextField
@@ -3218,7 +3149,6 @@ export default function DeliverySettingsPage() {
 
                     <div className="incode-postal-rule-form__section-heading">
                       <Text as="h3" variant="headingSm">Delivery options</Text>
-                      <Text as="p" tone="subdued">Choose the services shoppers can see for this coverage rule.</Text>
                     </div>
                     <InlineStack gap="400" wrap>
                       <Checkbox label="COD" checked={postalCodeForm.codAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, codAvailable: checked }))} />
@@ -3239,11 +3169,6 @@ export default function DeliverySettingsPage() {
                       <Banner tone={fetcher.data.ok ? "success" : "critical"} title={fetcher.data.ok ? "Postal rule saved" : "Postal rule not saved"}>
                         <BlockStack gap="100">
                           <Text as="p">{fetcher.data.message}</Text>
-                          {fetcher.data.ok && fetcher.data.savedRules?.length ? (
-                            <Text as="p" tone="subdued">
-                              Saved under the coverage rules table below: {fetcher.data.savedRules.join(", ")}.
-                            </Text>
-                          ) : null}
                         </BlockStack>
                       </Banner>
                     ) : null}
@@ -3274,7 +3199,7 @@ export default function DeliverySettingsPage() {
                       placeholder={
                         "US,10001,2,true,true,New York,New York,metro,8,USD,false,true,true\nUS,10000-10999,3,true,false,,,metro,10,USD,false,false,false\nIN,4*,2,true,true,Rural MH,,rural,40,INR,false,true,false"
                       }
-                      helpText="One row per line: country, postal_code, delivery_days, serviceable, cod_available, city, state, zone, delivery_charge, currency, same_day, next_day, express. postal_code may be exact, a range (10000-10999), or a wildcard (4*). Max 1,000 rows."
+                      helpText="Paste one CSV row per line. Maximum 1,000 rows."
                       requiredIndicator
                     />
                     <Button submit variant="primary" loading={isIntentSaving("bulk_manual_rows")} disabled={pageBusy}>
@@ -3292,14 +3217,10 @@ export default function DeliverySettingsPage() {
                 <InlineStack align="space-between" blockAlign="center" gap="300">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingMd">Coverage rules</Text>
-                    <Text as="p" tone="subdued">Browse postal rules by delivery zone. Edit or remove any rule directly.</Text>
+                    <Text as="p" tone="subdued">Edit or remove postal rules.</Text>
                   </BlockStack>
                   <Badge tone="info">{`${visibleRules.length} shown`}</Badge>
                 </InlineStack>
-                <Text as="p" tone="subdued">
-                  Showing {visibleRules.length} of {data.coverageCount} matching rules ({data.totalPatterns} total)
-                  ({data.patternCount} range/wildcard).
-                </Text>
                 <InlineStack gap="200" blockAlign="end">
                   <TextField label="Search all coverage rules" value={coverageSearchInput} onChange={setCoverageSearchInput} autoComplete="off" helpText="Search postal pattern, country, city, state, or zone across all records." />
                   <Button onClick={() => updateQuery({ coverageSearch: coverageSearchInput, coveragePage: "1" })}>Search</Button>
@@ -3352,7 +3273,6 @@ export default function DeliverySettingsPage() {
                     <Text as="h2" variant="headingMd">Live rule preview</Text>
                     <Badge tone="info">Unsaved draft</Badge>
                   </InlineStack>
-                  <Text as="p" tone="subdued">This is how the current rule will be interpreted before you save it.</Text>
                   <div className="incode-rule-preview" aria-live="polite">
                     <div className="incode-rule-preview__title">{targetForm.name || "Unnamed rule"}</div>
                     <div className="incode-rule-preview__match">
@@ -3366,7 +3286,7 @@ export default function DeliverySettingsPage() {
                       <span>{targetForm.requireValidPin ? "PIN required" : "PIN optional"}</span>
                     </div>
                   </div>
-                  <Text as="p" tone="subdued" variant="bodySm">Product rules override the matching postal rule only when this target matches.</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">Applies when this target matches.</Text>
                 </BlockStack>
               </Card>
             ) : null}
@@ -3374,12 +3294,10 @@ export default function DeliverySettingsPage() {
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h2" variant="headingMd">Live delivery preview</Text>
-                  <Badge tone="success">Updates as you edit</Badge>
+                  <Text as="h2" variant="headingMd">Delivery preview</Text>
+                  <Badge tone="info">Preview</Badge>
                 </InlineStack>
-                <Text as="p" tone="subdued">
-                  Illustrative dates use US 10001 and 3 transit days. This is not a live delivery check.
-                </Text>
+                <Text as="p" tone="subdued">Sample dates only.</Text>
                 <div className="incode-store-preview">
                   <div className="incode-store-preview__product">
                     <div className="incode-store-preview__image" aria-hidden="true">ETA</div>
@@ -3460,8 +3378,8 @@ export default function DeliverySettingsPage() {
             {activeTab.id === "optional" ? <>
             <div id="countdown" className="incode-section-anchor"><Card>
               <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">Cutoff countdown display</Text>
-                <Text as="p" tone="subdued">Choose who sees the countdown here. Shopify still requires the app block to be added and published on each storefront surface you select.</Text>
+                <Text as="h2" variant="headingMd">Cutoff countdown</Text>
+                <Text as="p" tone="subdued">Choose where the countdown appears.</Text>
                 <countdownFetcher.Form method="post">
                   <input type="hidden" name="intent" value="save_countdown" />
                   <input type="hidden" name="countdownEnabled" value={String(countdownEnabled)} />
@@ -3569,23 +3487,10 @@ export default function DeliverySettingsPage() {
                   <span><strong>35</strong><small>Minutes</small></span>
                   <span><strong>40</strong><small>Seconds</small></span>
                 </div>
-                <Text as="p" tone="subdued" variant="bodySm">Setup: save these settings, open the Theme Editor, add the Check delivery availability block to the selected templates, then publish the theme.</Text>
               </BlockStack>
             </Card></div>
             </> : null}
 
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">
-                  Next steps
-                </Text>
-                <Text as="p" tone="subdued">
-                  {activeTab.id === "coverage" ? "Create zones if needed, then add a rule below. For larger lists, use Imports & Sync." : "Save your settings drafts, then test a real postal code on your storefront. Sample previews do not confirm serviceability."}
-                </Text>
-                <Button url={tabUrl(activeTab.id === "coverage" ? "imports" : "coverage")}>{activeTab.id === "coverage" ? "Import coverage in bulk" : "Review coverage"}</Button>
-                <Button url="/app/storefront-customization">Customize storefront appearance</Button>
-              </BlockStack>
-            </Card>
           </BlockStack>
         </Layout.Section>
       </Layout>

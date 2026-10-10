@@ -37,6 +37,7 @@ export async function getPartnerSubscription(admin: AdminClient): Promise<Partne
   const { organizationId, accessToken, appId } = partnerConfig();
   const response = await fetch(`https://partners.shopify.com/${organizationId}/api/2026-07/graphql.json`, {
     method: "POST",
+    signal: AbortSignal.timeout(8_000),
     headers: {
       "Content-Type": "application/json",
       "X-Shopify-Access-Token": accessToken,

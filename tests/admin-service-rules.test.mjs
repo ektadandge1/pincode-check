@@ -22,11 +22,16 @@ function fixture({ catalog = { product: [{ label: "Alpha", value: "10" }] }, zon
       count: async () => count,
       create: async (args) => writes.push(args),
       update: async (args) => writes.push(args),
+      delete: async (args) => writes.push({ operation: "delete", args }),
+    },
+    fulfillmentLocationRule: {
+      updateMany: async (args) => writes.push({ operation: "location-update", args }),
     },
     zone: {
       findFirst: async ({ where }) => where.shop === shop && where.id === zone?.id && where.enabled ? zone : null,
       count: async ({ where }) => zone && where.shop === shop && where.enabled ? where.id.in.filter((value) => value === zone.id).length : 0,
     },
+    $transaction: async (callback) => callback(prisma),
   };
   const mocks = {
     "../db.server": prisma,
@@ -124,4 +129,23 @@ test("failed service-rule actions preserve unsaved form state", () => {
   const f = fixture();
   assert.equal(f.shouldRevalidate({ actionResult: { ok: false, message: "Invalid" }, defaultShouldRevalidate: true }), false);
   assert.equal(f.shouldRevalidate({ actionResult: { ok: true, message: "Saved" }, defaultShouldRevalidate: true }), true);
+});
+
+test("deleting a service rule clears only matching location assignments", async () => {
+  const existing = { id: 9, name: "Assigned rule", enabled: true };
+  const f = fixture({ existing });
+  const result = await f.submit({ intent: "delete", id: "9" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(f.writes, [
+    {
+      operation: "location-update",
+      args: { where: { shop, localDeliveryServiceRuleId: 9 }, data: { localDeliveryServiceRuleId: null } },
+    },
+    {
+      operation: "location-update",
+      args: { where: { shop, pickupServiceRuleId: 9 }, data: { pickupServiceRuleId: null } },
+    },
+    { operation: "delete", args: { where: { id: 9 } } },
+  ]);
+  assert.deepEqual(f.invalidated, [shop]);
 });

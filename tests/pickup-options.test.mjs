@@ -10,7 +10,7 @@ const rule = (number, extra = {}) => ({ shopifyLocationId: id(number), serviceTa
 const item = (number, quantity = 1, extra = {}) => ({ variantId: String(number), productId: `gid://shopify/Product/${number}`, quantity, ...extra });
 
 function fixture({ rules = [rule(1), rule(2)], levels, truncated = false, locationErrors = false, exact = null, patterns = [], active = true,
-  online = true, nodeActive = active, nodeOnline = online, access = true, noAdmin = false } = {}) {
+  online = true, nodeActive = active, nodeOnline = online, access = true, noAdmin = false, serviceRules = [] } = {}) {
   const calls = [];
   const admin = { graphql: async (query, options) => {
     calls.push({ query, variables: options.variables });
@@ -35,6 +35,7 @@ function fixture({ rules = [rule(1), rule(2)], levels, truncated = false, locati
   } };
   const prisma = {
     fulfillmentLocationRule: { findMany: async (query) => { assert.deepEqual(query.where, { shop, enabled: true, pickupEnabled: true }); assert.equal(query.take, 101); return rules; } },
+    serviceAvailabilityRule: { findMany: async () => serviceRules },
     postalCode: { findFirst: async () => exact, findMany: async (query) => { assert.equal(query.take, 2001); return patterns; } },
     deliverySetting: { findUnique: async () => ({ timeZone: "UTC" }) },
   };
@@ -108,6 +109,18 @@ test("pickup uses its own location audience", async () => {
   const restricted = fixture({ rules: [rule(1, { serviceTargetMode: "all", pickupTargetMode: "product", pickupTargetValuesCsv: "2" })] });
   assert.deepEqual((await restricted.get({ items: [item(1)] })).pickup_locations, []);
   assert.equal((await restricted.get({ items: [item(2)] })).pickup_locations.length, 1);
+});
+
+test("pickup locations enforce their assigned service rule for every item", async () => {
+  const serviceRules = [{
+    id: 7, shop, name: "Selected products", targetKind: "product", targetValue: "2",
+    shippingAvailable: true, localDeliveryAvailable: true, pickupAvailable: true,
+    enabled: true, priority: 1,
+  }];
+  const assigned = fixture({ rules: [rule(1, { pickupServiceRuleId: 7 })], serviceRules });
+  assert.deepEqual((await assigned.get({ items: [item(1)] })).pickup_locations, []);
+  assert.equal((await assigned.get({ items: [item(2)] })).pickup_locations.length, 1);
+  assert.deepEqual((await fixture({ rules: [rule(1, { pickupServiceRuleId: 999 })], serviceRules }).get({ items: [item(2)] })).pickup_locations, []);
 });
 
 test("zone targeting needs valid postal context and real enabled shop-owned zone matching", async () => {

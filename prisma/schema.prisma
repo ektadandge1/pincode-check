@@ -31,6 +31,8 @@ model Session {
   emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+
+  @@index([shop, isOnline])
 }
 
 model Zone {
@@ -75,6 +77,7 @@ model PostalCode {
 
   @@unique([shop, country, postalCode])
   @@index([shop, country, patternType])
+  @@index([shop, zoneId])
 }
 
 model DeliverySetting {
@@ -200,6 +203,9 @@ model ServiceAvailabilityRule {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
+  localDeliveryLocations FulfillmentLocationRule[] @relation("LocalDeliveryServiceRule")
+  pickupLocations        FulfillmentLocationRule[] @relation("PickupServiceRule")
+
   @@unique([shop, name])
   @@index([shop, targetKind, targetValue])
   @@index([shop, enabled, priority])
@@ -230,14 +236,21 @@ model FulfillmentLocationRule {
   localDeliveryTargetValuesCsv String  @default("")
   pickupTargetMode            String   @default("all")
   pickupTargetValuesCsv       String   @default("")
+  localDeliveryServiceRuleId  Int?
+  pickupServiceRuleId         Int?
   // Legacy shared targeting columns retained for data compatibility.
   serviceTargetMode           String   @default("all")
   serviceTargetValuesCsv      String   @default("")
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
 
+  localDeliveryServiceRule ServiceAvailabilityRule? @relation("LocalDeliveryServiceRule", fields: [localDeliveryServiceRuleId], references: [id], onDelete: SetNull)
+  pickupServiceRule        ServiceAvailabilityRule? @relation("PickupServiceRule", fields: [pickupServiceRuleId], references: [id], onDelete: SetNull)
+
   @@unique([shop, shopifyLocationId])
   @@index([shop, enabled, priority])
+  @@index([localDeliveryServiceRuleId])
+  @@index([pickupServiceRuleId])
 }
 
 model ShippingMethodRule {
@@ -305,6 +318,7 @@ model PostalCodeSearchEvent {
 
   @@index([shop, createdAt])
   @@index([shop, country, postalCode])
+  @@index([shop, available, createdAt])
 }
 
 model HeadlessApiToken {

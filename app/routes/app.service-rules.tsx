@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
-import { useEffect, useMemo, useState } from "react";
+import { Await, Form, useActionData, useLoaderData, useNavigation } from "react-router";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Autocomplete,
   Badge,
@@ -25,7 +25,36 @@ import { loadShopifyTargetSuggestions, loadShopifyTargetSuggestionsForKind, type
 import { MAX_SERVICE_AVAILABILITY_RULES, MAX_TARGET_VALUES_PER_RULE, normalizeTargetKind, normalizeTargetValue, serializeTargetValues } from "../utils/targeting.server";
 
 type ActionData = { ok: boolean; message: string };
+type CatalogResult = Awaited<ReturnType<typeof loadShopifyTargetSuggestions>> extends infer Suggestions
+  ? { suggestions: Suggestions; error: string | null }
+  : never;
 const MAX_RULE_TARGETS = 100;
+const catalogCache = new Map<string, { expiresAt: number; value?: CatalogResult; pending?: Promise<CatalogResult> }>();
+
+function loadCatalogSuggestions(shop: string, admin: Parameters<typeof loadShopifyTargetSuggestions>[0]): Promise<CatalogResult> {
+  const cached = catalogCache.get(shop);
+  if (cached?.value && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+  if (cached?.pending) return cached.pending;
+  if (!cached && catalogCache.size >= 500) {
+    const now = Date.now();
+    for (const [key, entry] of catalogCache) {
+      if (!entry.pending && entry.expiresAt <= now) catalogCache.delete(key);
+    }
+    if (catalogCache.size >= 500) catalogCache.delete(catalogCache.keys().next().value as string);
+  }
+  const pending = loadShopifyTargetSuggestions(admin)
+    .then((suggestions) => ({ suggestions, error: null }))
+    .catch((error: unknown) => ({
+      suggestions: { product: [], collection: [], vendor: [], tag: [] },
+      error: error instanceof Error ? error.message : "Unable to load Shopify catalog suggestions.",
+    }))
+    .then((value) => {
+      catalogCache.set(shop, { value, expiresAt: Date.now() + 60_000 });
+      return value;
+    });
+  catalogCache.set(shop, { expiresAt: 0, pending });
+  return pending;
+}
 
 function storedTargetValues(value: string): string[] {
   const raw = String(value ?? "").trim();
@@ -45,8 +74,9 @@ function parseBool(value: FormDataEntryValue | null): boolean {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { admin, session } = await requireActiveBilling(request);
-  const access = await resolvePlanAccess({ shop: session.shop, admin });
-  const [rules, zones, catalogResult] = await Promise.all([
+  const catalogResult = loadCatalogSuggestions(session.shop, admin);
+  const [access, rules, zones] = await Promise.all([
+    resolvePlanAccess({ shop: session.shop, admin }),
     prisma.serviceAvailabilityRule.findMany({
       where: { shop: session.shop },
       orderBy: [{ priority: "asc" }, { id: "asc" }],
@@ -57,9 +87,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderBy: [{ priority: "asc" }, { name: "asc" }],
       select: { id: true, name: true, country: true },
     }),
-    loadShopifyTargetSuggestions(admin)
-      .then((suggestions) => ({ suggestions, error: null }))
-      .catch((error: unknown) => ({ suggestions: { product: [], collection: [], vendor: [], tag: [] }, error: error instanceof Error ? error.message : "Unable to load Shopify catalog suggestions." })),
   ]);
   if (rules.length > MAX_SERVICE_AVAILABILITY_RULES) throw new Error("Service availability rules exceed the supported limit");
   const editParam = new URL(request.url).searchParams.get("edit");
@@ -70,11 +97,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     rules,
     editingRule,
     editNotFound: editParam !== null && !editingRule,
-    targetSuggestions: {
-      ...catalogResult.suggestions,
-      zone: zones.map((zone) => ({ label: `${zone.name}${zone.country ? ` · ${zone.country}` : ""}`, value: String(zone.id) })),
-    },
-    catalogError: catalogResult.error,
+    zoneSuggestions: zones.map((zone) => ({ label: `${zone.name}${zone.country ? ` · ${zone.country}` : ""}`, value: String(zone.id) })),
+    catalogResult,
   };
 }
 
@@ -94,7 +118,17 @@ export async function action({ request }: ActionFunctionArgs) {
     const rule = await prisma.serviceAvailabilityRule.findFirst({ where: { id, shop: session.shop } });
     if (!rule) return { ok: false, message: "Service rule not found." } satisfies ActionData;
     if (intent === "delete") {
-      await prisma.serviceAvailabilityRule.delete({ where: { id } });
+      await prisma.$transaction(async (tx) => {
+        await tx.fulfillmentLocationRule.updateMany({
+          where: { shop: session.shop, localDeliveryServiceRuleId: id },
+          data: { localDeliveryServiceRuleId: null },
+        });
+        await tx.fulfillmentLocationRule.updateMany({
+          where: { shop: session.shop, pickupServiceRuleId: id },
+          data: { pickupServiceRuleId: null },
+        });
+        await tx.serviceAvailabilityRule.delete({ where: { id } });
+      });
       clearDeliveryCheckCaches(session.shop);
       return { ok: true, message: `Service rule "${rule.name}" deleted.` } satisfies ActionData;
     }
@@ -193,8 +227,19 @@ const SERVICE_META = [
   { key: "pickupAvailable", title: "Store pickup", desc: "Location + date pickup", icon: "🏬" },
 ] as const;
 
-export default function ServiceRulesPage() {
-  const { access, rules, editingRule, editNotFound, targetSuggestions, catalogError } = useLoaderData<typeof loader>();
+function ServiceRulesContent({
+  data,
+  catalogResult,
+}: {
+  data: Awaited<ReturnType<typeof loader>>;
+  catalogResult: CatalogResult;
+}) {
+  const { access, rules, editingRule, editNotFound, zoneSuggestions } = data;
+  const targetSuggestions = useMemo(
+    () => ({ ...catalogResult.suggestions, zone: zoneSuggestions }),
+    [catalogResult.suggestions, zoneSuggestions],
+  );
+  const catalogError = catalogResult.error;
   const actionData = useActionData<ActionData>();
   const navigation = useNavigation();
   const [form, setForm] = useState(EMPTY_FORM);
@@ -218,10 +263,6 @@ export default function ServiceRulesPage() {
   const pendingId = Number(navigation.formData?.get("id") ?? 0);
   const savePending = pendingIntent === "save";
   const enabledRules = rules.filter((rule) => rule.enabled).length;
-  const restrictedServices = rules.reduce((total, rule) => total
-    + Number(!rule.shippingAvailable)
-    + Number(!rule.localDeliveryAvailable)
-    + Number(!rule.pickupAvailable), 0);
   const suggestions = (targetSuggestions[form.targetKind as keyof typeof targetSuggestions] ?? []) as TargetSuggestion[];
   const normalizedTargetSearch = targetSearch.trim().toLowerCase();
   const targetOptions = suggestions
@@ -244,23 +285,14 @@ export default function ServiceRulesPage() {
   return (
     <Page
       title="Service availability rules"
-      subtitle="ETADeliverPickup premium control for Shipping, Local delivery and Store pickup."
+      subtitle="Choose which services appear for selected items."
       backAction={{ content: "Delivery & pickup", url: "/app/locations" }}
       titleMetadata={<Badge tone={access.features.targeting ? "success" : "info"}>{access.features.targeting ? "Standard" : "Subscription required"}</Badge>}
     >
       <BlockStack gap="500">
         {actionData ? <Banner tone={actionData.ok ? "success" : "critical"} title={actionData.ok ? "Service rules updated" : "Could not update service rules"}>{actionData.message}</Banner> : null}
-        {editNotFound ? <Banner tone="warning" title="Service rule not found" action={{ content: "Clear edit link", url: "/app/service-rules" }}>The requested rule is unavailable or does not belong to this shop. No changes were made.</Banner> : null}
-        {catalogError ? <Banner tone="critical" title="Shopify target suggestions are unavailable">{catalogError} Refresh the page before creating a rule.</Banner> : null}
-        <Banner tone="info" title="Dates stay untouched">
-          These rules only show or hide Shipping, Local delivery and Pickup. Processing days, transit days, messages and PIN protection stay under Delivery settings → Product rules.
-        </Banner>
-
-        <div className="service-metrics">
-          <Card><div className="service-metric"><span className="service-metric__icon">📦</span><div><Text as="p" variant="heading2xl" fontWeight="bold">{rules.length}</Text><Text as="p" tone="subdued" variant="bodySm">Total rules</Text></div><Badge>{rules.length ? "Configured" : "Empty"}</Badge></div></Card>
-          <Card><div className="service-metric"><span className="service-metric__icon">✅</span><div><Text as="p" variant="heading2xl" fontWeight="bold">{enabledRules}</Text><Text as="p" tone="subdued" variant="bodySm">Enabled rules</Text></div><Badge tone="success">Live</Badge></div></Card>
-          <Card><div className="service-metric"><span className="service-metric__icon">🚫</span><div><Text as="p" variant="heading2xl" fontWeight="bold">{restrictedServices}</Text><Text as="p" tone="subdued" variant="bodySm">Blocked service choices</Text></div><Badge tone={restrictedServices ? "critical" : undefined}>Guarded</Badge></div></Card>
-        </div>
+        {editNotFound ? <Banner tone="warning" title="Service rule not found" action={{ content: "Clear edit link", url: "/app/service-rules" }}>This rule is unavailable.</Banner> : null}
+        {catalogError ? <Banner tone="critical" title="Product choices unavailable">Refresh before creating a rule.</Banner> : null}
 
         <Layout>
           <Layout.Section>
@@ -273,14 +305,13 @@ export default function ServiceRulesPage() {
                     <InlineStack align="space-between" blockAlign="center">
                       <BlockStack gap="100">
                         <Text as="h2" variant="headingLg">{editingRule ? `Edit ${editingRule.name}` : "Create service rule"}</Text>
-                        <Text as="p" tone="subdued">Match one catalog group, then choose allowed services. Preview updates live.</Text>
+                        <Text as="p" tone="subdued">Choose targets and their available services.</Text>
                       </BlockStack>
-                      <Badge tone="info">{`Priority ${form.priority || "100"}`}</Badge>
                     </InlineStack>
                     <FormLayout>
                       <FormLayout.Group>
                         <TextField label="Rule name" name="name" value={form.name} onChange={(name) => setForm((current) => ({ ...current, name }))} maxLength={60} autoComplete="off" placeholder="Bulky furniture — pickup only" />
-                        <TextField label="Priority" name="priority" type="number" min={0} max={9999} value={form.priority} onChange={(priority) => setForm((current) => ({ ...current, priority }))} helpText="Lower wins between rules of the same target type." autoComplete="off" />
+                        <TextField label="Priority" name="priority" type="number" min={0} max={9999} value={form.priority} onChange={(priority) => setForm((current) => ({ ...current, priority }))} helpText="Lower numbers apply first." autoComplete="off" />
                       </FormLayout.Group>
                       <FormLayout.Group>
                         <Select
@@ -311,7 +342,7 @@ export default function ServiceRulesPage() {
                                 placeholder={`Search ${form.targetKind === "zone" ? "delivery zones" : `${form.targetKind}s`}`}
                                 autoComplete="off"
                                 requiredIndicator
-                                helpText={`Select up to ${MAX_RULE_TARGETS}. The rule applies when any selected target matches.`}
+                                helpText={`Select up to ${MAX_RULE_TARGETS} targets.`}
                               />
                             }
                           />
@@ -347,9 +378,9 @@ export default function ServiceRulesPage() {
                       })}
                     </div>
                     <div className="service-preview">
-                      <Text as="p" variant="bodySm" tone="subdued">Shopper will see:</Text>
+                      <Text as="p" variant="bodySm" tone="subdued">Available services</Text>
                       <InlineStack gap="200">
-                        {enabledCount === 0 ? <Badge tone="critical">No services — shoppers see unavailable</Badge> : null}
+                        {enabledCount === 0 ? <Badge tone="critical">No services available</Badge> : null}
                         {form.shippingAvailable ? <Badge tone="success">Shipping</Badge> : null}
                         {form.localDeliveryAvailable ? <Badge tone="success">Local delivery</Badge> : null}
                         {form.pickupAvailable ? <Badge tone="success">Store pickup</Badge> : null}
@@ -367,7 +398,7 @@ export default function ServiceRulesPage() {
                 <InlineStack align="space-between" blockAlign="end" gap="300" wrap>
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingLg">Configured service rules</Text>
-                    <Text as="p" tone="subdued">The most specific target type wins, then the lower priority number. Toggle instantly without deleting.</Text>
+                    <Text as="p" tone="subdued">More specific rules apply first.</Text>
                   </BlockStack>
                   <InlineStack gap="200" blockAlign="center">
                     <Badge tone={enabledRules ? "success" : "info"}>{`${enabledRules} enabled`}</Badge>
@@ -397,7 +428,7 @@ export default function ServiceRulesPage() {
                 )) : (
                   <Card><BlockStack gap="200" inlineAlign="center">
                     <Text as="h3" variant="headingMd">{rules.length ? "No rules match search" : "No service rules yet"}</Text>
-                    <Text as="p" tone="subdued">{rules.length ? "Clear search to see all rules." : "Matching products currently use global and location defaults. Create your first premium rule above."}</Text>
+                    <Text as="p" tone="subdued">{rules.length ? "Clear the search." : "Create a rule above to limit services."}</Text>
                     {rules.length ? <Button onClick={() => setSearch("")}>Clear search</Button> : null}
                   </BlockStack></Card>
                 )}
@@ -409,21 +440,43 @@ export default function ServiceRulesPage() {
             <BlockStack gap="400">
               <Card><BlockStack gap="200">
                 <Text as="h2" variant="headingMd">How priority works</Text>
-                <Text as="p" tone="subdued">Specificity order is Product, Collection, Vendor, Tag, then Zone. Between rules of the same type, the lower priority number wins.</Text>
-              </BlockStack></Card>
-              <Card><BlockStack gap="200">
-                <Text as="h2" variant="headingMd">Real-store test</Text>
-                <Text as="p" tone="subdued">1. Create rule for one product. 2. Open product page. 3. Confirm only allowed tabs appear. 4. Remove rule and confirm tabs return.</Text>
-                <Button url="/app/additional" fullWidth>Open setup guide</Button>
-              </BlockStack></Card>
-              <Card><BlockStack gap="200">
-                <Text as="h2" variant="headingMd">Safety</Text>
-                <Text as="p" tone="subdued">Toggle disables instantly, delete is permanent with confirm. Cache clears automatically on every change.</Text>
+                <Text as="p" tone="subdued">Product rules apply before collection, vendor, tag, and zone rules. Lower numbers apply first.</Text>
               </BlockStack></Card>
             </BlockStack>
           </Layout.Section>
         </Layout>
       </BlockStack>
     </Page>
+  );
+}
+
+function ServiceRulesLoading() {
+  return (
+    <Page
+      title="Service availability rules"
+      subtitle="Choose which services appear for selected items."
+      backAction={{ content: "Delivery & pickup", url: "/app/locations" }}
+    >
+      <Card>
+        <div className="incode-admin-route-skeleton" role="status" aria-live="polite">
+          <span aria-hidden="true" />
+          <BlockStack gap="100">
+            <Text as="h2" variant="headingMd">Loading service rules</Text>
+            <Text as="p" tone="subdued">Loading catalog choices...</Text>
+          </BlockStack>
+        </div>
+      </Card>
+    </Page>
+  );
+}
+
+export default function ServiceRulesPage() {
+  const data = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<ServiceRulesLoading />}>
+      <Await resolve={data.catalogResult}>
+        {(catalogResult) => <ServiceRulesContent data={data} catalogResult={catalogResult} />}
+      </Await>
+    </Suspense>
   );
 }

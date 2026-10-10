@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { getPartnerSubscription } from "../app/services/partner-billing.server.ts";
 import { shopifyPricingUrl } from "../app/utils/shopify-pricing-url.ts";
+import { injectedServer } from "./helpers/injected-server.mjs";
 
 async function withPartnerFixture(subscription, callback) {
   const names = ["SHOPIFY_PARTNER_ORG_ID", "SHOPIFY_PARTNER_API_ACCESS_TOKEN", "SHOPIFY_APP_GID"];
@@ -51,6 +52,37 @@ test("missing active subscription remains locked", async () => {
   await withPartnerFixture(null, async ({ admin }) => {
     assert.equal(await getPartnerSubscription(admin), null);
   });
+});
+
+test("billing status is cached and concurrent checks share one Partner API request", async () => {
+  let checks = 0;
+  const load = injectedServer({
+    "app/shopify.server.ts": { authenticate: { admin: async () => {} }, STANDARD_PLAN: "Standard" },
+    "app/services/billing-config.server.ts": { isBillingRequired: () => true },
+    "app/services/partner-billing.server.ts": {
+      getPartnerSubscription: async () => {
+        checks += 1;
+        await new Promise((resolve) => setImmediate(resolve));
+        return { billingPeriod: "MONTHLY" };
+      },
+    },
+  });
+  const billing = load("app/services/billing.server.ts");
+  const admin = {};
+  const shop = "billing-cache.myshopify.com";
+
+  assert.deepEqual(await Promise.all([
+    billing.getCachedBillingStatus({ shop, admin }),
+    billing.getCachedBillingStatus({ shop, admin }),
+    billing.getCachedBillingStatus({ shop, admin }),
+  ]), [true, true, true]);
+  assert.equal(checks, 1);
+  assert.equal(await billing.getCachedBillingStatus({ shop, admin }), true);
+  assert.equal(checks, 1);
+
+  billing.clearBillingStatusCache(shop);
+  assert.equal(await billing.getCachedBillingStatus({ shop, admin }), true);
+  assert.equal(checks, 2);
 });
 
 test("pricing uses Shopify's supported hosted selection flow", () => {

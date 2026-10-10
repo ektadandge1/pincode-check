@@ -17,42 +17,30 @@ import {
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { requireActiveBilling } from "../services/billing.server";
-import { resolvePlanAccess } from "../services/plan-access.server";
 import { isPublishedThemeEmbedEnabled } from "../services/theme-embed.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await requireActiveBilling(request);
   const shop = session.shop;
-  const access = await resolvePlanAccess({ shop, admin });
   const appHandle = process.env.SHOPIFY_APP_HANDLE || "incode-track";
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 30);
 
-  const [rules, zones, targets, settings, searches, available] = await Promise.all([
+  const [rules, zones, targets, settings, embedEnabled] = await Promise.all([
     prisma.postalCode.count({ where: { shop } }),
     prisma.zone.count({ where: { shop, enabled: true } }),
     prisma.deliveryTarget.count({ where: { shop, enabled: true } }),
     prisma.deliverySetting.findUnique({ where: { shop } }),
-    access.features.analytics
-      ? prisma.postalCodeSearchEvent.count({ where: { shop, createdAt: { gte: since } } })
-      : Promise.resolve(0),
-    access.features.analytics
-      ? prisma.postalCodeSearchEvent.count({ where: { shop, createdAt: { gte: since }, available: true } })
-      : Promise.resolve(0),
+    isPublishedThemeEmbedEnabled(admin, appHandle, "delivery-checker-embed"),
   ]);
 
   return {
     rules,
     zones,
     targets,
-    searches,
-    availabilityRate: searches > 0 ? Math.round((available / searches) * 100) : 0,
     settingsConfigured: Boolean(settings),
     cartProtectionEnabled: Boolean(settings?.requireValidPin || settings?.disableAddToCart),
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shop,
-    access,
-    embedEnabled: await isPublishedThemeEmbedEnabled(admin, appHandle, "delivery-checker-embed"),
+    embedEnabled,
   };
 };
 
@@ -82,28 +70,33 @@ export default function Index() {
   const appEmbedUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=${appEmbedId}`;
 
   useEffect(() => {
-    const refreshStatus = () => {
-      if (document.visibilityState === "visible" && revalidator.state === "idle") revalidator.revalidate();
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const queueRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        if (revalidator.state === "idle") revalidator.revalidate();
+      }, 100);
     };
-    window.addEventListener("focus", refreshStatus);
-    document.addEventListener("visibilitychange", refreshStatus);
+    window.addEventListener("focus", queueRefresh);
+    document.addEventListener("visibilitychange", queueRefresh);
     return () => {
-      window.removeEventListener("focus", refreshStatus);
-      document.removeEventListener("visibilitychange", refreshStatus);
+      clearTimeout(refreshTimer);
+      window.removeEventListener("focus", queueRefresh);
+      document.removeEventListener("visibilitychange", queueRefresh);
     };
   }, [revalidator]);
 
   return (
-    <Page title="Overview" subtitle="Control delivery promises shoppers can trust.">
+    <Page title="Overview" subtitle="Manage delivery availability and dates.">
       <BlockStack gap="500">
         <div className="incode-hero">
           <BlockStack gap="400">
             <BlockStack gap="200">
-              <Text as="h1" variant="heading2xl">Turn delivery certainty into more completed carts.</Text>
+              <Text as="h1" variant="heading2xl">Set up delivery checks for your store.</Text>
               <div className="incode-hero__copy">
                 <Text as="p" variant="bodyLg">
-                  Give every shopper a precise serviceability answer, delivery date, COD status,
-                  and product-specific purchase policy before checkout.
+                  Show availability and delivery dates before checkout.
                 </Text>
               </div>
             </BlockStack>
@@ -115,15 +108,10 @@ export default function Index() {
           </BlockStack>
         </div>
 
-        <div className="incode-metrics">
-          <MetricCard label="Coverage rules" value={data.rules} detail="Exact, range, and wildcard rules" />
-          <MetricCard label="Active zones" value={data.zones} detail="Priority-based delivery regions" />
-          <MetricCard label="Product targets" value={data.targets} detail="Active enforcement overrides" />
-          <MetricCard
-            label="30-day availability"
-            value={data.access.features.analytics ? `${data.availabilityRate}%` : "Subscription required"}
-            detail={data.access.features.analytics ? `${data.searches} shopper checks` : "Upgrade for delivery analytics"}
-          />
+        <div className="incode-metrics incode-metrics--overview">
+          <MetricCard label="Coverage rules" value={data.rules} detail="Postal codes and ranges" />
+          <MetricCard label="Active zones" value={data.zones} detail="Enabled delivery zones" />
+          <MetricCard label="Product rules" value={data.targets} detail="Active product rules" />
         </div>
 
         <Layout>
@@ -133,9 +121,8 @@ export default function Index() {
                 <InlineStack align="space-between" blockAlign="center" gap="300">
                   <BlockStack gap="100">
                     <Text as="h2" variant="headingLg">Launch checklist</Text>
-                    <Text as="p" tone="subdued">Complete these steps before promoting the checker.</Text>
                   </BlockStack>
-                    <Badge tone={progress === 100 ? "success" : "attention"}>{`${completedSteps} of 2 automated checks complete`}</Badge>
+                    <Badge tone={progress === 100 ? "success" : "attention"}>{`${completedSteps} of 2 complete`}</Badge>
                 </InlineStack>
                 <ProgressBar progress={progress} size="small" tone={progress === 100 ? "success" : "primary"} />
                 <Divider />
@@ -143,7 +130,7 @@ export default function Index() {
                   <span className="incode-step__number">1</span>
                   <BlockStack gap="050">
                     <Text as="h3" fontWeight="semibold">Configure delivery behavior</Text>
-                    <Text as="p" tone="subdued">Set cutoff time, weekends, messaging, and cart protection.</Text>
+                    <Text as="p" tone="subdued">Set timing, messages, and cart rules.</Text>
                   </BlockStack>
                   <Button url="/app/delivery-settings?tab=timing" size="slim">{data.settingsConfigured ? "Review" : "Configure"}</Button>
                 </div>
@@ -151,7 +138,7 @@ export default function Index() {
                   <span className="incode-step__number">2</span>
                   <BlockStack gap="050">
                     <Text as="h3" fontWeight="semibold">Add delivery coverage</Text>
-                    <Text as="p" tone="subdued">Import CSV data or create your first postal rule.</Text>
+                    <Text as="p" tone="subdued">Add postal codes or import a CSV.</Text>
                   </BlockStack>
                   <Button url="/app/delivery-settings?tab=coverage" size="slim">{data.rules > 0 ? "Manage" : "Add rules"}</Button>
                 </div>
@@ -159,7 +146,7 @@ export default function Index() {
                   <span className="incode-step__number">3</span>
                   <BlockStack gap="050">
                     <Text as="h3" fontWeight="semibold">Publish the storefront block</Text>
-                    <Text as="p" tone="subdued">Manual final step, shown separately from the two automated checks. Add the checker to your published product template and test a serviceable and an unavailable code.</Text>
+                    <Text as="p" tone="subdued">Add the block to your product template and test it.</Text>
                   </BlockStack>
                   <Button url={appEmbedUrl} external target="_blank" size="slim">Enable app</Button>
                 </div>
@@ -174,11 +161,11 @@ export default function Index() {
                   <InlineStack align="space-between" blockAlign="center">
                     <Text as="h2" variant="headingMd">Storefront protection</Text>
                     <Badge tone={data.cartProtectionEnabled ? "success" : "attention"}>
-                      {data.cartProtectionEnabled ? "Shop-wide controls enabled" : "Shop-wide controls disabled"}
+                      {data.cartProtectionEnabled ? "Enabled" : "Disabled"}
                     </Badge>
                   </InlineStack>
                   <Text as="p" tone="subdued">
-                    Require a serviceable postal code before Add to Cart globally or only for selected products, collections, and tags.
+                    Require a valid postal code before Add to Cart.
                   </Text>
                   <Button url="/app/delivery-settings?tab=products" fullWidth>Review targeting</Button>
                 </BlockStack>
@@ -186,7 +173,7 @@ export default function Index() {
               <Card>
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Need a hand?</Text>
-                  <Text as="p" tone="subdued">Follow the setup guide, CSV reference, and storefront troubleshooting checklist.</Text>
+                  <Text as="p" tone="subdued">View setup and troubleshooting steps.</Text>
                   <Button url="/app/additional" fullWidth>Open setup guide</Button>
                 </BlockStack>
               </Card>
