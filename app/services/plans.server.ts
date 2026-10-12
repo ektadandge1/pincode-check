@@ -5,7 +5,6 @@ export type PlanFeatures = {
   exactRules: boolean;
   csvImport: boolean;
   deliveryDates: boolean;
-  cod: boolean;
   schedule: boolean;
   patterns: boolean;
   zones: boolean;
@@ -24,7 +23,6 @@ export const STANDARD_FEATURES: PlanFeatures = {
   exactRules: true,
   csvImport: true,
   deliveryDates: true,
-  cod: true,
   schedule: true,
   patterns: true,
   zones: true,

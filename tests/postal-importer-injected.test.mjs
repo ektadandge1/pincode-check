@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "vite";
 
-test("actual importer preserves currency-only records and still requires currency for a charge", async () => {
+test("actual importer ignores legacy options without reading or changing persisted fields", async () => {
   const historical = {
     shop: "import-test.myshopify.com", country: "US", postalCode: "10001",
     patternType: "exact", rangeStart: null, rangeEnd: null, deliveryDays: 2,
@@ -14,8 +14,7 @@ test("actual importer preserves currency-only records and still requires currenc
   let state = { postal: { ...historical }, jobs: [], errors: [] };
   const client = (current) => ({
     postalCode: {
-      findUnique: async ({ where }) => current.postal?.postalCode === where.shop_country_postalCode.postalCode
-        ? { deliveryCharge: current.postal.deliveryCharge, currency: current.postal.currency } : null,
+      findUnique: async () => assert.fail("Legacy fields must not be read"),
       upsert: async ({ where, create, update }) => {
         const exists = current.postal?.postalCode === where.shop_country_postalCode.postalCode;
         current.postal = exists ? { ...current.postal, ...update } : { deliveryCharge: null, ...create };
@@ -77,23 +76,20 @@ test("actual importer preserves currency-only records and still requires currenc
     const zero = await importPostalCodesFromCsv(historical.shop,
       "country,postal_code,delivery_days,delivery_charge\nUS,10001,3,0", "csv");
     assert.equal(zero.status, "completed");
-    assert.equal(state.postal.deliveryCharge, 0);
+    assert.equal(state.postal.deliveryCharge, null);
     assert.equal(state.postal.currency, "USD");
 
     const currencyOnly = await importPostalCodesFromCsv(historical.shop,
       "country,postal_code,delivery_days,currency\nUS,10002,3,USD", "csv");
     assert.equal(currencyOnly.status, "completed");
     assert.equal(state.postal.deliveryCharge, null);
-    assert.equal(state.postal.currency, "USD");
-
-    const beforeFailure = structuredClone(state.postal);
+    assert.equal(state.postal.currency, undefined);
     const missingCurrency = await importPostalCodesFromCsv(historical.shop,
       "country,postal_code,delivery_days,delivery_charge\nUS,10003,3,0", "csv");
-    assert.equal(missingCurrency.status, "failed");
-    assert.equal(missingCurrency.failedRows, 1);
-    assert.equal(state.jobs.at(-1).failedRows, 1);
-    assert.match(state.errors.at(-1).reason, /Currency is required/);
-    assert.deepEqual(state.postal, beforeFailure);
+    assert.equal(missingCurrency.status, "completed");
+    assert.equal(missingCurrency.failedRows, 0);
+    assert.equal(state.postal.deliveryCharge, null);
+    assert.equal(state.errors.length, 0);
   } finally {
     if (previousPrisma === undefined) delete globalThis.prismaGlobal;
     else globalThis.prismaGlobal = previousPrisma;

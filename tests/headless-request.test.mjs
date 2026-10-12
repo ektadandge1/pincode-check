@@ -18,7 +18,7 @@ test("normalizes country and postal code and supplies optional defaults without 
   const body = Object.freeze({ country: "iN", postal_code: " 110001 " });
   assert.deepEqual(parseHeadlessDeliveryInput(body), {
     country: "IN", postalCode: "110001", productId: undefined, variantId: undefined,
-    quantity: 1, codRequested: false,
+    quantity: 1,
   });
   assert.deepEqual(body, { country: "iN", postal_code: " 110001 " });
 });
@@ -31,7 +31,7 @@ test("accepts numeric string IDs and matching Shopify GIDs without rewriting the
     ["0", "000456"],
   ]) {
     assert.deepEqual(parseHeadlessDeliveryInput({ ...valid, product_id: productId, variant_id: variantId, quantity: 2, cod_requested: true }), {
-      country: "IN", postalCode: "110001", productId, variantId, quantity: 2, codRequested: true,
+      country: "IN", postalCode: "110001", productId, variantId, quantity: 2,
     });
   }
   assert.equal(parseHeadlessDeliveryInput({ ...valid, variant_id: "456" }).variantId, "456");
@@ -67,12 +67,9 @@ test("rejects invalid quantities without coercion or rounding", () => {
   }
 });
 
-test("requires actual booleans for cod_requested", () => {
-  for (const codRequested of [true, false, undefined]) {
-    assert.equal(parseHeadlessDeliveryInput({ ...valid, cod_requested: codRequested }).codRequested, codRequested === true);
-  }
-  for (const codRequested of [null, "true", "false", "", 0, 1, [], {}]) {
-    rejects({ ...valid, cod_requested: codRequested }, "invalid_request");
+test("ignores legacy cod_requested values entirely", () => {
+  for (const codRequested of [true, false, undefined, null, "true", "false", "", 0, 1, [], {}]) {
+    assert.deepEqual(parseHeadlessDeliveryInput({ ...valid, cod_requested: codRequested }), parseHeadlessDeliveryInput(valid));
   }
 });
 
@@ -112,7 +109,7 @@ test("requires a nonblank postal string of at most 30 raw characters for checks"
 test("estimate mode permits missing postal values but validates supplied fields", () => {
   assert.deepEqual(parseHeadlessDeliveryInput({ country: "us" }, true), {
     country: "US", postalCode: undefined, productId: undefined, variantId: undefined,
-    quantity: 1, codRequested: false,
+    quantity: 1,
   });
   for (const postalCode of [null, 123, true, [], {}, "x".repeat(31)]) {
     rejects({ country: "US", postal_code: postalCode }, "invalid_postal_code", true);
@@ -122,7 +119,7 @@ test("estimate mode permits missing postal values but validates supplied fields"
   }
   rejects({ country: "US", product_id: "bad" }, "invalid_product_context", true);
   rejects({ country: "US", quantity: 0 }, "invalid_quantity", true);
-  rejects({ country: "US", cod_requested: "true" }, "invalid_request", true);
+  assert.deepEqual(parseHeadlessDeliveryInput({ country: "US", cod_requested: "true" }, true), parseHeadlessDeliveryInput({ country: "US" }, true));
 });
 
 test("request errors preserve their message, code, and optional HTTP status", () => {

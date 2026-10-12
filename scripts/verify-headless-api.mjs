@@ -246,8 +246,7 @@ try {
       assert.equal(data.available, true);
       assert.equal(data.source, "db_fallback");
       assert.equal(data.postal_code, "10001");
-      assert.equal(data.cod_available, true);
-      assert.equal(data.delivery_charge, 4.5);
+      for (const key of ["cod_available", "delivery_charge", "currency", "same_day_available", "next_day_available", "express_available"]) assert.equal(key in data, false);
     } });
     await verify(`${type}: check unavailable`, {
       type, token, body: { ...body, postal_code: "99999" }, status: 200,

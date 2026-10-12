@@ -11,18 +11,17 @@ import {
 } from "../app/utils/shipping-method.ts";
 
 const unavailable = {
-  express: false,
-  sameDay: false,
-  nextDay: false,
   local: false,
   pickup: false,
 };
 
 test("shipping method eligibility preserves every supported method kind", () => {
   assert.equal(shippingMethodEligible("standard", unavailable), true);
-  assert.equal(shippingMethodEligible("express", { ...unavailable, express: true }), true);
-  assert.equal(shippingMethodEligible("same_day", { ...unavailable, sameDay: true }), true);
-  assert.equal(shippingMethodEligible("next_day", { ...unavailable, nextDay: true }), true);
+  assert.deepEqual(SHIPPING_METHOD_KINDS, ["standard", "local", "pickup"]);
+  for (const kind of ["express", "same_day", "next_day"]) {
+    assert.equal(shippingMethodEligible(kind, { local: true, pickup: true }), false);
+    assert.match(validateShippingMethodFields({ name: "Legacy", handle: "legacy", kind, transitDays: 1 }).error, /Invalid/);
+  }
   assert.equal(shippingMethodEligible("local", { ...unavailable, local: true }), true);
   assert.equal(shippingMethodEligible("pickup", { ...unavailable, pickup: true }), true);
   assert.equal(shippingMethodEligible("express", unavailable), false);
@@ -30,9 +29,10 @@ test("shipping method eligibility preserves every supported method kind", () => 
 });
 
 test("Shopify method names infer conservative eligibility kinds", () => {
-  assert.equal(inferShippingMethodKind("Express shipping"), "express");
-  assert.equal(inferShippingMethodKind("Same day delivery"), "same_day");
-  assert.equal(inferShippingMethodKind("Next-day service"), "next_day");
+  assert.equal(shippingMethodHandle("Standard Shipping"), "standard-shipping");
+  assert.equal(inferShippingMethodKind("Express shipping"), "standard");
+  assert.equal(inferShippingMethodKind("Same day delivery"), "standard");
+  assert.equal(inferShippingMethodKind("Next-day service"), "standard");
   assert.equal(inferShippingMethodKind("Store pickup"), "pickup");
   assert.equal(inferShippingMethodKind("Local courier"), "local");
   assert.equal(inferShippingMethodKind("Economy shipping"), "standard");
@@ -42,7 +42,7 @@ test("shipping method validation enforces copy limits and ETA ranges", () => {
   const valid = validateShippingMethodFields({
     name: "Express",
     handle: "express",
-    kind: "express",
+    kind: "standard",
     priority: "20",
     processingDays: "",
     transitDays: "2",
@@ -55,7 +55,7 @@ test("shipping method validation enforces copy limits and ETA ranges", () => {
   assert.match(validateShippingMethodFields({
     name: "Express",
     handle: "express",
-    kind: "express",
+    kind: "standard",
     priority: 20,
     transitDays: 2,
     description: "x".repeat(251),
@@ -63,7 +63,7 @@ test("shipping method validation enforces copy limits and ETA ranges", () => {
   assert.match(validateShippingMethodFields({
     name: "Express",
     handle: "express",
-    kind: "express",
+    kind: "standard",
     priority: 20,
     transitDays: 2,
     customMessage: "x".repeat(501),
@@ -74,7 +74,7 @@ test("shipping method serialization includes storefront copy and date labels", (
   assert.deepEqual(serializeShippingMethod({
     handle: "express",
     name: "Express",
-    kind: "express",
+    kind: "standard",
     description: "Tracked priority delivery",
     customMessage: "Arrives quickly.",
     processingDays: null,
@@ -88,7 +88,7 @@ test("shipping method serialization includes storefront copy and date labels", (
   }), {
     handle: "express",
     name: "Express",
-    kind: "express",
+    kind: "standard",
     description: "Tracked priority delivery",
     custom_message: "Arrives quickly.",
     dispatch_date: "2026-10-02",

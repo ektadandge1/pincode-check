@@ -16,13 +16,18 @@ const callers = [
   ['assets/delivery-card-eta.js', 1],
 ];
 
-test('all six blocks and embed expose an explicit escaped Shopify app proxy setting on every widget root', () => {
+test('widget roots escape the proxy path while the embed keeps its technical setting hidden', () => {
   const blocks = readdirSync(new URL('blocks/', base)).filter((name) => name.endsWith('.liquid'));
   assert.equal(blocks.length, 6);
   for (const name of blocks) {
     const liquid = source(`blocks/${name}`);
     const schema = JSON.parse(liquid.match(/{% schema %}([\s\S]*?){% endschema %}/)[1]);
     const settings = schema.settings.filter((setting) => setting.id === 'proxy_path');
+    if (name === 'delivery-checker-embed.liquid') {
+      assert.equal(settings.length, 0, name);
+      assert.match(liquid, /data-proxy-path="{{ block\.settings\.proxy_path \| default: '\/apps\/delivery-checker' \| escape }}"/);
+      continue;
+    }
     assert.equal(settings.length, 1, name);
     assert.equal(settings[0].type, 'text', name);
     assert.equal(settings[0].default, '/apps/delivery-checker', name);

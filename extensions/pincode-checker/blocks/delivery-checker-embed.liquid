@@ -54,7 +54,7 @@ assign inline_saved_postal = customer.default_address.zip | default: ''
 endif
 %}
 
-<div class="incode-inline-delivery" data-proxy-path="{{ block.settings.proxy_path | escape }}" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ inline_country }}" data-saved-postal="{{ inline_saved_postal | escape }}">
+<div class="incode-inline-delivery" data-proxy-path="{{ block.settings.proxy_path | default: '/apps/delivery-checker' | escape }}" data-inline-delivery-eta data-template="{{ template.name }}" data-country="{{ inline_country }}" data-saved-postal="{{ inline_saved_postal | escape }}">
   <script type="application/json" data-inline-items>{{ inline_items }}</script>
 </div>
 
@@ -73,5 +73,5 @@ endif
 </style>
 
 {% schema %}
-{"name":"ETADeliverPickup","target":"body","settings":[{"type":"text","id":"proxy_path","label":"App proxy path","default":"/apps/delivery-checker","info":"Match the customized Shopify app proxy path, including its prefix (for example /apps/delivery-checker)."}]}
+{"name":"ETADeliverPickup","target":"body","settings":[]}
 {% endschema %}

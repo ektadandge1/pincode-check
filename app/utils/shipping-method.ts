@@ -1,8 +1,5 @@
 export const SHIPPING_METHOD_KINDS = [
   "standard",
-  "express",
-  "same_day",
-  "next_day",
   "local",
   "pickup",
 ] as const;
@@ -10,15 +7,9 @@ export const SHIPPING_METHOD_KINDS = [
 export type ShippingMethodKind = (typeof SHIPPING_METHOD_KINDS)[number];
 
 export function shippingMethodEligible(kind: string, options: {
-  express: boolean;
-  sameDay: boolean;
-  nextDay: boolean;
   local: boolean;
   pickup: boolean;
-}): boolean {
-  if (kind === "express") return options.express;
-  if (kind === "same_day") return options.sameDay;
-  if (kind === "next_day") return options.nextDay;
+}): kind is ShippingMethodKind {
   if (kind === "local") return options.local;
   if (kind === "pickup") return options.pickup;
   return kind === "standard";
@@ -26,11 +17,8 @@ export function shippingMethodEligible(kind: string, options: {
 
 export function inferShippingMethodKind(name: string): ShippingMethodKind {
   const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, " ");
-  if (/\b(same day|same-day)\b/.test(normalized)) return "same_day";
-  if (/\b(next day|next-day|overnight)\b/.test(normalized)) return "next_day";
   if (/\b(pickup|pick up|collection)\b/.test(normalized)) return "pickup";
   if (/\b(local|courier)\b/.test(normalized)) return "local";
-  if (/\b(express|expedited|priority)\b/.test(normalized)) return "express";
   return "standard";
 }
 
@@ -106,7 +94,7 @@ export function serializeShippingMethod(
   method: {
     handle: string;
     name: string;
-    kind: string;
+    kind: ShippingMethodKind;
     description: string | null;
     customMessage: string | null;
     processingDays: number | null;

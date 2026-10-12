@@ -7,7 +7,6 @@ import {
   getGeneralCartDeliveryEstimate,
   checkCartDeliveryPolicy,
   getProductCardDeliveryEstimates,
-  parseCodRequestParam,
 } from "../services/delivery-checker.server";
 import { authenticate } from "../shopify.server";
 import { parseListParam, parseProductEstimateBatch } from "../utils/targeting.server";
@@ -263,7 +262,6 @@ async function storefrontDelivery(request: Request) {
     url.searchParams.get("postalCode") ??
     url.searchParams.get("pincode") ??
     "";
-  const cod = parseCodRequestParam(url.searchParams.get("cod"));
   const variantId = url.searchParams.get("variantId") ?? undefined;
   const quantityRaw = Number(url.searchParams.get("qty") ?? "1");
   const quantity = Number.isFinite(quantityRaw) ? quantityRaw : 1;
@@ -418,7 +416,7 @@ async function storefrontDelivery(request: Request) {
 
   if (isEstimate) {
     try {
-      const estimateInput = { ...context, features: access.features, requireTarget };
+      const estimateInput = { ...context, postalCode, features: access.features, requireTarget };
       const estimate = cartRequest
         ? await getGeneralCartDeliveryEstimate(estimateInput, canonicalCartItems, { complete: cart.complete })
         : await getGeneralDeliveryEstimate(estimateInput);
@@ -460,7 +458,6 @@ async function storefrontDelivery(request: Request) {
 
   const deliveryInput = {
     postalCode,
-    codRequested: cod,
     features: access.features,
     ...context,
   };

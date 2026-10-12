@@ -50,11 +50,11 @@ For `check`, `methods`, and `estimate`, send a JSON object with only these field
 | `product_id` | Optional numeric ID **string** or `gid://shopify/Product/<digits>`. |
 | `variant_id` | Optional numeric ID **string** or `gid://shopify/ProductVariant/<digits>`. |
 | `quantity` | Integer number from 1 through 2147483647 (Shopify GraphQL `Int` maximum). Missing defaults to 1. Null, strings and booleans are rejected. |
-| `cod_requested` | Optional boolean. Missing defaults to false; `null`, numbers, and strings are rejected. |
+| `cod_requested` | Legacy compatibility field. Accepted with any value but ignored; omit it from new integrations. |
 
 Arrays, null, primitives, and unknown fields are rejected. IDs are not trimmed or coerced; wrong-resource GIDs, signs, decimals, and suffixes are rejected. Syntax alone does not prove an ID exists: supplied products and variants must be verified against Shopify, and a supplied product/variant pair must match. Product vendor, tags, and collection context are resolved server-side, not accepted from the caller.
 
-An estimate returns `enabled: false` and `matched_target` for an excluded target. Otherwise it includes `enabled: true`, order/dispatch/estimated dates and labels, the maximum estimated date, delivery date range, processing/transit days, and matched target. It is not a guarantee that a postal code is serviceable. `cod_requested` affects delivery checks where applicable; it does not turn a general estimate into a COD availability check.
+An estimate returns `enabled: false` and `matched_target` for an excluded target. Otherwise it includes `enabled: true`, order/dispatch/estimated dates and labels, the maximum estimated date, delivery date range, processing/transit days, and matched target. It is not a guarantee that a postal code is serviceable.
 
 ### Batch
 
@@ -80,7 +80,7 @@ Server-to-server delivery check (environment variables are example integration s
 curl "$APP_ORIGIN/api/v1/private/delivery/check" \
   -H "Authorization: Bearer $HEADLESS_PRIVATE_TOKEN" \
   -H 'Content-Type: application/json' \
-  --data '{"country":"IN","postal_code":"110001","product_id":"123","quantity":1,"cod_requested":false}'
+  --data '{"country":"IN","postal_code":"110001","product_id":"123","quantity":1}'
 ```
 
 Browser request from an allowlisted storefront origin:

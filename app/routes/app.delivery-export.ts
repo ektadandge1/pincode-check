@@ -31,15 +31,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     "pattern_type",
     "delivery_days",
     "serviceable",
-    "cod_available",
-    "delivery_charge",
-    "currency",
     "city",
     "state",
     "zone",
-    "same_day",
-    "next_day",
-    "express",
   ];
 
   const lines = [
@@ -51,15 +45,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         row.patternType,
         row.deliveryDays,
         row.serviceable,
-        row.codAvailable,
-        row.deliveryCharge ?? "",
-        row.currency ?? "",
         row.city ?? "",
         row.state ?? "",
         row.zoneGroup?.name ?? row.zone ?? "",
-        row.sameDayAvailable,
-        row.nextDayAvailable,
-        row.expressAvailable,
       ]
         .map(csvValue)
         .join(","),

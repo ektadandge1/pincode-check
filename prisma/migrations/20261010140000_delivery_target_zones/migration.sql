@@ -1,0 +1,1 @@
+ALTER TABLE "DeliveryTarget" ADD COLUMN "zoneIdsCsv" TEXT NOT NULL DEFAULT '';

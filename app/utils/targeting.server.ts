@@ -10,6 +10,7 @@ export type DeliveryTargetRecord = {
   name: string;
   targetKind: string;
   targetValue: string;
+  zoneIdsCsv?: string;
   countryCode?: string | null;
   stateRegion?: string | null;
   inventoryMode?: string;
@@ -262,6 +263,14 @@ function targetMatches(
   if (!kind) return false;
   const values = parseTargetValues(kind, target.targetValue);
   if (!values.length) return false;
+
+  const zoneIdsCsv = String(target.zoneIdsCsv ?? "").trim();
+  if (zoneIdsCsv) {
+    const zoneIds = zoneIdsCsv.split(",").map((value) => value.trim());
+    // Reject the whole restriction, rather than silently broadening malformed data.
+    if (zoneIds.some((value) => !normalizeTargetValue("zone", value))) return false;
+    if (!context.zoneId || !zoneIds.includes(context.zoneId)) return false;
+  }
 
   const countryCode = String(target.countryCode ?? "").trim().toUpperCase();
   const contextCountry = String(context.country ?? "").trim().toUpperCase();

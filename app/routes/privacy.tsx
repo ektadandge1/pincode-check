@@ -28,7 +28,7 @@ export default function PrivacyPolicy() {
   return (
     <PolarisProvider i18n={enTranslations}>
       <div className="incode-public">
-       <Page title="Privacy Policy" subtitle="Last updated: October 6, 2026" narrowWidth backAction={{ content: "ETADeliverPickup", url: "/" }}>
+        <Page title="Privacy Policy" subtitle="Last updated: October 12, 2026" narrowWidth backAction={{ content: "ETADeliverPickup", url: "/" }}>
         <Layout>
           <Layout.Section>
             <Card>
@@ -40,7 +40,7 @@ export default function PrivacyPolicy() {
                   <Text as="p">
                      ETADeliverPickup stores merchant configuration needed to provide
                     delivery availability checks, including shop domain, country and postal code
-                    coverage, delivery-day rules, COD availability, cutoff time,
+                    coverage, delivery-day rules, cutoff time,
                     weekend settings, and holiday dates.
                   </Text>
                    <Text as="p">
@@ -76,7 +76,7 @@ export default function PrivacyPolicy() {
                   </Text>
                   <Text as="p">
                     Merchant configuration is used only to show delivery
-                    availability, estimated delivery dates, COD availability, and
+                    availability, estimated delivery dates, and
                     stock-aware messages through the storefront theme app
                     extension.
                   </Text>

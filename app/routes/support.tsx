@@ -69,8 +69,7 @@ export default function Support() {
                   </Text>
                   <Text as="p">
                     Required columns are country, postal_code, and delivery_days.
-                    Optional columns include serviceable, cod_available, delivery_charge,
-                    currency, city, state, zone, same_day, next_day, and express.
+                    Optional columns include serviceable, city, state, zone, and pattern_type.
                   </Text>
                 </BlockStack>
 

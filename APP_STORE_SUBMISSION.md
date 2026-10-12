@@ -29,19 +29,18 @@ App card subtitle: Show delivery availability by postal or ZIP code on product p
 
 App introduction: Help shoppers check delivery availability by country and postal or ZIP code before buying.
 
-App details: ETADeliverPickup adds a product-page delivery availability checker through a Shopify theme app extension. Merchants can upload serviceable countries and postal codes, set delivery days, manage holidays and weekends, configure COD availability, target rules by product, collection, vendor, or tag, and optionally use inventory-aware delivery messages for selected variants.
+App details: ETADeliverPickup adds a product-page delivery availability checker through a Shopify theme app extension. Merchants can upload serviceable countries and postal codes, set delivery days, manage holidays and weekends, target rules by product, collection, vendor, or tag, and optionally use inventory-aware delivery messages for selected variants.
 
 Feature ideas:
 - Add a postal and ZIP code checker to product pages without theme code edits.
 - Upload serviceable country/postal-code coverage by CSV or enter records manually.
 - Export CSV records, sync from a published Google Sheet CSV URL, and review failed import rows.
 - Show estimated delivery dates using cutoff, weekend, and holiday rules.
-- Display COD availability for each serviceable postal code.
-- Show delivery charges and custom storefront messages.
+- Show custom storefront messages.
 - Disable Add to Cart when delivery is unavailable.
 - Require a valid postal or ZIP code before Add to Cart, with product-targeted overrides.
 - Exclude selected products or other targets from delivery estimates.
-- Offer configured express, same-day, next-day, local delivery, and pickup options when eligible.
+- Offer configured local delivery and pickup options when eligible.
 - View privacy-safe delivery lookup analytics.
 - Optionally check selected variant inventory before showing delivery estimates.
 

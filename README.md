@@ -14,8 +14,8 @@ ETADeliverPickup is a Shopify public app that adds a country-aware postal and ZI
 - **Require valid PIN before Add to Cart** (shop-wide and per-targeting rule).
 - CSV import and manual postal rule management (exact, range, and wildcard rows).
 - CSV export, Google Sheet manual sync, and import validation reports.
-- Holiday, weekend, cutoff, COD, and inventory-aware delivery rules.
-- Delivery charges, custom storefront messages, Add-to-Cart blocking, and basic lookup analytics.
+- Holiday, weekend, cutoff, and inventory-aware delivery rules.
+- Custom storefront messages, Add-to-Cart blocking, and basic lookup analytics.
 - **Product, collection, and tag targeting** with priority-based overrides.
 - **Require valid PIN before Add to Cart** (shop-wide and per-targeting rule).
 - Mandatory Shopify privacy compliance webhooks.
@@ -32,12 +32,11 @@ is used.
 - Product-page delivery checker
 - Unlimited postal and ZIP code rules, ranges, wildcards, and zones
 - CSV and manual imports
-- Delivery estimates and COD availability
+- Delivery estimates
 - Cutoff, weekend, and holiday schedules
 - Product, collection, and tag targeting
 - Valid-PIN and unavailable-location Add-to-Cart controls
 - Inventory and optional courier-aware checks
-- Delivery charges and speed options
 - Google Sheet sync, CSV export, and privacy-safe analytics
 
 ## Shopify Requirements Covered Locally
@@ -89,11 +88,11 @@ The storefront can persist delivery selections as Shopify cart attributes which 
 Supported columns:
 
 ```csv
-country,postal_code,delivery_days,serviceable,cod_available,delivery_charge,currency,city,state,zone,same_day,next_day,express
-US,10001,2,true,false,8,USD,New York,New York,metro,false,true,true
-US,10000-10999,3,true,false,10,USD,NY metro range,,metro,false,false,false
-IN,4*,2,true,true,40,INR,Rural Maharashtra,,rural,false,true,false
-GB,SW1A*,3,false,false,5,GBP,London SW postcodes,,london,false,false,true
+country,postal_code,delivery_days,serviceable,city,state,zone
+US,10001,2,true,New York,New York,metro
+US,10000-10999,3,true,NY metro range,,metro
+IN,4*,2,true,Rural Maharashtra,,rural
+GB,SW1A*,3,false,London SW postcodes,,london
 ```
 
 `country`, `postal_code`, and `delivery_days` are required. Other columns are optional.
@@ -108,6 +107,8 @@ GB,SW1A*,3,false,false,5,GBP,London SW postcodes,,london,false,false,true
 
 - Targeting rules match **product ID**, **collection handle**, or **product tag** from the storefront widget context.
 - Match precedence: product → collection → tag; lower `priority` wins inside a kind; disabled rules are ignored.
+- Product Rules include an optional **Apply only to these zones** multi-select (up to 100 zones per rule). Empty means all zones. A selected-zone rule must match both its product/collection/vendor/tag and the winning postal rule's zone; without a known destination zone it does not apply. Existing rules remain unrestricted after migration.
+- For different collection timings in one zone, create one rule per collection, select that same zone on each rule, and set each rule's preparation/transit overrides. A single rule can also cover several selected zones. Existing target-kind and priority ordering still resolves overlapping matches.
 - **Require valid PIN before Add to Cart**: shop-wide default, overridable by the highest-precedence matching target (`true` locks, `false` exempts).
 - When locked, Add to Cart stays disabled until a serviceable delivery check succeeds. Editing the postal code or variant re-locks until the next successful check.
 - The theme block sends `productId`, `productTags`, and `collections` on each app-proxy check (`init=1` loads the initial lock policy).

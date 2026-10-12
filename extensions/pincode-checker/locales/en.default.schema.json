@@ -5,8 +5,6 @@
       "heading_label": "Heading",
       "supporting_text_label": "Supporting text",
       "button_label": "Button label",
-      "cod_enabled_label": "Show COD availability",
-      "cod_enabled_info": "Show COD or prepaid status after a successful ZIP check. Availability comes from your delivery rules.",
       "auto_check_saved_address_label": "Auto-check saved customer address",
       "auto_check_saved_address_info": "Uses the logged-in customer's default address when available. This does not use precise IP location.",
       "show_cutoff_countdown_label": "Show delivery cutoff countdown",

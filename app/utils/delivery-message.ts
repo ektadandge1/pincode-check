@@ -13,10 +13,6 @@ export const DELIVERY_MESSAGE_SHORTCODES = [
   "days",
   "processing_days",
   "transit_days",
-  "cod_message",
-  "delivery_charge_message",
-  "delivery_charge",
-  "currency",
   "country",
   "postal_code",
 ] as const;
@@ -27,7 +23,10 @@ export function renderDeliveryMessage(
 ): string {
   return template
     .replace(/\{([a-z_]+)(?:,\s*([^}]+))?\}/gi, (_match, rawKey: string, fallback?: string) => {
-      const value = values[rawKey.toLowerCase()];
+      const key = rawKey.toLowerCase();
+      // Retired placeholders in persisted templates must not render values or fallbacks.
+      if (["cod_message", "delivery_charge_message", "delivery_charge", "currency"].includes(key)) return "";
+      const value = values[key];
       return value === null || value === undefined ? String(fallback ?? "").trim() : String(value);
     })
     .replace(/\s+/g, " ")

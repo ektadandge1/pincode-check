@@ -15,4 +15,5 @@ test("downloadable postal template uses the importer's canonical columns", () =>
     "postal_code",
     "delivery_days",
   ]);
+  assert.deepEqual(POSTAL_CSV_TEMPLATE_HEADERS, ["country", "postal_code", "delivery_days", "serviceable", "city", "state", "zone"]);
 });

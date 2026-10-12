@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import { countdownVisible } from "../app/utils/countdown-visibility.ts";
@@ -27,18 +27,70 @@ test("shared appearance does not overwrite Theme Editor countdown control", () =
   assert.match(script, /params\.set\('countdown', root\.dataset\.showCountdown === 'true' \? '1' : '0'\)/);
 });
 
-test("COD toggle hides the badge when off and shows true and false status when on", () => {
+test("persisted premium and COD switches cannot revive removed badges", () => {
   const code = script.slice(script.indexOf("      const renderShippingOptions ="), script.indexOf("    const renderMethodSelection ="));
   const node = () => ({ dataset: {}, children: [], setAttribute() {}, append(...items) { this.children.push(...items); } });
-  for (const cod of [true, false]) {
+  for (const enabled of ["true", "false"]) {
     for (const available of [true, false]) {
       const options = { replaceChildren(fragment) { this.children = fragment.children; this.childElementCount = this.children.length; } };
-      const root = { dataset: { codLabel: "COD", availableLabel: "Available", unavailableLabel: "Prepaid only" } };
-      vm.runInNewContext(`${code}\nrenderShippingOptions({ cod_available: ${available} });`, { cod, options, root, document: { createDocumentFragment: node, createElement: node } });
-      assert.equal(options.childElementCount, cod ? 1 : 0);
-      if (cod) assert.equal(options.children[0].children[2].textContent, available ? "Available" : "Prepaid only");
+      const root = { dataset: { cod: enabled, showSameDay: enabled, showNextDay: enabled, showExpress: enabled, localDeliveryLabel: "Local delivery", pickupLabel: "Store pickup" } };
+      const data = { cod_available: available, same_day_available: available, next_day_available: available, express_available: available, delivery_charge: 25, currency: "USD", local_delivery_available: true, pickup_available: true };
+      vm.runInNewContext(`${code}\nrenderShippingOptions(data);`, { data, options, root, document: { createDocumentFragment: node, createElement: node } });
+      assert.equal(options.childElementCount, 2);
+      assert.deepEqual(options.children.map((item) => item.children[1].textContent), ["Local delivery", "Store pickup"]);
     }
   }
+});
+
+test("shared appearance ignores persisted removed feature switches", () => {
+  const code = script.slice(script.indexOf("    const applyStorefrontStyle ="), script.indexOf("    const productContextParams ="));
+  const root = { dataset: { appearanceSource: "shop" }, style: { setProperty() {} }, querySelector: () => null };
+  vm.runInNewContext(`${code}\napplyStorefrontStyle({ cod_enabled: true, show_same_day: true, show_next_day: true, show_express: true, show_charge: true, currency: 'USD' });`, { root });
+  for (const key of ["cod", "showSameDay", "showNextDay", "showExpress", "showCharge", "currency"]) {
+    assert.equal(root.dataset[key], undefined);
+  }
+});
+
+test("all extension sources, schemas, and locales omit removed feature references", () => {
+  const base = new URL("../extensions/", import.meta.url);
+  const removed = /\b(?:cod|cod_enabled|cod_available|cod_message|cod_requested|delivery_charge(?:_message)?|deliveryCharge|currency|same[_ -]day(?:_available)?|next[_ -]day(?:_available)?|express(?:_available)?|show_same_day|show_next_day|show_express|prepaid)\b/i;
+  for (const path of readdirSync(base, { recursive: true })) {
+    if (!/\.(?:liquid|js|jsx|json|css|md|toml)$/.test(path)) continue;
+    const source = readFileSync(new URL(path, base), "utf8");
+    assert.doesNotMatch(source, removed, path);
+    if (path.endsWith(".json")) JSON.parse(source);
+    if (path.endsWith(".liquid")) JSON.parse(source.match(/{% schema %}([\s\S]*?){% endschema %}/)[1]);
+  }
+});
+
+test("normal shipping method selection still updates the journey and persisted ETA", () => {
+  const code = script.slice(script.indexOf("    const renderMethodSelection ="), script.indexOf("    const renderCountdown ="));
+  const node = () => ({ children: [], append(...items) { this.children.push(...items); }, addEventListener(name, handler) { this[name] = handler; } });
+  const methodControls = node();
+  const methods = { hidden: true };
+  const methodSummary = {};
+  const selected = [];
+  const persisted = [];
+  const root = { dataset: { methodSelectLabel: "Shipping method", methodDeliveryBy: "Delivery by", methodDispatchLabel: "Dispatch", methodDeliveryLabel: "Delivery" } };
+  const data = { country: "US", postal_code: "10001", shipping_method_display_style: "dropdown", shipping_methods: [{ handle: "standard", name: "Standard shipping", dispatch_date: "2026-10-12", estimated_date: "2026-10-15" }] };
+  vm.runInNewContext(`${code}\nrenderMethodSelection(data);`, {
+    root, data, requestVersion: 1, disposed: false, id: "test", eventOptions: {},
+    methodControls, methods, methodSummary, document: { createElement: node },
+    formatJourneyDate: (date) => date, renderJourney: (estimate) => selected.push(estimate),
+    setResult: (message, state) => assert.equal(state, "success"),
+    persistEstimate: async (estimate, country, postal) => { persisted.push({ estimate, country, postal }); },
+  });
+  assert.equal(methods.hidden, false);
+  const select = methodControls.children[1];
+  assert.equal(select.children[1].value, "standard");
+  select.value = "standard";
+  select.change();
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].estimated_date, "2026-10-15");
+  assert.equal(persisted[0].estimate.estimated_date, "2026-10-15");
+  assert.equal(persisted[0].country, "US");
+  assert.equal(persisted[0].postal, "10001");
+  assert.match(methodSummary.textContent, /Standard shipping/);
 });
 
 test("countdown uses a live timer before cutoff and an expired status after cutoff", () => {
@@ -65,17 +117,17 @@ test("the checker never renders sample countdowns or internal diagnostic text", 
 test("Theme Editor service switches hide all badges or individual real service badges", () => {
   const code = script.slice(script.indexOf("      const renderShippingOptions ="), script.indexOf("    const renderMethodSelection ="));
   const node = () => ({ dataset: {}, children: [], setAttribute() {}, append(...items) { this.children.push(...items); } });
-  const fields = { showSameDay: "same_day_available", showNextDay: "next_day_available", showExpress: "express_available", showLocal: "local_delivery_available", showPickup: "pickup_available" };
+  const fields = { showLocal: "local_delivery_available", showPickup: "pickup_available" };
   for (const disabled of ["showServiceBadges", ...Object.keys(fields)]) {
     const options = { replaceChildren(fragment) { this.children = fragment?.children ?? []; this.childElementCount = this.children.length; } };
     const root = { dataset: { [disabled]: "false" } };
     const data = Object.fromEntries(Object.values(fields).map((field) => [field, true]));
-    vm.runInNewContext(`${code}\nrenderShippingOptions(data);`, { root, options, data, cod: false, document: { createDocumentFragment: node, createElement: node } });
-    assert.equal(options.childElementCount, disabled === "showServiceBadges" ? 0 : 4);
+    vm.runInNewContext(`${code}\nrenderShippingOptions(data);`, { root, options, data, document: { createDocumentFragment: node, createElement: node } });
+    assert.equal(options.childElementCount, disabled === "showServiceBadges" ? 0 : 1);
     if (disabled === "showServiceBadges") assert.equal(options.hidden, true);
   }
   const schema = JSON.parse(liquid.match(/{% schema %}([\s\S]*?){% endschema %}/)[1]);
-  for (const id of ["show_service_badges", "show_same_day", "show_next_day", "show_express", "show_local", "show_pickup"]) {
+  for (const id of ["show_service_badges", "show_local", "show_pickup"]) {
     assert.equal(schema.settings.find((setting) => setting.id === id)?.default, true);
   }
 });

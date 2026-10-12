@@ -99,11 +99,12 @@ model DeliverySetting {
   inventoryAwareEnabled         Boolean   @default(false)
   disableAddToCart              Boolean   @default(false)
   requireValidPin               Boolean   @default(false)
-  successMessage                String    @default("Delivery between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}")
+  successMessage                String    @default("Delivery between {min_delivery_date} and {max_delivery_date}.")
   unavailableMessage            String    @default("Sorry, delivery is not available for this postal code.")
-  codAvailableMessage           String    @default("COD available.")
-  codUnavailableMessage         String    @default("Prepaid only.")
-  deliveryChargeMessage         String    @default(" Delivery charge: {currency}{delivery_charge}.")
+  // Retained inert for existing installations; no storefront behavior uses these.
+  codAvailableMessage           String    @default("")
+  codUnavailableMessage         String    @default("")
+  deliveryChargeMessage         String    @default("")
   storefrontFontFamily          String    @default("system")
   storefrontFontSize            Int       @default(14)
   storefrontHeadingSize         Int       @default(18)
@@ -153,6 +154,7 @@ model DeliveryTarget {
   name                 String
   targetKind           String
   targetValue          String
+  zoneIdsCsv           String   @default("")
   countryCode          String?
   stateRegion          String?
   inventoryMode        String   @default("any")

@@ -17,6 +17,7 @@ export function parseHeadlessDeliveryInput(body: unknown, estimate = false) {
     throw new HeadlessRequestError("invalid_request", "A JSON object is required.");
   }
   const value = body as Record<string, unknown>;
+  // Accept the shipped legacy input as an inert omission, regardless of its value.
   const allowed = new Set(["country", "postal_code", "product_id", "variant_id", "quantity", "cod_requested"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw new HeadlessRequestError("invalid_request", "Unsupported request field.");
@@ -39,15 +40,11 @@ export function parseHeadlessDeliveryInput(body: unknown, estimate = false) {
   if (!validDeliveryQuantity(quantity)) {
     throw new HeadlessRequestError("invalid_quantity", `quantity must be an integer between 1 and ${MAX_DELIVERY_QUANTITY}.`);
   }
-  if (value.cod_requested !== undefined && typeof value.cod_requested !== "boolean") {
-    throw new HeadlessRequestError("invalid_request", "cod_requested must be boolean.");
-  }
   return {
     country: value.country.toUpperCase(),
     postalCode: typeof value.postal_code === "string" ? value.postal_code.trim() : undefined,
     productId: value.product_id as string | undefined,
     variantId: value.variant_id as string | undefined,
     quantity,
-    codRequested: value.cod_requested === true,
   };
 }

@@ -5,11 +5,11 @@ const prisma = new PrismaClient();
 
 async function main() {
   const postalCodes = [
-    { country: "US", postalCode: "10001", city: "New York", state: "New York", deliveryDays: 2, codAvailable: false },
-    { country: "GB", postalCode: "SW1A 1AA", city: "London", state: "England", deliveryDays: 3, codAvailable: false },
-    { country: "CA", postalCode: "M5V 3L9", city: "Toronto", state: "Ontario", deliveryDays: 4, codAvailable: false },
-    { country: "AU", postalCode: "2000", city: "Sydney", state: "New South Wales", deliveryDays: 3, codAvailable: false },
-    { country: "IN", postalCode: "400001", city: "Mumbai", state: "Maharashtra", deliveryDays: 2, codAvailable: true },
+    { country: "US", postalCode: "10001", city: "New York", state: "New York", deliveryDays: 2 },
+    { country: "GB", postalCode: "SW1A 1AA", city: "London", state: "England", deliveryDays: 3 },
+    { country: "CA", postalCode: "M5V 3L9", city: "Toronto", state: "Ontario", deliveryDays: 4 },
+    { country: "AU", postalCode: "2000", city: "Sydney", state: "New South Wales", deliveryDays: 3 },
+    { country: "IN", postalCode: "400001", city: "Mumbai", state: "Maharashtra", deliveryDays: 2 },
   ];
 
   for (const row of postalCodes) {

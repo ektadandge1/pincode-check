@@ -5,8 +5,6 @@
       "heading_label": "शीर्षक",
       "supporting_text_label": "सहायक टेक्स्ट",
       "button_label": "बटन लेबल",
-      "cod_enabled_label": "कैश ऑन डिलीवरी की उपलब्धता दिखाएं",
-      "cod_enabled_info": "सफल ZIP जांच के बाद COD या प्रीपेड स्थिति दिखाएं। उपलब्धता आपके डिलीवरी नियमों से आती है।",
       "auto_check_saved_address_label": "सहेजे हुए ग्राहक पते की अपने आप जांच करें",
       "auto_check_saved_address_info": "उपलब्ध होने पर लॉग-इन ग्राहक के डिफ़ॉल्ट पते का उपयोग करता है। यह सटीक IP स्थान का उपयोग नहीं करता।",
       "show_cutoff_countdown_label": "डिलीवरी समय-सीमा की उलटी गिनती दिखाएं",

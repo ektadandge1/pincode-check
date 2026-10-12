@@ -35,3 +35,11 @@ test("supports uppercase shortcodes and fallback values", () => {
     "Delivery in 4 to 5 days",
   );
 });
+
+test("retired placeholders are unsupported and never render legacy values or fallbacks", () => {
+  const keys = ["cod_message", "delivery_charge_message", "delivery_charge", "currency"];
+  assert.deepEqual(unsupportedDeliveryShortcodes(keys.map((key) => `{${key}}`).join(" ")), keys);
+  assert.equal(renderDeliveryMessage(`Delivery {date}. ${keys.map((key) => `{${key.toUpperCase()},legacy}`).join(" ")}`, {
+    date: "Friday", ...Object.fromEntries(keys.map((key) => [key, "legacy"])),
+  }), "Delivery Friday.");
+});

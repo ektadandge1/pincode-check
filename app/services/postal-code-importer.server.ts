@@ -1,7 +1,6 @@
 import prisma from "../db.server";
 import {
   parsePostalImportOptions,
-  validateImportCurrency,
   type PostalImportOptions,
 } from "../utils/postal-import";
 import { parseCsv, type CsvRow } from "../utils/csv.server";
@@ -16,13 +15,11 @@ type ImportSource = "csv" | "google_sheet";
 export type PostalImportPolicy = {
   patterns: boolean;
   zones: boolean;
-  deliveryOptions: boolean;
 };
 
 const FULL_IMPORT_POLICY: PostalImportPolicy = {
   patterns: true,
   zones: true,
-  deliveryOptions: true,
 };
 
 type ImportResult = {
@@ -184,17 +181,6 @@ export async function importPostalCodesFromCsv(
       await recordFailure(row, index, "Zones require an active Standard subscription.");
       continue;
     }
-    if (
-      !policy.deliveryOptions &&
-      (validation.data.deliveryCharge !== undefined ||
-        validation.data.currency !== undefined ||
-        validation.data.sameDayAvailable ||
-        validation.data.nextDayAvailable ||
-        validation.data.expressAvailable)
-    ) {
-      await recordFailure(row, index, "Delivery charges and speed options require an active Standard subscription.");
-      continue;
-    }
 
     try {
       await prisma.$transaction(async (tx) => {
@@ -202,11 +188,6 @@ export async function importPostalCodesFromCsv(
         const where = {
           shop_country_postalCode: { shop, country: data.country, postalCode: data.postalCode },
         };
-        const existing = await tx.postalCode.findUnique({
-          where,
-          select: { deliveryCharge: true, currency: true },
-        });
-        validateImportCurrency(data, existing);
         const zone = zoneName ? await tx.zone.upsert({
           where: { shop_name: { shop, name: zoneName } },
           create: { shop, name: zoneName, country: data.country },

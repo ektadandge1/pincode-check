@@ -18,6 +18,7 @@ import {
   Page,
   Select,
   Spinner,
+  Tag,
   Text,
   TextField,
 } from "@shopify/polaris";
@@ -31,6 +32,13 @@ import {
   normalizeCountryCode,
   parsePostalPattern,
 } from "../utils/delivery.server";
+import {
+  computeDeliveryDetails,
+  formatIsoDateInZone,
+  formatReadableDate,
+  parseCsvToStringSet,
+  parseWeekendDays,
+} from "../utils/delivery-date";
 import {
   normalizeActivationMode,
   normalizeInventoryMode,
@@ -49,7 +57,7 @@ import { regionsForCountry, suggestedRegions } from "../utils/regions";
 import { COUNTRY_OPTIONS } from "../utils/countries";
 import { compactCollectionName } from "../utils/target-display";
 import { buildPostalCsvTemplate } from "../utils/postal-csv-template";
-import { BULK_RULE_FIELDS, parseZoneRulePatch, validatePatchedRule } from "../utils/zone-rule-edit";
+import { BULK_RULE_FIELDS, parseZoneRulePatch } from "../utils/zone-rule-edit";
 import type { loader as zoneRulesLoader } from "./app.zone-rules";
 
 type ActionData = {
@@ -246,45 +254,10 @@ function isValidCustomDatePattern(pattern: string): boolean {
   return /^[\s,./-]*$/.test(remainder);
 }
 
-function previewDate(locale: string, days = 5, dateFormat = "weekday_day_month"): string {
-  try {
-    if (dateFormat.startsWith("custom:")) {
-      const date = new Date(Date.now() + days * 86_400_000);
-      const pattern = dateFormat.slice(7);
-      const numeric = Object.fromEntries(new Intl.DateTimeFormat("en-CA-u-ca-gregory-nu-latn", {
-        year: "numeric", month: "2-digit", day: "2-digit",
-      }).formatToParts(date).map((part) => [part.type, part.value]));
-      const monthLong = new Intl.DateTimeFormat(locale || "en", { month: "long" }).format(date);
-      const monthShort = new Intl.DateTimeFormat(locale || "en", { month: "short" }).format(date);
-      const weekday = new Intl.DateTimeFormat(locale || "en", { weekday: "long" }).format(date);
-      const replacements: Record<string, string> = {
-        YYYY: numeric.year, YY: numeric.year.slice(-2), MMMM: monthLong, MMM: monthShort,
-        MM: numeric.month, M: String(Number(numeric.month)), DD: numeric.day,
-        D: String(Number(numeric.day)), dddd: weekday, ddd: weekday.slice(0, 3),
-      };
-      return pattern.replace(/YYYY|MMMM|dddd|MMM|ddd|YY|MM|DD|M|D/g, (token) => replacements[token]);
-    }
-    const options: Intl.DateTimeFormatOptions = dateFormat === "month_day"
-      ? { month: "short", day: "2-digit" }
-      : dateFormat === "day_month"
-        ? { day: "2-digit", month: "short" }
-        : dateFormat === "numeric"
-          ? { day: "2-digit", month: "2-digit", year: "numeric" }
-          : { weekday: "long", day: "2-digit", month: "short" };
-    return new Intl.DateTimeFormat(locale || "en", options).format(new Date(Date.now() + days * 86_400_000));
-  } catch {
-    return "Friday, Oct 02";
-  }
-}
-
-function previewIsoDate(days: number): string {
-  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
-}
-
 const ETA_MESSAGE_TEMPLATES = [
   { label: "Choose a ready template", value: "" },
-  { label: "Delivery date range", value: "Delivery between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}" },
-  { label: "Promised delivery date", value: "Get it by {max_delivery_date}. {cod_message}{delivery_charge_message}" },
+  { label: "Delivery date range", value: "Delivery between {min_delivery_date} and {max_delivery_date}." },
+  { label: "Promised delivery date", value: "Get it by {max_delivery_date}." },
   { label: "Order to doorstep", value: "Order on {order_date}, ships by {dispatch_date_formatted}, and arrives between {min_delivery_date} and {max_delivery_date}." },
   { label: "Dates and lead days", value: "Estimated delivery: {delivery_date_range} ({min_lead_days}-{max_lead_days} business days)." },
 ];
@@ -297,12 +270,19 @@ const SHORTCODE_OPTIONS = [
   })),
 ];
 
+function stripRemovedMessageValues(message: string): string {
+  // Legacy templates must not re-save retired placeholders or their fallback text.
+  return message.replace(/\{(?:cod_message|delivery_charge_message|delivery_charge|currency)(?:,\s*[^}]+)?\}/gi, "").trim();
+}
+
 const ETA_DAY_PRESETS = [
   { label: "Custom value", value: "custom" },
   { label: "Ships immediately · 0 days", value: "0" },
   { label: "Standard preparation · 2 days", value: "2" },
   { label: "Custom manufacturing · 7 days", value: "7" },
 ];
+
+const MAX_TARGET_ZONES = 100;
 
 function hasCourierIntegrationConfig() {
   return Boolean(
@@ -428,6 +408,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return {
       shop,
+      previewNow: new Date().toISOString(),
       apiKey: process.env.SHOPIFY_API_KEY || "",
       courierIntegrationAvailable: hasCourierIntegrationConfig(),
     setting: setting ?? {
@@ -447,11 +428,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       retryCount: 1,
       disableAddToCart: false,
       requireValidPin: false,
-       successMessage: "Delivery between {min_delivery_date} and {max_delivery_date}. {cod_message}{delivery_charge_message}",
+       successMessage: "Delivery between {min_delivery_date} and {max_delivery_date}.",
       unavailableMessage: "Sorry, delivery is not available for this postal code.",
-      codAvailableMessage: "COD available.",
-      codUnavailableMessage: "Prepaid only.",
-      deliveryChargeMessage: " Delivery charge: {currency}{delivery_charge}.",
       countdownEnabled: true,
       countdownTargetMode: "all",
       countdownProductIdsCsv: "",
@@ -465,7 +443,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     samplePostalCodes: rows,
     coverageSearch, coverageGroup, coveragePage, coverageCount, pageSize, targetPage, unassignedCount,
     zones,
-    targets,
+    targets: targets.map((target) => ({
+      ...target,
+      customSuccessMessage: stripRemovedMessageValues(target.customSuccessMessage ?? "") || null,
+    })),
     targetCount,
     products,
     totalPatterns,
@@ -547,11 +528,8 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     const weekendDaysCsv = [...new Set(weekendDays)].sort().join(",");
     const courierTimeoutMs = Number(formData.get("courierTimeoutMs") ?? 2000);
     const retryCount = Number(formData.get("retryCount") ?? 1);
-    const successMessage = String(formData.get("successMessage") ?? "").trim();
-    const unavailableMessage = String(formData.get("unavailableMessage") ?? "").trim();
-    const codAvailableMessage = String(formData.get("codAvailableMessage") ?? "").trim();
-    const codUnavailableMessage = String(formData.get("codUnavailableMessage") ?? "").trim();
-    const deliveryChargeMessage = String(formData.get("deliveryChargeMessage") ?? "").trim();
+    const successMessage = stripRemovedMessageValues(String(formData.get("successMessage") ?? ""));
+    const unavailableMessage = stripRemovedMessageValues(String(formData.get("unavailableMessage") ?? ""));
 
     if (!Number.isInteger(cutoffHour24) || cutoffHour24 < 0 || cutoffHour24 > 23) {
       return { ok: false, message: "Cutoff hour must be an integer from 0 to 23." } satisfies ActionData;
@@ -591,7 +569,7 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     if (!Number.isInteger(retryCount) || retryCount < 0 || retryCount > 3) {
       return { ok: false, message: "Retry count must be an integer from 0 to 3." } satisfies ActionData;
     }
-    const messages = [successMessage, unavailableMessage, codAvailableMessage, codUnavailableMessage, deliveryChargeMessage];
+    const messages = [successMessage, unavailableMessage];
     if (access.features.customMessages && messages.some((message) => !message || message.length > 500)) {
       return { ok: false, message: "Storefront messages are required and must be 500 characters or fewer." } satisfies ActionData;
     }
@@ -608,9 +586,6 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
           requireValidPin,
           successMessage,
           unavailableMessage,
-          codAvailableMessage,
-          codUnavailableMessage,
-          deliveryChargeMessage,
         }
       : {};
 
@@ -874,6 +849,8 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     const name = String(formData.get("targetName") ?? "").trim();
     const kindRaw = String(formData.get("targetKind") ?? "").trim();
     const valueRaw = String(formData.get("targetValue") ?? "").trim();
+    const zoneIdsRaw = String(formData.get("targetZoneIdsCsv") ?? "").trim();
+    const zoneIds = [...new Set(zoneIdsRaw ? zoneIdsRaw.split(",").map((id) => id.trim()) : [])];
     const priority = Number(formData.get("targetPriority") ?? 100);
     const requireValidPin = parseBool(formData.get("targetRequireValidPin"));
     const excluded = parseBool(formData.get("targetExcluded"));
@@ -885,7 +862,7 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     const countryCode = countryRaw.toUpperCase() || null;
     const stateRegion = String(formData.get("targetStateRegion") ?? "").trim() || null;
     const inventoryMode = normalizeInventoryMode(String(formData.get("targetInventoryMode") ?? "any"));
-    const customSuccessMessage = String(formData.get("targetCustomSuccessMessage") ?? "").trim() || null;
+    const customSuccessMessage = stripRemovedMessageValues(String(formData.get("targetCustomSuccessMessage") ?? "")) || null;
     const activationMode = normalizeActivationMode(String(formData.get("targetActivationMode") ?? "always"));
     const activeFromLocalRaw = String(formData.get("targetActiveFromLocal") ?? "").trim();
     const activeUntilLocalRaw = String(formData.get("targetActiveUntilLocal") ?? "").trim();
@@ -925,6 +902,16 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     }
     if ([processingDays, transitDays].some((days) => days !== null && (!Number.isInteger(days) || days < 0 || days > 60))) {
       return { ok: false, message: "ETA override days must be integers from 0 to 60, or left blank." } satisfies ActionData;
+    }
+    if (zoneIdsRaw.length > 2_000 || zoneIds.length > MAX_TARGET_ZONES
+      || zoneIds.some((id) => !/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) > 2_147_483_647)) {
+      return { ok: false, message: `Select up to ${MAX_TARGET_ZONES} valid delivery zones, or leave the selection empty for all zones.` } satisfies ActionData;
+    }
+    if (zoneIds.length) {
+      const ownedZones = await prisma.zone.count({ where: { shop, enabled: true, id: { in: zoneIds.map(Number) } } });
+      if (ownedZones !== zoneIds.length) {
+        return { ok: false, message: "One or more selected zones are disabled or unavailable. Remove them or choose enabled zones from this store." } satisfies ActionData;
+      }
     }
     if (countryRaw && !ISO_COUNTRY_CODES.has(countryCode ?? "")) {
       return { ok: false, message: "Country must be blank or a 2-letter ISO country code." } satisfies ActionData;
@@ -976,6 +963,7 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
         name,
         targetKind: kind,
         targetValue: value,
+        zoneIdsCsv: zoneIds.sort((a, b) => Number(a) - Number(b)).join(","),
         countryCode,
         stateRegion,
         inventoryMode,
@@ -1058,10 +1046,6 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : "Invalid changes." } satisfies ActionData;
     }
-    if (patch.deliveryCharge !== undefined || patch.currency !== undefined
-      || patch.sameDayAvailable !== undefined || patch.nextDayAvailable !== undefined || patch.expressAvailable !== undefined) {
-      requireFeature(access, "deliveryOptions");
-    }
     return prisma.$transaction(async (tx) => {
       const zone = await tx.zone.findFirst({ where: { id: zoneId, shop } });
       if (!zone) return { ok: false, message: "Zone not found." } satisfies ActionData;
@@ -1069,11 +1053,6 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
       const rules = await tx.postalCode.findMany({ where });
       if (rules.length !== ids.length) {
         return { ok: false, message: "Some selected rules no longer belong to this zone. Reload the list and select again." } satisfies ActionData;
-      }
-      try {
-        for (const rule of rules) validatePatchedRule(rule, patch);
-      } catch (error) {
-        return { ok: false, message: error instanceof Error ? error.message : "Invalid changes." } satisfies ActionData;
       }
       await tx.postalCode.updateMany({ where, data: patch });
       return { ok: true, message: `${rules.length} postal rules updated.`, intent, zoneId } satisfies ActionData;
@@ -1118,35 +1097,15 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     }
     const deliveryDays = Number(deliveryDaysRaw);
     const serviceable = parseBool(formData.get("serviceable"));
-    const codAvailable = parseBool(formData.get("codAvailable"));
     const city = String(formData.get("city") ?? "").trim() || null;
     const state = String(formData.get("state") ?? "").trim() || null;
     const zoneName = String(formData.get("zone") ?? "").trim() || null;
     const zoneIdRaw = Number(formData.get("zoneId") ?? 0);
     const zonePriority = Number(formData.get("zonePriority") ?? 100);
-    const deliveryChargeRaw = String(formData.get("deliveryCharge") ?? "").trim();
-    const deliveryCharge = deliveryChargeRaw ? Number(deliveryChargeRaw) : null;
-    const currency = String(formData.get("currency") ?? "").trim().toUpperCase() || null;
-    const sameDayAvailable = parseBool(formData.get("sameDayAvailable"));
-    const nextDayAvailable = parseBool(formData.get("nextDayAvailable"));
-    const expressAvailable = parseBool(formData.get("expressAvailable"));
-    if (
-      !access.features.deliveryOptions &&
-      (deliveryChargeRaw || sameDayAvailable || nextDayAvailable || expressAvailable)
-    ) {
-      requireFeature(access, "deliveryOptions");
-    }
     if ((zoneIdRaw > 0 || zoneName) && !access.features.zones) requireFeature(access, "zones");
 
     if (!Number.isInteger(deliveryDays) || deliveryDays < 0 || deliveryDays > 60) {
       return { ok: false, message: "Delivery days should be between 0 and 60." } satisfies ActionData;
-    }
-
-    if (deliveryCharge !== null && (!Number.isFinite(deliveryCharge) || deliveryCharge < 0 || !currency || !/^[A-Z]{3}$/.test(currency))) {
-      return { ok: false, message: "Delivery charge requires a positive amount and 3-letter currency." } satisfies ActionData;
-    }
-    if (currency && !/^[A-Z]{3}$/.test(currency)) {
-      return { ok: false, message: "Currency must be a 3-letter ISO code such as USD." } satisfies ActionData;
     }
 
     if (postalRuleId !== null) {
@@ -1209,12 +1168,6 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
               zoneId: editZoneId,
               deliveryDays,
               serviceable,
-              codAvailable,
-              deliveryCharge,
-              currency,
-              sameDayAvailable,
-              nextDayAvailable,
-              expressAvailable,
               city,
               state,
               zone: editZoneName,
@@ -1285,12 +1238,6 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
           zoneId,
           deliveryDays,
           serviceable,
-          codAvailable,
-          deliveryCharge,
-          currency,
-          sameDayAvailable,
-          nextDayAvailable,
-          expressAvailable,
           city,
           state,
           zone: resolvedZoneName,
@@ -1302,12 +1249,6 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
           zoneId,
           deliveryDays,
           serviceable,
-          codAvailable,
-          deliveryCharge,
-          currency,
-          sameDayAvailable,
-          nextDayAvailable,
-          expressAvailable,
           city,
           state,
           zone: resolvedZoneName,
@@ -1377,7 +1318,7 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
     }
     const lines = rawLines;
     const csv = [
-      "country,postal_code,delivery_days,serviceable,cod_available,city,state,zone,delivery_charge,currency,same_day,next_day,express",
+      "country,postal_code,delivery_days,serviceable,city,state,zone",
       ...lines,
     ].join("\n");
     try {
@@ -1396,18 +1337,16 @@ async function deliverySettingsAction(request: Request, { admin, session }: Awai
 
 const RULE_FIELD_LABELS = {
   country: "Country", postalCode: "Postal code, range, or wildcard",
-  deliveryDays: "Transit / delivery days", serviceable: "Delivery available", codAvailable: "COD available",
-  deliveryCharge: "Delivery charge (blank to clear)", currency: "Currency (blank to clear)",
-  sameDayAvailable: "Same-day available", nextDayAvailable: "Next-day available", expressAvailable: "Express available",
+  deliveryDays: "Transit / delivery days", serviceable: "Delivery available",
   city: "City (blank to clear)", state: "State / region (blank to clear)",
 };
-const RULE_BOOLEAN_FIELDS = new Set<string>(["serviceable", "codAvailable", "sameDayAvailable", "nextDayAvailable", "expressAvailable"]);
+const RULE_BOOLEAN_FIELDS = new Set<string>(["serviceable"]);
 const RULE_EDIT_FIELDS = ["country", "postalCode", ...BULK_RULE_FIELDS] as const;
 type RuleDraft = Record<(typeof RULE_EDIT_FIELDS)[number] | "zoneId" | "zone", string>;
 type ZoneSummary = { id: number; name: string; country: string | null; priority: number; enabled: boolean };
 
-function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
-  zone: ZoneSummary; zones: ZoneSummary[]; deliveryOptions: boolean; onClose: () => void; onDirtyChange: (dirty: boolean) => void;
+function ZoneEditor({ zone, zones, onClose, onDirtyChange }: {
+  zone: ZoneSummary; zones: ZoneSummary[]; onClose: () => void; onDirtyChange: (dirty: boolean) => void;
 }) {
   const list = useFetcher<typeof zoneRulesLoader>();
   const save = useFetcher<ActionData>();
@@ -1421,8 +1360,7 @@ function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
   const [savedMetadata, setSavedMetadata] = useState(metadata);
   const [rule, setRule] = useState<{ id: number; values: RuleDraft; original: RuleDraft } | null>(null);
   const [bulkValues, setBulkValues] = useState<Record<(typeof BULK_RULE_FIELDS)[number], string>>({
-    deliveryDays: "", serviceable: "true", codAvailable: "false", deliveryCharge: "", currency: "",
-    sameDayAvailable: "false", nextDayAvailable: "false", expressAvailable: "false", city: "", state: "",
+    deliveryDays: "", serviceable: "true", city: "", state: "",
   });
   const [applied, setApplied] = useState<string[]>([]);
   const [notice, setNotice] = useState<ActionData | null>(null);
@@ -1495,11 +1433,9 @@ function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
       ? <Select label={RULE_FIELD_LABELS[key]} name={key} options={[{ label: "Yes", value: "true" }, { label: "No", value: "false" }]} value={value} onChange={onChange} disabled={disabled} />
       : <TextField label={RULE_FIELD_LABELS[key]} name={key} value={value} onChange={onChange} disabled={disabled} autoComplete="off"
           type={key === "deliveryDays" ? "number" : "text"}
-          inputMode={key === "deliveryCharge" ? "decimal" : undefined}
           min={key === "deliveryDays" ? 0 : undefined}
           max={key === "deliveryDays" ? 60 : undefined} />
   );
-  const optionField = (key: string) => ["deliveryCharge", "currency", "sameDayAvailable", "nextDayAvailable", "expressAvailable"].includes(key);
 
   return <Modal open onClose={close} title={`Edit zone: ${savedMetadata.name}`} size="large"
     secondaryActions={[{ content: "Close", onAction: close, disabled: saving }]}>
@@ -1542,15 +1478,13 @@ function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
           <Text as="p">{`${current.total} matching rules. Page ${current.page} of ${Math.max(1, Math.ceil(current.total / current.pageSize))}. ${selected.length} selected.`}</Text>
           <Checkbox label="Select all rules on this page" checked={current.rules.length > 0 && selected.length === current.rules.length} disabled={saving || !!rule || current.rules.length === 0}
             onChange={(checked) => setSelected(checked ? current.rules.map((row) => row.id) : [])} />
-          <DataTable columnContentTypes={["text", "text", "text", "numeric", "text", "text", "text", "text", "text", "text"]}
-            headings={["Select", "Country", "Postal rule", "Transit days", "Available", "COD", "Charge", "Location", "Options", "Actions"]}
+          <DataTable columnContentTypes={["text", "text", "text", "numeric", "text", "text", "text"]}
+            headings={["Select", "Country", "Postal rule", "Transit days", "Available", "Location", "Actions"]}
             rows={current.rules.map((row) => [
               <Checkbox key={`${row.id}-select`} label={`Select ${row.country} ${row.postalCode}`} labelHidden checked={selected.includes(row.id)} disabled={saving || !!rule}
                 onChange={(checked) => setSelected((ids) => checked ? [...ids, row.id] : ids.filter((id) => id !== row.id))} />,
-              row.country, row.postalCode, row.deliveryDays, row.serviceable ? "Yes" : "No", row.codAvailable ? "Yes" : "No",
-              row.deliveryCharge === null ? "-" : `${row.currency ?? ""} ${row.deliveryCharge}`,
+              row.country, row.postalCode, row.deliveryDays, row.serviceable ? "Yes" : "No",
               [row.city, row.state].filter(Boolean).join(", ") || "-",
-              [row.sameDayAvailable && "Same-day", row.nextDayAvailable && "Next-day", row.expressAvailable && "Express"].filter(Boolean).join(", ") || "-",
               <Button key={`${row.id}-edit`} size="slim" disabled={saving} onClick={() => {
                 if (!discardRule()) return;
                 const values = Object.fromEntries(RULE_EDIT_FIELDS.map((key) => [key, row[key] === null ? "" : String(row[key])])) as RuleDraft;
@@ -1576,17 +1510,15 @@ function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
               <FormLayout>
                <Text as="h3" variant="headingMd">Edit postal rule</Text>
               <FormLayout.Group condensed>
-                {(["country", "postalCode", "deliveryDays", "serviceable", "codAvailable"] as const).map((key) => <div key={key}>
-                  {field(key, rule.values[key], (value) => setRule((currentRule) => currentRule ? { ...currentRule, values: { ...currentRule.values, [key]: value } } : null), !deliveryOptions && optionField(key))}
-                  {!deliveryOptions && optionField(key) ? <input type="hidden" name={key} value={rule.values[key]} /> : null}
+                {(["country", "postalCode", "deliveryDays", "serviceable"] as const).map((key) => <div key={key}>
+                  {field(key, rule.values[key], (value) => setRule((currentRule) => currentRule ? { ...currentRule, values: { ...currentRule.values, [key]: value } } : null))}
                 </div>)}
               </FormLayout.Group>
               <details className="incode-zone-editor__details">
                 <summary>More delivery details</summary>
                 <FormLayout.Group condensed>
-                  {RULE_EDIT_FIELDS.filter((key) => !["country", "postalCode", "deliveryDays", "serviceable", "codAvailable"].includes(key)).map((key) => <div key={key}>
-                    {field(key, rule.values[key], (value) => setRule((currentRule) => currentRule ? { ...currentRule, values: { ...currentRule.values, [key]: value } } : null), !deliveryOptions && optionField(key))}
-                    {!deliveryOptions && optionField(key) ? <input type="hidden" name={key} value={rule.values[key]} /> : null}
+                  {RULE_EDIT_FIELDS.filter((key) => !["country", "postalCode", "deliveryDays", "serviceable"].includes(key)).map((key) => <div key={key}>
+                    {field(key, rule.values[key], (value) => setRule((currentRule) => currentRule ? { ...currentRule, values: { ...currentRule.values, [key]: value } } : null))}
                   </div>)}
                 </FormLayout.Group>
                 <FormLayout.Group condensed>
@@ -1608,9 +1540,9 @@ function ZoneEditor({ zone, zones, deliveryOptions, onClose, onDirtyChange }: {
       <BlockStack gap="300">
         <details className="incode-zone-editor__details">
           <summary>Bulk update selected rules</summary>
-          <Text as="p" tone="subdued">Select rules above, then choose only the fields you want to change. Blank charge, currency, city, or state clears that field.</Text>
+          <Text as="p" tone="subdued">Select rules above, then choose only the fields you want to change. Blank city or state clears that field.</Text>
           {BULK_RULE_FIELDS.map((key) => <BlockStack key={key} gap="200">
-            <Checkbox label={`Apply ${RULE_FIELD_LABELS[key]}`} checked={applied.includes(key)} disabled={saving || !!rule || (!deliveryOptions && optionField(key))}
+            <Checkbox label={`Apply ${RULE_FIELD_LABELS[key]}`} checked={applied.includes(key)} disabled={saving || !!rule}
               onChange={(checked) => setApplied((keys) => checked ? [...keys, key] : keys.filter((item) => item !== key))} />
             {applied.includes(key) ? field(key, bulkValues[key], (value) => setBulkValues((values) => ({ ...values, [key]: value })), saving || !!rule) : null}
           </BlockStack>)}
@@ -1642,7 +1574,7 @@ export default function DeliverySettingsPage() {
   const updateQuery = (values: Record<string, string>) => {
     const params = new URLSearchParams(searchParams);
     Object.entries(values).forEach(([key, value]) => params.set(key, value));
-    setSearchParams(params);
+    setSearchParams(params, { preventScrollReset: true });
   };
   const activeTab = SETTINGS_TABS.find((tab) => tab.id === searchParams.get("tab")) ?? SETTINGS_TABS[0];
   const tabUrl = (tab: string) => {
@@ -1679,11 +1611,8 @@ export default function DeliverySettingsPage() {
     inventoryAwareEnabled: data.setting.inventoryAwareEnabled,
     disableAddToCart: data.setting.disableAddToCart,
     requireValidPin: data.setting.requireValidPin,
-    successMessage: data.setting.successMessage,
-    unavailableMessage: data.setting.unavailableMessage,
-    codAvailableMessage: data.setting.codAvailableMessage,
-    codUnavailableMessage: data.setting.codUnavailableMessage,
-    deliveryChargeMessage: data.setting.deliveryChargeMessage,
+    successMessage: stripRemovedMessageValues(data.setting.successMessage),
+    unavailableMessage: stripRemovedMessageValues(data.setting.unavailableMessage),
   });
   const [googleSheetCsvUrl, setGoogleSheetCsvUrl] = useState(data.setting.googleSheetCsvUrl ?? "");
   const [savedSettings, setSavedSettings] = useState(settings);
@@ -1717,6 +1646,7 @@ export default function DeliverySettingsPage() {
     name: "",
     kind: "product",
     value: "",
+    zoneIdsCsv: "",
     priority: "100",
     requireValidPin: true,
     processingDays: "",
@@ -1737,14 +1667,17 @@ export default function DeliverySettingsPage() {
   const targetBaseline = useRef(targetForm);
   const emptyTargetForm = useRef(targetForm);
   const [productSearch, setProductSearch] = useState("");
+  const [targetZoneSearch, setTargetZoneSearch] = useState("");
   const resetTargetForm = () => {
     targetBaseline.current = emptyTargetForm.current;
     setEditingTargetId(null);
     setProductSearch("");
+    setTargetZoneSearch("");
     setTargetForm({
       name: "",
       kind: "product",
       value: "",
+      zoneIdsCsv: "",
       priority: "100",
       requireValidPin: true,
       processingDays: "",
@@ -1778,13 +1711,7 @@ export default function DeliverySettingsPage() {
     zone: "",
     city: "",
     state: "",
-    deliveryCharge: "",
-    currency: "",
     serviceable: true,
-    codAvailable: false,
-    sameDayAvailable: false,
-    nextDayAvailable: false,
-    expressAvailable: false,
   });
   const [editingPostalRule, setEditingPostalRule] = useState<{ id: number; postalCode: string } | null>(null);
   const postalBaseline = useRef(postalCodeForm);
@@ -1800,13 +1727,7 @@ export default function DeliverySettingsPage() {
         zone: "",
         city: "",
         state: "",
-        deliveryCharge: "",
-        currency: "",
         serviceable: true,
-        codAvailable: false,
-        sameDayAvailable: false,
-        nextDayAvailable: false,
-        expressAvailable: false,
         };
         postalBaseline.current = cleared;
         return cleared;
@@ -1835,9 +1756,39 @@ export default function DeliverySettingsPage() {
     .filter(Boolean)
     .sort();
   const sampleProcessingDays = Math.max(0, Number(settings.processingDays) || 0);
-  const sampleMinLeadDays = sampleProcessingDays + 3;
+  const sampleTransitDays = Math.max(0, Number(settings.fallbackDays) || 0);
+  const sampleMinLeadDays = sampleProcessingDays + sampleTransitDays;
   const sampleMaxLeadDays = sampleMinLeadDays + Math.max(0, Number(settings.deliveryWindowDays) || 0);
   const selectedDateFormat = settings.dateFormat === "custom" ? `custom:${settings.customDateFormat}` : settings.dateFormat;
+  const sampleDates = (() => {
+    try {
+      if (settings.dateFormat === "custom" && !isValidCustomDatePattern(settings.customDateFormat)) return null;
+      const input = {
+        processingDays: sampleProcessingDays,
+        transitDays: sampleTransitDays,
+        cutoffHour24: Number(settings.cutoffHour24),
+        holidays: parseCsvToStringSet(data.setting.holidaysCsv),
+        weekendDays: parseWeekendDays(settings.weekendDaysCsv),
+        timeZone: settings.timeZone,
+        now: new Date(data.previewNow),
+      };
+      const minimum = computeDeliveryDetails(input);
+      const maximum = computeDeliveryDetails({ ...input, transitDays: sampleMaxLeadDays - sampleProcessingDays });
+      const label = (date: Date) => formatReadableDate(date, settings.locale, settings.timeZone, selectedDateFormat);
+      return {
+        order: label(minimum.orderDate),
+        dispatch: label(minimum.dispatchDate),
+        minimum: label(minimum.estimatedDate),
+        maximum: label(maximum.estimatedDate),
+        dispatchIso: formatIsoDateInZone(minimum.dispatchDate, settings.timeZone),
+        minimumIso: formatIsoDateInZone(minimum.estimatedDate, settings.timeZone),
+        maximumIso: formatIsoDateInZone(maximum.estimatedDate, settings.timeZone),
+      };
+    } catch {
+      // Invalid unsaved schedules must not crash the settings page or show stale dates.
+      return null;
+    }
+  })();
   const visibleSettingFields: string[] = activeTab.id === "timing"
     ? ["processingDays", "fallbackDays", "deliveryWindowDays", "timeZone", "locale", "cutoffHour24", "weekendDaysCsv"]
     : activeTab.id === "coverage"
@@ -1847,13 +1798,13 @@ export default function DeliverySettingsPage() {
         : activeTab.id === "optional"
           ? ["disableAddToCart", "requireValidPin"]
           : activeTab.id === "messages"
-            ? ["successMessage", "unavailableMessage", "codAvailableMessage", "codUnavailableMessage", "deliveryChargeMessage"]
+            ? ["successMessage", "unavailableMessage"]
             : [];
-  const sampleOrderDate = previewDate(settings.locale, 0, selectedDateFormat);
-  const sampleDispatchDate = previewDate(settings.locale, sampleProcessingDays, selectedDateFormat);
-  const sampleMinDeliveryDate = previewDate(settings.locale, sampleMinLeadDays, selectedDateFormat);
-  const sampleMaxDeliveryDate = previewDate(settings.locale, sampleMaxLeadDays, selectedDateFormat);
-  const previewMessage = renderDeliveryMessage(settings.successMessage, {
+  const sampleOrderDate = sampleDates?.order ?? "";
+  const sampleDispatchDate = sampleDates?.dispatch ?? "";
+  const sampleMinDeliveryDate = sampleDates?.minimum ?? "";
+  const sampleMaxDeliveryDate = sampleDates?.maximum ?? "";
+  const previewMessage = sampleDates ? renderDeliveryMessage(settings.successMessage, {
     date: sampleMaxDeliveryDate,
     min_delivery_date: sampleMinDeliveryDate,
     max_delivery_date: sampleMaxDeliveryDate,
@@ -1862,19 +1813,15 @@ export default function DeliverySettingsPage() {
     max_lead_days: sampleMaxLeadDays,
     order_date: sampleOrderDate,
     dispatch_date_formatted: sampleDispatchDate,
-    estimated_date: previewIsoDate(sampleMinLeadDays),
-    estimated_date_max: previewIsoDate(sampleMaxLeadDays),
+    estimated_date: sampleDates.minimumIso,
+    estimated_date_max: sampleDates.maximumIso,
     days: sampleMinLeadDays,
     processing_days: settings.processingDays || "0",
-    transit_days: 3,
-    dispatch_date: previewIsoDate(sampleProcessingDays),
+    transit_days: sampleTransitDays,
+    dispatch_date: sampleDates.dispatchIso,
     country: "US",
     postal_code: "10001",
-    cod_message: settings.codAvailableMessage,
-    delivery_charge_message: "",
-    delivery_charge: "",
-    currency: "USD",
-  });
+  }) : "Select valid timing settings and at least one business day to preview delivery dates.";
   const zoneOptions = [
     { label: "No zone", value: "" },
     ...data.zones.map((zone) => ({
@@ -1882,6 +1829,22 @@ export default function DeliverySettingsPage() {
       value: String(zone.id),
     })),
   ];
+  const selectedTargetZones = targetForm.zoneIdsCsv.split(",").map((id) => id.trim()).filter(Boolean);
+  const targetZoneOptions = data.zones
+    .filter((zone) => zone.enabled || selectedTargetZones.includes(String(zone.id)))
+    .map((zone) => ({
+      label: `${zone.name}${zone.country ? ` (${zone.country})` : ""}${zone.enabled ? "" : " - disabled"}`,
+      value: String(zone.id),
+      disabled: !zone.enabled,
+    }));
+  const visibleTargetZones = targetZoneOptions.filter((zone) => selectedTargetZones.includes(zone.value)
+    || zone.label.toLowerCase().includes(targetZoneSearch.trim().toLowerCase()));
+  const targetZonesLabel = (csv: string) => csv.trim()
+    ? csv.split(",").map((id) => {
+      const zone = data.zones.find((item) => String(item.id) === id.trim());
+      return zone ? `${zone.name}${zone.enabled ? "" : " (disabled)"}` : `Unavailable zone #${id.trim()}`;
+    }).join(", ")
+    : "All zones";
   const stateOptions = (LOCATION_SUGGESTIONS[postalCodeForm.country] ?? []).map((location) => ({
     label: location.state,
     value: location.state,
@@ -1944,13 +1907,7 @@ export default function DeliverySettingsPage() {
       zone: row.zoneGroup?.name ?? row.zone ?? "",
       city: row.city ?? "",
       state: row.state ?? "",
-      deliveryCharge: row.deliveryCharge !== null && row.deliveryCharge !== undefined ? String(row.deliveryCharge) : "",
-      currency: row.currency ?? "",
       serviceable: row.serviceable,
-      codAvailable: row.codAvailable,
-      sameDayAvailable: row.sameDayAvailable,
-      nextDayAvailable: row.nextDayAvailable,
-      expressAvailable: row.expressAvailable,
     };
     postalBaseline.current = draft;
     setPostalCodeForm(draft);
@@ -1962,11 +1919,13 @@ export default function DeliverySettingsPage() {
       ? data.products.find((item) => item.id.replace(/\D/g, "") === target.targetValue.replace(/\D/g, ""))
       : undefined;
     setEditingTargetId(target.id);
+    setTargetZoneSearch("");
     setProductSearch(product ? `${product.title} · ${product.handle}` : target.targetKind === "product" ? target.targetValue : "");
     const draft = {
       name: target.name,
       kind: target.targetKind,
       value: target.targetKind === "product" ? (product?.id ?? target.targetValue).replace(/\D/g, "") : target.targetValue,
+      zoneIdsCsv: target.zoneIdsCsv,
       priority: String(target.priority),
       requireValidPin: target.requireValidPin,
       processingDays: target.processingDays === null ? "" : String(target.processingDays),
@@ -2008,8 +1967,6 @@ export default function DeliverySettingsPage() {
     row.zoneGroup?.name ?? row.zone ?? "-",
     row.deliveryDays,
     row.serviceable ? <Badge key={`${row.id}-serviceable`} tone="success">Yes</Badge> : <Badge key={`${row.id}-serviceable`} tone="critical">No</Badge>,
-    row.codAvailable ? <Badge key={`${row.id}-cod`} tone="success">Yes</Badge> : <Badge key={`${row.id}-cod`}>No</Badge>,
-    row.deliveryCharge !== null && row.deliveryCharge !== undefined ? `${row.currency ?? ""} ${row.deliveryCharge}`.trim() : "-",
     row.city ?? "-",
     row.state ?? "-",
     <InlineStack key={`${row.id}-actions`} gap="100">
@@ -2079,6 +2036,7 @@ export default function DeliverySettingsPage() {
         <div className="incode-target-card__grid">
           <div><span>Matches</span><strong title={`${target.targetKind}: ${target.targetValue}`}>{matchLabel}</strong></div>
           <div><span>Geography</span><strong>{geography}</strong></div>
+          <div><span>Zones</span><strong>{targetZonesLabel(target.zoneIdsCsv)}</strong></div>
           <div><span>Inventory</span><strong>{target.inventoryMode.replaceAll("_", " ")}</strong></div>
           <div><span>Schedule</span><strong>{schedule}</strong></div>
           <div><span>Behavior</span><strong>{behavior}</strong></div>
@@ -2146,7 +2104,7 @@ export default function DeliverySettingsPage() {
         </InlineStack>
       }
     >
-      {editingZone ? <ZoneEditor key={editingZone.id} zone={editingZone} zones={data.zones} deliveryOptions={data.access.features.deliveryOptions} onClose={() => setEditingZone(null)} onDirtyChange={setZoneDirty} /> : null}
+      {editingZone ? <ZoneEditor key={editingZone.id} zone={editingZone} zones={data.zones} onClose={() => setEditingZone(null)} onDirtyChange={setZoneDirty} /> : null}
       <div className="incode-delivery-settings">
       <BlockStack gap="400">
         <nav className="incode-delivery-settings__tabs" aria-label="Delivery settings sections">
@@ -2346,6 +2304,35 @@ export default function DeliverySettingsPage() {
                         />
                       )}
                     </FormLayout.Group>
+                    <BlockStack gap="200">
+                      <input type="hidden" name="targetZoneIdsCsv" value={targetForm.zoneIdsCsv} />
+                      <Autocomplete
+                        allowMultiple
+                        options={visibleTargetZones}
+                        selected={selectedTargetZones}
+                        onSelect={(selected) => {
+                          if (selected.length <= MAX_TARGET_ZONES) setTargetForm((current) => ({ ...current, zoneIdsCsv: [...new Set(selected)].join(",") }));
+                        }}
+                        emptyState={targetZoneOptions.length ? "No matching zones." : "Create an enabled zone in Coverage first."}
+                        textField={<Autocomplete.TextField
+                          label="Apply only to these zones"
+                          value={targetZoneSearch}
+                          onChange={setTargetZoneSearch}
+                          placeholder="Search and select delivery zones"
+                          autoComplete="off"
+                          disabled={!isAdvanced || pageBusy}
+                          clearButton
+                          onClearButtonClick={() => setTargetZoneSearch("")}
+                          helpText={`Optional. Leave empty for all zones, or select up to ${MAX_TARGET_ZONES}. The rule applies when the shopper's postal code matches one of the selected zones.`}
+                        />}
+                      />
+                      {selectedTargetZones.length ? <InlineStack gap="200" wrap>
+                        {selectedTargetZones.map((id) => <Tag key={id} onRemove={pageBusy ? undefined : () => setTargetForm((current) => ({ ...current, zoneIdsCsv: current.zoneIdsCsv.split(",").filter((value) => value !== id).join(",") }))}>
+                          {targetZonesLabel(id)}
+                        </Tag>)}
+                        <Button variant="plain" disabled={pageBusy} onClick={() => setTargetForm((current) => ({ ...current, zoneIdsCsv: "" }))}>Clear selection</Button>
+                      </InlineStack> : <Text as="p" tone="subdued" variant="bodySm">Applies to all zones.</Text>}
+                    </BlockStack>
                     <FormLayout.Group condensed>
                       <BlockStack gap="100">
                         <Select
@@ -2774,39 +2761,6 @@ export default function DeliverySettingsPage() {
                       }
                       autoComplete="off"
                     />
-                    <FormLayout.Group condensed>
-                      <TextField
-                        label="COD available message"
-                        name="codAvailableMessage"
-                        value={settings.codAvailableMessage}
-                        disabled={!isAdvanced || pageBusy}
-                        onChange={(value) =>
-                          setSettings((current) => ({ ...current, codAvailableMessage: value }))
-                        }
-                        autoComplete="off"
-                      />
-                      <TextField
-                        label="COD unavailable message"
-                        name="codUnavailableMessage"
-                        value={settings.codUnavailableMessage}
-                        disabled={!isAdvanced || pageBusy}
-                        onChange={(value) =>
-                          setSettings((current) => ({ ...current, codUnavailableMessage: value }))
-                        }
-                        autoComplete="off"
-                      />
-                    </FormLayout.Group>
-                    <TextField
-                      label="Delivery charge message"
-                      name="deliveryChargeMessage"
-                      value={settings.deliveryChargeMessage}
-                      disabled={!isAdvanced || pageBusy}
-                      onChange={(value) =>
-                        setSettings((current) => ({ ...current, deliveryChargeMessage: value }))
-                      }
-                      autoComplete="off"
-                      helpText="Shown only when a delivery charge exists. Variables: {currency}, {delivery_charge}."
-                    />
 
                     <Card>
                       <BlockStack gap="200">
@@ -2964,13 +2918,7 @@ export default function DeliverySettingsPage() {
                           zone: "",
                           city: "",
                           state: "",
-                          deliveryCharge: "",
-                          currency: "",
                           serviceable: true,
-                          codAvailable: false,
-                          sameDayAvailable: false,
-                          nextDayAvailable: false,
-                          expressAvailable: false,
                            };
                            postalBaseline.current = cleared;
                            return cleared;
@@ -3121,45 +3069,6 @@ export default function DeliverySettingsPage() {
                       <input type="hidden" name="state" value={postalCodeForm.state} />
                     </FormLayout.Group>
 
-                    <FormLayout.Group condensed>
-                      <TextField
-                        label="Delivery charge"
-                        name="deliveryCharge"
-                        type="number"
-                        min={0}
-                        value={postalCodeForm.deliveryCharge}
-                        onChange={(value) =>
-                          setPostalCodeForm((current) => ({ ...current, deliveryCharge: value }))
-                        }
-                        placeholder="50"
-                        autoComplete="off"
-                      />
-                      <TextField
-                        label="Currency"
-                        name="currency"
-                        value={postalCodeForm.currency}
-                        onChange={(value) =>
-                          setPostalCodeForm((current) => ({ ...current, currency: value.toUpperCase() }))
-                        }
-                        placeholder="INR"
-                        maxLength={3}
-                        autoComplete="off"
-                      />
-                    </FormLayout.Group>
-
-                    <div className="incode-postal-rule-form__section-heading">
-                      <Text as="h3" variant="headingSm">Delivery options</Text>
-                    </div>
-                    <InlineStack gap="400" wrap>
-                      <Checkbox label="COD" checked={postalCodeForm.codAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, codAvailable: checked }))} />
-                      <Checkbox label="Same-day" checked={postalCodeForm.sameDayAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, sameDayAvailable: checked }))} />
-                      <Checkbox label="Next-day" checked={postalCodeForm.nextDayAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, nextDayAvailable: checked }))} />
-                      <Checkbox label="Express" checked={postalCodeForm.expressAvailable} onChange={(checked) => setPostalCodeForm((current) => ({ ...current, expressAvailable: checked }))} />
-                    </InlineStack>
-                    <input type="hidden" name="codAvailable" value={String(postalCodeForm.codAvailable)} />
-                    <input type="hidden" name="sameDayAvailable" value={String(postalCodeForm.sameDayAvailable)} />
-                    <input type="hidden" name="nextDayAvailable" value={String(postalCodeForm.nextDayAvailable)} />
-                    <input type="hidden" name="expressAvailable" value={String(postalCodeForm.expressAvailable)} />
                     </details>
 
                     <Button submit variant="primary" loading={isIntentSaving("upsert_single_postal_code")} disabled={pageBusy}>
@@ -3197,9 +3106,9 @@ export default function DeliverySettingsPage() {
                       monospaced
                       autoComplete="off"
                       placeholder={
-                        "US,10001,2,true,true,New York,New York,metro,8,USD,false,true,true\nUS,10000-10999,3,true,false,,,metro,10,USD,false,false,false\nIN,4*,2,true,true,Rural MH,,rural,40,INR,false,true,false"
+                        "US,10001,2,true,New York,New York,metro\nUS,10000-10999,3,true,,,metro\nIN,4*,2,true,Rural MH,,rural"
                       }
-                      helpText="Paste one CSV row per line. Maximum 1,000 rows."
+                      helpText="Paste one CSV row per line: country, postal_code, delivery_days, serviceable, city, state, zone. Maximum 1,000 rows."
                       requiredIndicator
                     />
                     <Button submit variant="primary" loading={isIntentSaving("bulk_manual_rows")} disabled={pageBusy}>
@@ -3242,8 +3151,8 @@ export default function DeliverySettingsPage() {
                 </div>
                 {tableRows.length > 0 ? (
                   <DataTable
-                    columnContentTypes={["text", "text", "text", "text", "numeric", "text", "text", "text", "text", "text", "text"]}
-                    headings={["Country", "Pattern", "Type", "Zone", "Days", "Serviceable", "COD", "Charge", "City", "State", "Actions"]}
+                    columnContentTypes={["text", "text", "text", "text", "numeric", "text", "text", "text", "text"]}
+                    headings={["Country", "Pattern", "Type", "Zone", "Days", "Serviceable", "City", "State", "Actions"]}
                     rows={tableRows}
                     increasedTableDensity
                   />
@@ -3281,6 +3190,7 @@ export default function DeliverySettingsPage() {
                       <em>{targetForm.kind === "product" ? productSearch || "Not selected yet" : targetForm.value || "Not selected yet"}</em>
                     </div>
                     <div className="incode-rule-preview__facts">
+                      <span>{targetZonesLabel(targetForm.zoneIdsCsv)}</span>
                       <span>{targetForm.excluded ? "Delivery excluded" : `${targetForm.processingDays || "Default"} prep days`}</span>
                       <span>{targetForm.transitDays || "Postal transit"}</span>
                       <span>{targetForm.requireValidPin ? "PIN required" : "PIN optional"}</span>
@@ -3297,7 +3207,8 @@ export default function DeliverySettingsPage() {
                   <Text as="h2" variant="headingMd">Delivery preview</Text>
                   <Badge tone="info">Preview</Badge>
                 </InlineStack>
-                <Text as="p" tone="subdued">Sample dates only.</Text>
+                <Text as="p" tone="subdued">{sampleDates ? "Based on your current timing selections. Postal and product rules may override these dates." : previewMessage}</Text>
+                {sampleDates ?
                 <div className="incode-store-preview">
                   <div className="incode-store-preview__product">
                     <div className="incode-store-preview__image" aria-hidden="true">ETA</div>
@@ -3310,12 +3221,12 @@ export default function DeliverySettingsPage() {
                     <div className="incode-store-preview__step incode-store-preview__step--active">
                       <span>1</span>
                       <strong>Order now</strong>
-                      <small>Today</small>
+                      <small>{sampleOrderDate}</small>
                     </div>
                     <div className="incode-store-preview__step">
                       <span>2</span>
                       <strong>Ready to ship</strong>
-                      <small>{settings.processingDays || "0"} days</small>
+                      <small>{sampleDispatchDate}</small>
                     </div>
                     <div className="incode-store-preview__step">
                       <span>3</span>
@@ -3324,6 +3235,7 @@ export default function DeliverySettingsPage() {
                     </div>
                   </div>
                 </div>
+                : null}
                 <Button url={themeEditorUrl} external fullWidth>
                   Customize in Theme Editor
                 </Button>

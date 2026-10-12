@@ -12,11 +12,11 @@ await prisma.postalCode.deleteMany({ where: { shop } });
 await prisma.zone.deleteMany({ where: { shop } });
 
 const csv = [
-  "country,postal_code,delivery_days,serviceable,cod_available,delivery_charge,currency,city,state,zone,same_day,next_day,express",
-  "US,10001,2,true,true,8,USD,New York,New York,metro,true,true,true",
-  "US,10000-10999,3,true,true,10,USD,NY range,,metro,false,false,false",
-  "US,123*,4,false,false,,,Sparse,,remote,false,false,false",
-  "GB,SW1A*,3,true,false,5,GBP,London SW,,london,false,false,true",
+  "country,postal_code,delivery_days,serviceable,city,state,zone",
+  "US,10001,2,true,New York,New York,metro",
+  "US,10000-10999,3,true,NY range,,metro",
+  "US,123*,4,false,Sparse,,remote",
+  "GB,SW1A*,3,true,London SW,,london",
 ].join("\n");
 
 const result = await importPostalCodesFromCsv(shop, csv, "csv");

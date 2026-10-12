@@ -3,7 +3,6 @@ import test from "node:test";
 import { parseCsv } from "../app/utils/csv.server.ts";
 import {
   parsePostalImportOptions,
-  validateImportCurrency,
   importErrorCsvValue,
 } from "../app/utils/postal-import.ts";
 
@@ -23,7 +22,6 @@ test("minimal and blank CSV options preserve existing fields", () => {
     const patch = parsePostalImportOptions(row);
     assert.deepEqual(patch, {});
     assert.deepEqual({ ...existing, ...patch }, existing);
-    validateImportCurrency(patch, existing);
   }
 });
 
@@ -33,33 +31,23 @@ test("explicit false and zero are updates, including aliases", () => {
     nextday: "off", expressavailable: "n", deliverycharge: "0",
     currency: "usd", city: " Boston ", state: "MA", zone: " North ",
   }), {
-    serviceable: false, codAvailable: false, sameDayAvailable: false,
-    nextDayAvailable: false, expressAvailable: false, deliveryCharge: 0,
-    currency: "USD", city: "Boston", state: "MA", zone: "North",
+    serviceable: false, city: "Boston", state: "MA", zone: "North",
   });
-  assert.deepEqual(parsePostalImportOptions({ delivery_charge: "", deliverycharge: "0" }), {
-    deliveryCharge: 0,
-  });
+  assert.deepEqual(parsePostalImportOptions({ delivery_charge: "", deliverycharge: "0" }), {});
 });
 
 test("invalid optional values fail rather than being treated as blank", () => {
   for (const row of [
-    { serviceable: "maybe" }, { delivery_charge: "-1" },
-    { delivery_charge: "Infinity" }, { delivery_charge: "abc" },
-    { currency: "US" }, { currency: "123" }, { zone: "x".repeat(61) },
+    { serviceable: "maybe" }, { zone: "x".repeat(61) },
   ]) assert.throws(() => parsePostalImportOptions(row));
 });
 
-test("charge and currency validation uses the effective pair on updates", () => {
-  const existing = { deliveryCharge: 10, currency: "USD" };
-  validateImportCurrency({ deliveryCharge: 0 }, existing);
-  validateImportCurrency({ currency: "EUR" }, existing);
-  validateImportCurrency({ deliveryCharge: 0, currency: "USD" }, null);
-  validateImportCurrency({}, null);
-  assert.throws(() => validateImportCurrency({ deliveryCharge: 0 }, null), /Currency is required/);
-  validateImportCurrency({ currency: "USD" }, null);
-  assert.throws(() => validateImportCurrency({}, { deliveryCharge: 10, currency: null }), /Currency is required/);
-  validateImportCurrency({ currency: "USD" }, { deliveryCharge: null, currency: null });
+test("removed import columns and aliases are ignored even when invalid", () => {
+  for (const key of ["cod_available", "codavailable", "same_day", "sameday", "next_day", "nextday", "express", "express_available", "expressavailable", "delivery_charge", "deliverycharge", "currency"]) {
+    for (const value of ["true", "0", "-1", "Infinity", "invalid"]) {
+      assert.deepEqual(parsePostalImportOptions({ [key]: value }), {});
+    }
+  }
 });
 
 test("minimal and blank money cells preserve historical currency-only records", () => {
@@ -69,10 +57,8 @@ test("minimal and blank money cells preserve historical currency-only records", 
     "country,postal_code,delivery_days,delivery_charge,currency\nUS,10001,3, , ",
   ]) {
     const patch = parsePostalImportOptions(parseCsv(csv)[0]);
-    validateImportCurrency(patch, existing);
     assert.deepEqual({ ...existing, ...patch }, existing);
   }
-  validateImportCurrency({ deliveryCharge: 0 }, existing);
 });
 
 test("error CSV neutralizes formulas, including whitespace and control prefixes", () => {

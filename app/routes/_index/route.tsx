@@ -15,7 +15,7 @@ import {
 
 export const meta: MetaFunction = () => [
   { title: "ETADeliverPickup | Shopify" },
-  { name: "description", content: "Advanced postal and ZIP code delivery availability, delivery dates, COD rules, and cart protection for Shopify." },
+  { name: "description", content: "Advanced postal and ZIP code delivery availability, delivery dates, and cart protection for Shopify." },
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -44,7 +44,7 @@ export default function App() {
                   <Text as="h1" variant="heading3xl">Delivery certainty, before shoppers reach checkout.</Text>
                   <div className="incode-hero__copy">
                     <Text as="p" variant="bodyLg">
-                      ETADeliverPickup combines postal-code coverage, accurate delivery dates, COD messaging,
+                      ETADeliverPickup combines postal-code coverage, accurate delivery dates,
                       product targeting, and Add-to-Cart protection in one Shopify-native experience.
                     </Text>
                   </div>
@@ -61,7 +61,7 @@ export default function App() {
                 <Card>
                   <BlockStack gap="200">
                     <Text as="h2" variant="headingMd">Advanced coverage</Text>
-                    <Text as="p" tone="subdued">Exact codes, ranges, wildcards, zones, delivery charges, and CSV imports up to 100,000 rows.</Text>
+                    <Text as="p" tone="subdued">Exact codes, ranges, wildcards, zones, and CSV imports up to 100,000 rows.</Text>
                   </BlockStack>
                 </Card>
               </Layout.Section>
