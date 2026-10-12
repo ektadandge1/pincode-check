@@ -1,10 +1,9 @@
-import { redirect } from "react-router";
 import {
   authenticate,
-  STANDARD_PLAN,
+  STARTUP_PLAN,
+  STARTUP_PLAN_NAME,
 } from "../shopify.server";
 import { isBillingRequired } from "./billing-config.server";
-import { getPartnerSubscription } from "./partner-billing.server";
 
 export { isBillingRequired } from "./billing-config.server";
 
@@ -26,17 +25,30 @@ export type ActiveAppSubscription = {
 export async function getActiveAppSubscriptions(
   admin: AdminClient,
 ): Promise<ActiveAppSubscription[]> {
-  const subscription = await getPartnerSubscription(admin);
-  if (!subscription) return [];
-  return [{
-    id: "shopify-app-pricing",
-    name: STANDARD_PLAN,
-    status: "ACTIVE",
-    test: false,
-    trialDays: subscription.trialEndsAt ? Math.max(0, Math.ceil((new Date(subscription.trialEndsAt).getTime() - Date.now()) / 86_400_000)) : 0,
-    createdAt: subscription.currentBillingCycle?.startTime ?? "",
-    currentPeriodEnd: subscription.currentBillingCycle?.endTime ?? subscription.trialEndsAt ?? "",
-  }];
+  const response = await admin.graphql(`#graphql
+    query ActiveAppSubscriptions {
+      currentAppInstallation {
+        activeSubscriptions {
+          id
+          name
+          status
+          test
+          trialDays
+          createdAt
+          currentPeriodEnd
+        }
+      }
+    }
+  `);
+  const payload = (await response.json()) as {
+    data?: { currentAppInstallation?: { activeSubscriptions?: ActiveAppSubscription[] } };
+    errors?: Array<{ message?: string }>;
+  };
+  if (!response.ok || payload.errors?.length || !payload.data?.currentAppInstallation) {
+    throw new Error(payload.errors?.[0]?.message ?? "Unable to verify the Shopify subscription.");
+  }
+  return (payload.data.currentAppInstallation.activeSubscriptions ?? [])
+    .filter((subscription) => subscription.status === "ACTIVE" && subscription.name === STARTUP_PLAN);
 }
 
 export async function hasActiveBilling(admin: AdminClient): Promise<boolean> {
@@ -91,20 +103,20 @@ export async function requireActiveBilling(
     throw context.cors(Response.json(
       {
         error: "BILLING_REQUIRED",
-        message: `An active ${STANDARD_PLAN} subscription is required.`,
+        message: `An active ${STARTUP_PLAN_NAME} subscription is required.`,
       },
       { status: 402, headers: { "Cache-Control": "no-store" } },
     ));
   }
 
-  throw redirect("/app/plans");
+  throw context.redirect("/app/plans");
 }
 
 export function billingRequiredResponse(): Response {
   return Response.json(
     {
       error: "BILLING_REQUIRED",
-      message: `An active ${STANDARD_PLAN} subscription is required.`,
+      message: `An active ${STARTUP_PLAN_NAME} subscription is required.`,
     },
     { status: 402, headers: { "Cache-Control": "no-store" } },
   );

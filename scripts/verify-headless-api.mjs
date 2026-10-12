@@ -8,9 +8,6 @@ process.env.SHOPIFY_API_SECRET ||= "headless-verification-not-a-secret";
 process.env.SHOPIFY_APP_URL ||= "https://headless-verification.example";
 process.env.SCOPES ||= "read_products";
 process.env.SHOPIFY_BILLING_REQUIRED = "true";
-process.env.SHOPIFY_PARTNER_ORG_ID = "98765";
-process.env.SHOPIFY_PARTNER_API_ACCESS_TOKEN = "headless-verification-partner-token";
-process.env.SHOPIFY_APP_GID = "gid://shopify/App/123456";
 
 const prisma = (await import("../app/db.server.ts")).default;
 const shop = `headless-verify-${randomUUID()}.myshopify.com`;

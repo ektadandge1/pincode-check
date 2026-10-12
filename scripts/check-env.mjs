@@ -4,8 +4,7 @@ const warnings = [];
 const env = process.env;
 const required = [
   "NODE_ENV", "APP_ENV", "DATABASE_URL", "SHOPIFY_API_KEY", "SHOPIFY_API_SECRET",
-  "SHOPIFY_APP_URL", "SHOPIFY_APP_HANDLE", "SHOPIFY_APP_GID",
-  "SHOPIFY_PARTNER_ORG_ID", "SHOPIFY_PARTNER_API_ACCESS_TOKEN",
+  "SHOPIFY_APP_URL", "SHOPIFY_APP_HANDLE",
   "SHOPIFY_BILLING_REQUIRED", "SCOPES", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME",
 ];
 
@@ -21,6 +20,9 @@ for (const [name, expected] of [["SHOPIFY_BILLING_REQUIRED", "true"]]) {
 if (env.SHOPIFY_BILLING_DEV_BYPASS !== undefined && env.SHOPIFY_BILLING_DEV_BYPASS.trim().toLowerCase() !== "false") {
   errors.push("SHOPIFY_BILLING_DEV_BYPASS must be false or unset in production.");
 }
+if (env.SHOPIFY_BILLING_TEST !== undefined && env.SHOPIFY_BILLING_TEST.trim().toLowerCase() !== "false") {
+  errors.push("SHOPIFY_BILLING_TEST must be false or unset in production.");
+}
 
 try {
   const url = new URL(env.SHOPIFY_APP_URL);
@@ -34,13 +36,11 @@ try {
   errors.push("SHOPIFY_APP_URL must be a valid production HTTPS origin.");
 }
 
-for (const name of ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_APP_HANDLE", "SHOPIFY_PARTNER_API_ACCESS_TOKEN", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME"]) {
+for (const name of ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_APP_HANDLE", "SUPPORT_EMAIL", "LEGAL_BUSINESS_NAME"]) {
   if (/your[- _]|example\.(com|org|net)|change[- _]?me|placeholder/i.test(env[name] || "")) {
     errors.push(`${name} must not contain an example placeholder.`);
   }
 }
-if (!/^gid:\/\/shopify\/App\/\d+$/.test(env.SHOPIFY_APP_GID || "")) errors.push("SHOPIFY_APP_GID must be a Shopify App GID.");
-if (!/^\d+$/.test(env.SHOPIFY_PARTNER_ORG_ID || "")) errors.push("SHOPIFY_PARTNER_ORG_ID must be numeric.");
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.SUPPORT_EMAIL || "")) errors.push("SUPPORT_EMAIL must be a valid email address.");
 
 const scopes = new Set((env.SCOPES || "").split(",").map((scope) => scope.trim()));

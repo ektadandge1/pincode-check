@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   isBillingRequired,
+  isBillingTest,
 } from "../app/services/billing-config.server.ts";
 
 function withEnv(values, callback) {
@@ -41,6 +42,11 @@ test("billing enforcement rejects ambiguous values", () => {
   });
 });
 
+test("billing test mode is explicit and defaults off", () => {
+  withEnv({ SHOPIFY_BILLING_TEST: undefined }, () => assert.equal(isBillingTest(), false));
+  withEnv({ SHOPIFY_BILLING_TEST: "true" }, () => assert.equal(isBillingTest(), true));
+});
+
 test("development bypass avoids billing network failures without changing production enforcement", () => {
   withEnv({
     APP_ENV: "development",
@@ -66,6 +72,7 @@ test("production billing fails closed for unsafe or missing flags in either envi
       { SHOPIFY_BILLING_REQUIRED: "false" },
       { SHOPIFY_BILLING_DEV_BYPASS: "true" },
       { SHOPIFY_BILLING_DEV_BYPASS: "yes" },
+      { SHOPIFY_BILLING_TEST: "true" },
     ]) {
       withEnv({ [marker]: "production", SHOPIFY_BILLING_REQUIRED: "true", ...overrides }, () => {
         assert.throws(() => isBillingRequired(), /SHOPIFY_BILLING_/);

@@ -18,6 +18,10 @@ export function isBillingRequired(): boolean {
   return envFlag("SHOPIFY_BILLING_REQUIRED", true);
 }
 
+export function isBillingTest(): boolean {
+  return envFlag("SHOPIFY_BILLING_TEST", false);
+}
+
 function assertProductionBilling(): void {
   if (process.env.NODE_ENV !== "production" && process.env.APP_ENV !== "production") return;
   if (process.env.SHOPIFY_BILLING_REQUIRED?.trim().toLowerCase() !== "true") {
@@ -25,5 +29,8 @@ function assertProductionBilling(): void {
   }
   if (envFlag("SHOPIFY_BILLING_DEV_BYPASS", false)) {
     throw new Error("SHOPIFY_BILLING_DEV_BYPASS must be false or unset in production.");
+  }
+  if (envFlag("SHOPIFY_BILLING_TEST", false)) {
+    throw new Error("SHOPIFY_BILLING_TEST must be false or unset in production.");
   }
 }

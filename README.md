@@ -26,7 +26,7 @@ ETADeliverPickup uses the Shopify Billing API. Shopify approves the subscription
 adds all charges to the merchant's Shopify invoice. No external billing provider
 is used.
 
-### Standard - $9 USD every 30 days
+### Startup - $7 USD every 30 days
 
 - 7-day free trial
 - Product-page delivery checker
@@ -56,7 +56,7 @@ is used.
 ## Production Setup
 
 1. Use `.env.example` as a development template, not a ready production configuration. Set real deployment values and run `node scripts/check-env.mjs` in the production environment. `npm run env:check` also loads the local `.env` if present; do not use a developer `.env` for release validation.
-2. Configure Standard in Shopify App Pricing at $9 USD monthly with a 7-day trial and `/app/plans` as its welcome link. Create a Partner API client with Manage apps permission and set `SHOPIFY_APP_HANDLE`, `SHOPIFY_APP_GID`, `SHOPIFY_PARTNER_ORG_ID`, and `SHOPIFY_PARTNER_API_ACCESS_TOKEN`. Production also requires `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true`, and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset).
+2. Startup billing is configured in `app/shopify.server.ts` at $7 USD monthly with a 7-day trial. Shopify's Billing API creates and verifies subscriptions. Production requires `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true`, `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset), and `SHOPIFY_BILLING_TEST=false` (or unset).
 3. Replace the `https://example.com` application and redirect URLs in `shopify.app.toml` with the production HTTPS domain.
 4. Provision durable database storage. The current Prisma schema requires SQLite: use an absolute `file:` path on a persistent writable volume, one application instance, and tested backups/restore. A passing environment check cannot verify any of these. Relative and temporary/development paths produce warnings, not evidence of durability.
 5. Run `npm run setup` in production to generate Prisma Client and apply migrations.

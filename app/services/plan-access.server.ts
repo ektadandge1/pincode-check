@@ -17,13 +17,13 @@ export async function resolvePlanAccess({
   admin?: AdminClient;
   forceRefresh?: boolean;
 }): Promise<PlanAccess> {
-  if (!isBillingRequired()) return accessForPlan("standard");
+  if (!isBillingRequired()) return accessForPlan("startup");
   if (!admin) return NO_PLAN_ACCESS;
   const cached = cache.get(shop);
   if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.access;
 
   const access = await getCachedBillingStatus({ shop, admin, forceRefresh })
-    ? accessForPlan("standard")
+    ? accessForPlan("startup")
     : NO_PLAN_ACCESS;
   cache.set(shop, {
     access,

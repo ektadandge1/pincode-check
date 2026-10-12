@@ -38,7 +38,7 @@ function actionFixture({ zones = defaultZones, targets = [], writeError = null, 
   const admin = {};
   const load = injectedServer({});
   const plans = load("app/services/plans.server.ts");
-  const access = { ...plans.accessForPlan("standard"), features: { ...plans.STANDARD_FEATURES, targeting } };
+  const access = { ...plans.accessForPlan("startup"), features: { ...plans.STANDARD_FEATURES, targeting } };
   const prisma = {
     zone: {
       count: async (args) => {

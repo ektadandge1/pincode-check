@@ -42,7 +42,7 @@ import {
   type ShippingMethodKind,
 } from "../utils/shipping-method";
 import { matchesLocationTarget } from "../utils/location-targeting";
-import { STANDARD_FEATURES, type PlanFeatures } from "./plans.server";
+import { STARTUP_FEATURES, type PlanFeatures } from "./plans.server";
 
 export type CheckDeliveryInput = {
   country?: string;
@@ -356,7 +356,7 @@ async function resolvePostalRecord(input: CheckDeliveryInput) {
   const coverageRecord = exactRecord ?? legacyExactRecord;
   const exactMatch = coverageRecord?.zoneId !== null && coverageRecord?.zoneGroup?.enabled === false
     ? null : coverageRecord;
-  return exactMatch ?? ((input.features ?? STANDARD_FEATURES).patterns
+  return exactMatch ?? ((input.features ?? STARTUP_FEATURES).patterns
     ? await findPatternMatch(shopKey, country, postalCode, generation)
     : null);
 }
@@ -628,7 +628,7 @@ export async function checkDeliveryPolicy(input: CheckDeliveryInput): Promise<{
 }> {
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? STANDARD_FEATURES;
+  const features = input.features ?? STARTUP_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
   const serviceTargets = features.targeting ? await loadServiceAvailabilityRules(shopKey) : [];
   const postalRecord = await resolvePostalRecord(input);
@@ -722,7 +722,7 @@ export async function getGeneralDeliveryEstimate(input: CheckDeliveryInput) {
   }
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? STANDARD_FEATURES;
+  const features = input.features ?? STARTUP_FEATURES;
   const [targets, serviceTargets] = features.targeting
     ? await Promise.all([loadDeliveryTargets(shopKey), loadServiceAvailabilityRules(shopKey)])
     : [[], []];
@@ -808,7 +808,7 @@ export async function getProductCardDeliveryEstimates(
 ) {
   const shopKey = input.shop && input.shop.length > 0 ? input.shop : "default";
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? STANDARD_FEATURES;
+  const features = input.features ?? STARTUP_FEATURES;
   const [targets, serviceTargets] = features.targeting
     ? await Promise.all([loadDeliveryTargets(shopKey), loadServiceAvailabilityRules(shopKey)])
     : [[], []];
@@ -943,7 +943,7 @@ export async function checkDelivery(input: CheckDeliveryInput): Promise<Delivery
   }
 
   const settings = await getShopSettings(input.shop);
-  const features = input.features ?? STANDARD_FEATURES;
+  const features = input.features ?? STARTUP_FEATURES;
   const targets = features.targeting ? await loadDeliveryTargets(shopKey) : [];
   const serviceTargets = features.targeting ? await loadServiceAvailabilityRules(shopKey) : [];
   const inventoryAware = features.inventory && settings.inventoryAwareEnabled;

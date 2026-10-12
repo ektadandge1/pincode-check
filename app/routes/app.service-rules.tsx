@@ -106,7 +106,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await requireActiveBilling(request);
   const access = await resolvePlanAccess({ shop: session.shop, admin });
   if (!access.features.targeting) {
-    return { ok: false, message: "Service availability rules require an active Standard subscription." } satisfies ActionData;
+    return { ok: false, message: "Service availability rules require an active Startup subscription." } satisfies ActionData;
   }
 
   const formData = await request.formData();
@@ -287,7 +287,7 @@ function ServiceRulesContent({
       title="Service availability rules"
       subtitle="Choose which services appear for selected items."
       backAction={{ content: "Delivery & pickup", url: "/app/locations" }}
-      titleMetadata={<Badge tone={access.features.targeting ? "success" : "info"}>{access.features.targeting ? "Standard" : "Subscription required"}</Badge>}
+      titleMetadata={<Badge tone={access.features.targeting ? "success" : "info"}>{access.features.targeting ? "Startup" : "Subscription required"}</Badge>}
     >
       <BlockStack gap="500">
         {actionData ? <Banner tone={actionData.ok ? "success" : "critical"} title={actionData.ok ? "Service rules updated" : "Could not update service rules"}>{actionData.message}</Banner> : null}

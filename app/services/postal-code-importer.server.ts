@@ -174,11 +174,11 @@ export async function importPostalCodesFromCsv(
     }
 
     if (!policy.patterns && validation.data.patternType !== "exact") {
-      await recordFailure(row, index, "ZIP ranges and wildcards require an active Standard subscription.");
+      await recordFailure(row, index, "ZIP ranges and wildcards require an active Startup subscription.");
       continue;
     }
     if (!policy.zones && validation.data.zoneName) {
-      await recordFailure(row, index, "Zones require an active Standard subscription.");
+      await recordFailure(row, index, "Zones require an active Startup subscription.");
       continue;
     }
 

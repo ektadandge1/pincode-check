@@ -42,7 +42,7 @@ try {
 
   const standardPolicy = await checkDeliveryPolicy({ shop, productId: "42", features: STANDARD_FEATURES });
   if (!standardPolicy.require_valid_pin) {
-    throw new Error("Standard must execute configured cart controls.");
+    throw new Error("Startup must execute configured cart controls.");
   }
 
   const exact = await checkDelivery({
@@ -59,7 +59,7 @@ try {
     postalCode: "12345",
     features: STANDARD_FEATURES,
   });
-  if (!standardWildcard.available) throw new Error("Standard wildcard rules should be available.");
+  if (!standardWildcard.available) throw new Error("Startup wildcard rules should be available.");
 
   const targetedWildcard = await checkDelivery({
     shop,
@@ -69,12 +69,12 @@ try {
     features: STANDARD_FEATURES,
   });
   if (!targetedWildcard.available || !targetedWildcard.require_valid_pin) {
-    throw new Error("Standard wildcard and targeting features should execute.");
+    throw new Error("Startup wildcard and targeting features should execute.");
   }
 
   const standardAnalytics = await prisma.postalCodeSearchEvent.count({ where: { shop } });
   if (standardAnalytics !== 3) {
-    throw new Error("Standard lookups should write analytics.");
+    throw new Error("Startup lookups should write analytics.");
   }
 
   const standardImport = await importPostalCodesFromCsv(
@@ -84,7 +84,7 @@ try {
     STANDARD_FEATURES,
   );
   if (standardImport.status !== "completed" || standardImport.successRows !== 1) {
-    throw new Error("Standard CSV imports should accept wildcard rules.");
+    throw new Error("Startup CSV imports should accept wildcard rules.");
   }
 } finally {
   await prisma.deliveryTarget.deleteMany({ where: { shop } });

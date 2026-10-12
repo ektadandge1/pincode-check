@@ -623,7 +623,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: false, message: "Unsupported action." } satisfies ActionData;
   }
   if (!access.features.inventory) {
-    return { ok: false, message: "Fulfillment location rules require an active Standard subscription." } satisfies ActionData;
+    return { ok: false, message: "Fulfillment location rules require an active Startup subscription." } satisfies ActionData;
   }
   if (intent === "enable_pickup") {
     const shopifyLocationId = String(formData.get("shopifyLocationId") ?? "").trim();
@@ -1564,7 +1564,7 @@ export default function LocationsPage() {
       <Page
       title="Delivery & pickup"
       subtitle="Set up delivery and pickup by location."
-      titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Standard" : "Subscription required"}</Badge>}
+      titleMetadata={<Badge tone={isAdvanced ? "success" : "info"}>{isAdvanced ? "Startup" : "Subscription required"}</Badge>}
     >
       <BlockStack gap="400">
         <div className="incode-location-tabs" role="navigation" aria-label="Delivery and pickup views">
@@ -1602,7 +1602,7 @@ export default function LocationsPage() {
           </Banner>
         ) : null}
         {!isAdvanced ? (
-          <Banner tone="info" title="Standard subscription required" action={{ content: "View plan", url: "/app/plans" }}>
+          <Banner tone="info" title="Startup subscription required" action={{ content: "View plan", url: "/app/plans" }}>
             Upgrade to set delivery times, pickup, and local delivery.
           </Banner>
         ) : null}

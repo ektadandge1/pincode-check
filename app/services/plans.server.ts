@@ -1,5 +1,5 @@
-export const STANDARD_PLAN_KEY = "standard" as const;
-export type PlanKey = typeof STANDARD_PLAN_KEY;
+export const STARTUP_PLAN_KEY = "startup" as const;
+export type PlanKey = typeof STARTUP_PLAN_KEY;
 
 export type PlanFeatures = {
   exactRules: boolean;
@@ -19,7 +19,7 @@ export type PlanFeatures = {
   analytics: boolean;
 };
 
-export const STANDARD_FEATURES: PlanFeatures = {
+export const STARTUP_FEATURES: PlanFeatures = {
   exactRules: true,
   csvImport: true,
   deliveryDates: true,
@@ -37,6 +37,9 @@ export const STANDARD_FEATURES: PlanFeatures = {
   analytics: true,
 };
 
+// Keep the feature export stable for service callers; the paid plan is Startup.
+export const STANDARD_FEATURES = STARTUP_FEATURES;
+
 export type PlanAccess = {
   active: boolean;
   plan: PlanKey | null;
@@ -52,7 +55,7 @@ export const NO_PLAN_ACCESS: PlanAccess = {
   plan: null,
   planName: "No active plan",
   features: Object.fromEntries(
-    Object.keys(STANDARD_FEATURES).map((feature) => [feature, false]),
+    Object.keys(STARTUP_FEATURES).map((feature) => [feature, false]),
   ) as PlanFeatures,
   trialEndsAt: null,
   cancelAtEndOfCycle: false,
@@ -63,8 +66,8 @@ export function accessForPlan(plan: PlanKey): PlanAccess {
   return {
     active: true,
     plan,
-    planName: "Standard",
-    features: STANDARD_FEATURES,
+    planName: "Startup",
+    features: STARTUP_FEATURES,
     trialEndsAt: null,
     cancelAtEndOfCycle: false,
     billingPeriod: "EVERY_30_DAYS",
@@ -73,6 +76,6 @@ export function accessForPlan(plan: PlanKey): PlanAccess {
 
 export function requireFeature(access: PlanAccess, feature: keyof PlanFeatures): void {
   if (!access.active || !access.features[feature]) {
-    throw new Response("An active Standard subscription is required.", { status: 402 });
+    throw new Response("An active Startup subscription is required.", { status: 402 });
   }
 }

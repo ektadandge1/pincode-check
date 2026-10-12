@@ -60,7 +60,7 @@ export const headers: HeadersFunction = (args) => {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await requireActiveBilling(request);
-  const access = accessForPlan("standard");
+  const access = accessForPlan("startup");
   const tokens = await prisma.headlessApiToken.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },

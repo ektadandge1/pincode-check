@@ -10,12 +10,12 @@ Do not submit the app while any item below is incomplete:
 
 - Replace every `https://example.com` value in `shopify.app.toml` with the final HTTPS domain.
 - Host the web process and database on durable production infrastructure. The repository defaults to SQLite for local development; a container without a persistent volume will lose sessions and merchant data.
-- Replace development values from `.env.example`, including real support email/legal identity and Partner API credentials with Manage apps permission. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true` and `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset).
+- Replace development values from `.env.example`, including real support email and legal identity. Set `NODE_ENV=production`, `APP_ENV=production`, `SHOPIFY_BILLING_REQUIRED=true`, `SHOPIFY_BILLING_DEV_BYPASS=false` (or unset), and `SHOPIFY_BILLING_TEST=false` (or unset).
 - Run `npm run env:check`, `npm run setup`, `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `shopify app build` successfully.
 - Verify install, reinstall, and uninstall flows in Chrome incognito mode.
 - Verify all three mandatory privacy webhook topics against the production endpoint.
-- Test Standard plan selection, approval, cancellation, trial, reinstall, and the `/app/plans` welcome redirect through Shopify App Pricing.
-- Confirm Shopify App Pricing shows Standard at $9 USD monthly with a 7-day trial. Separate non-production development/review installations use Shopify's no-charge testing with no bypass while exercising paid flows; do not change the public production flags for review.
+- Test Startup plan selection, approval, cancellation, trial, reinstall, and the `/app/plans` return through Shopify's Billing API.
+- Confirm the Shopify approval page shows Startup at $7 USD monthly with a 7-day trial. Separate non-production development/review installations use `SHOPIFY_BILLING_TEST=true` with no bypass while exercising paid flows; do not change the public production flags for review.
 - Add the theme app block to a test product template and test desktop and mobile storefront behavior.
 - Measure storefront Lighthouse performance before and after enabling the app block. The reduction must remain within Shopify's current App Store requirement.
 
@@ -52,13 +52,13 @@ Geographic requirement: Built for global postal and ZIP code coverage. India-onl
 
 Languages supported: English.
 
-Pricing method: Shopify App Pricing (never off-platform billing).
+Pricing method: Shopify Billing API (never off-platform billing).
 
-### Standard
+### Startup
 
-- Price: $9 USD every 30 days
+- Price: $7 USD every 30 days
 - Free trial: 7 days
-- Billing API plan name: `Standard`
+- Billing API plan name: `startup`
 - Approval return route: `/app/plans`
 - Includes exact rules, ranges, wildcards, zones, product targeting,
   Add-to-Cart/PIN controls, inventory/courier checks, delivery options,
@@ -91,8 +91,8 @@ Demo store URL: Link directly to a product page where the Delivery availability 
 
 1. Install the app on the development store from Shopify.
 2. Open the app in Shopify admin.
-3. On the Plans page, start the Standard trial and approve the Shopify test charge.
-4. Confirm Shopify redirects to `/app/plans` and shows Standard as active.
+3. On the Plans page, start the Startup trial and approve the Shopify test charge.
+4. Confirm Shopify redirects to `/app/plans` and shows Startup as active.
 5. Go to Delivery control.
 6. Add a postal code manually, for example `US, 10001, 2 delivery days, serviceable`.
 7. Open Help and click Add block in Theme Editor.
@@ -117,7 +117,7 @@ Analytics displays shortened postal regions and stores product and variant IDs. 
 - App icon uploaded as 1200 x 1200 PNG or JPEG.
 - Three to six screenshots uploaded at 1600 x 900.
 - Demo screencast in English or with English subtitles.
-- Standard is configured in Shopify App Pricing as $9 USD monthly with a 7-day trial.
+- Startup is configured through the Shopify Billing API as $7 USD monthly with a 7-day trial.
 - Shopify hosts subscription approval, trial handling, invoicing, and development-store test charges.
 - Billing is required in production with `SHOPIFY_BILLING_REQUIRED=true`.
 - No screenshot, icon, app details, or feature-list text includes pricing.

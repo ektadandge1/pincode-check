@@ -35,7 +35,7 @@ function fixture() {
   const mocks = {
     "../db.server": prisma,
     "../services/billing.server": { requireActiveBilling: async () => ({ admin: {}, session: { shop } }) },
-    "../services/plan-access.server": { resolvePlanAccess: async () => plans.accessForPlan("standard") },
+    "../services/plan-access.server": { resolvePlanAccess: async () => plans.accessForPlan("startup") },
     "../services/plans.server": plans,
     "../services/delivery-checker.server": { clearDeliveryCheckCaches: () => {} },
     "../services/postal-code-importer.server": { importPostalCodesFromCsv: async (...args) => {

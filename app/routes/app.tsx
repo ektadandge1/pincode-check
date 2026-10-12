@@ -31,7 +31,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const context = isPlansRoute
     ? await authenticate.admin(request)
     : await requireActiveBilling(request);
-  const access = isPlansRoute ? NO_PLAN_ACCESS : accessForPlan("standard");
+  const access = isPlansRoute ? NO_PLAN_ACCESS : accessForPlan("startup");
 
   // eslint-disable-next-line no-undef
   return { apiKey: process.env.SHOPIFY_API_KEY || "", access, shop: context.session.shop };

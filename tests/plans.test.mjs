@@ -7,11 +7,11 @@ import {
   STANDARD_FEATURES,
 } from "../app/services/plans.server.ts";
 
-test("Standard grants the complete paid feature set", () => {
-  const access = accessForPlan("standard");
+test("Startup grants the complete paid feature set", () => {
+  const access = accessForPlan("startup");
   assert.equal(access.active, true);
-  assert.equal(access.plan, "standard");
-  assert.equal(access.planName, "Standard");
+  assert.equal(access.plan, "startup");
+  assert.equal(access.planName, "Startup");
   assert.equal(access.billingPeriod, "EVERY_30_DAYS");
   assert.ok(Object.values(STANDARD_FEATURES).every(Boolean));
   assert.ok(Object.values(access.features).every(Boolean));

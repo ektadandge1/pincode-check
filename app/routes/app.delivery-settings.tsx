@@ -2132,8 +2132,8 @@ export default function DeliverySettingsPage() {
               </Banner>
             ) : null}
             {!isAdvanced ? (
-              <Banner title="Standard subscription required" tone="info" action={{ content: "View plan", url: "/app/plans" }}>
-                Activate Standard to use delivery controls and storefront features.
+              <Banner title="Startup subscription required" tone="info" action={{ content: "View plan", url: "/app/plans" }}>
+                Activate Startup to use delivery controls and storefront features.
               </Banner>
             ) : null}
 
