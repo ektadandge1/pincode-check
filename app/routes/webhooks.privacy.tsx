@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import db from "../db.server";
-import { authenticate } from "../shopify.server";
+import { authenticateWebhookOnly as authenticate } from "../shopify.server";
 import { clearDeliveryCheckCaches } from "../services/delivery-checker.server";
 import { clearPlanAccessCache } from "../services/plan-access.server";
 

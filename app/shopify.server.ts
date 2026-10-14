@@ -14,7 +14,7 @@ export const STARTUP_PLAN_PRICE = 7;
 export const STARTUP_PLAN_CURRENCY = "USD" as const;
 export const STARTUP_PLAN_TRIAL_DAYS = 7;
 
-const shopify = shopifyApp({
+const shopifyConfig = {
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
   apiVersion: ApiVersion.April26,
@@ -41,7 +41,18 @@ const shopify = shopifyApp({
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
-});
+} satisfies Parameters<typeof shopifyApp>[0];
+
+const shopify = shopifyApp(shopifyConfig);
+
+// Privacy and uninstall handlers only need verified webhook data, not an Admin
+// API token. Refreshing an expired token after uninstall can fail because Shopify
+// has already revoked it, preventing these handlers from ever acknowledging it.
+// Keep SDK HMAC validation and session storage, but skip refresh for these routes.
+export const authenticateWebhookOnly = shopifyApp({
+  ...shopifyConfig,
+  future: { expiringOfflineAccessTokens: false },
+}).authenticate;
 
 export default shopify;
 export const apiVersion = ApiVersion.April26;
