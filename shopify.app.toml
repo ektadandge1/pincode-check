@@ -2,7 +2,7 @@
 
 client_id = "819a4f61c71a7a21adf004cda3437867"
 name = "ETADeliverPickup"
-application_url = "https://example.com"
+application_url = "https://zippin.bmconsulting.in"
 embedded = true
 
 [build]
@@ -28,10 +28,10 @@ api_version = "2026-04"
 scopes = "read_inventory,read_locations,read_orders,read_products,read_themes,write_app_proxy"
 
 [auth]
-redirect_urls = [ "https://example.com/auth/callback" ]
+redirect_urls = [ "https://zippin.bmconsulting.in/auth/callback" ]
 
 [app_proxy]
-url = "https://example.com/apps/delivery-checker"
+url = "https://zippin.bmconsulting.in/apps/delivery-checker"
 subpath = "delivery-checker"
 prefix = "apps"
 

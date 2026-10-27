@@ -1,0 +1,46 @@
+[Unit]
+Description=Incode Track Node.js application
+Documentation=https://github.com/
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=incode-track
+Group=incode-track
+WorkingDirectory=/opt/incode-track/current
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3001
+EnvironmentFile=/etc/incode-track/incode-track.env
+ExecStartPre=/usr/bin/npm run env:check
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0027
+
+# Security hardening. The app only needs network access and its SQLite state dir.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/incode-track
+
+[Install]
+WantedBy=multi-user.target
