@@ -492,15 +492,15 @@ test('delivery details save and clear with the selected service', async () => {
 
 test('pickup empty state, retry, collector fields, and premium tabs remain compact and responsive', () => {
   const css = source('assets/delivery-service-options.css');
-  assert.match(css, /width: min\(100%, 410px\)/);
-  assert.match(css, /data-surface="cart"\]\s*\{ width: min\(calc\(100% - \(2 \* var\(--ist-margin/);
+  assert.match(css, /width:\s*100%;\s*max-width:\s*410px/);
+  assert.match(css, /data-surface="cart"\]\s*\{[\s\S]*?width:\s*calc\(100% - \(2 \* var\(--ist-margin/);
   assert.match(css, /border-radius: 16px;[^}]*background: #fff;[^}]*box-shadow:/);
-  assert.match(css, /\.ist-services span \{[^}]*height: 100px;[^}]*border-radius: 10px/);
-  assert.match(css, /\.ist-locations > div \{ max-height: 180px;/);
-  assert.match(css, /\.ist-retry \{[^}]*border: 0;[^}]*background: transparent/);
-  assert.match(css, /input:not\(\[type="radio"\]\),[^\n]+height: 42px/);
-  assert.match(css, /@container \(max-width: 340px\)/);
-  assert.match(css, /@container \(max-width: 310px\)/);
+  assert.match(css, /\.ist-services span \{[^}]*height:\s*100px;[^}]*border-radius:\s*10px/);
+  assert.match(css, /\.ist-locations > div \{[^}]*max-height:\s*180px;/);
+  assert.match(css, /\.ist-retry \{[^}]*border:\s*0;[^}]*background:\s*transparent/);
+  assert.match(css, /input:not\(\[type="radio"\]\),[\s\S]*?height:\s*42px/);
+  assert.match(css, /@media \(max-width: 340px\)/);
+  assert.match(css, /@media \(max-width: 310px\)/);
   assert.match(css, /background: #fff1f1/);
   assert.match(css, /background: #edf8f1/);
   assert.match(css, /\.ist-shipping-result/);

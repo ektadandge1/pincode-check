@@ -366,9 +366,9 @@ test('insertion waits for helper readiness, ignores detached roots, and reinitia
 
 test('calendar CSS keeps seven equal columns and hides the enhanced native select without changing the card design', () => {
   const css = asset('delivery-service-options.css');
-  assert.match(css, /\.ist-date-row \{ display: grid; grid-column: 1 \/ -1; grid-template-columns: repeat\(7, minmax\(0, 1fr\)\); gap: 4px;/);
-  assert.match(css, /\.ist-date-row > \[role="gridcell"\] \{ display: grid; min-width: 0;/);
-  assert.match(css, /\.ist-date-picker\[data-enhanced="true"\] \.ist-date-native \{ display: none !important;/);
-  assert.match(css, /\.ist-date-popover \{[^}]*padding: 12px;[^}]*border-radius: 13px;/);
-  assert.match(css, /\.ist-date-day\[data-selected="true"\] \{ border-color: #1d5f8a; background: #1d5f8a;/);
+  assert.match(css, /\.ist-date-row \{[^}]*display:\s*grid;[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\);[^}]*gap:\s*4px;/);
+  assert.match(css, /\.ist-date-row > \[role="gridcell"\] \{[^}]*display:\s*grid;[^}]*min-width:\s*0;/);
+  assert.match(css, /\.ist-date-picker\[data-enhanced="true"\]\s+\.ist-date-native\s*\{[^}]*display:\s*none !important;/);
+  assert.match(css, /\.ist-date-popover \{[^}]*padding:\s*12px;[^}]*border-radius:\s*13px;/);
+  assert.match(css, /\.ist-date-day\[data-selected="true"\] \{[^}]*border-color:\s*#1d5f8a;[^}]*background:\s*#1d5f8a;/);
 });

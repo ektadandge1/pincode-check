@@ -140,10 +140,15 @@ endif
     --eta-countdown-digit: #ff6500;
     --eta-countdown-text: #ffffff;
     box-sizing: border-box;
+    display: block;
     width: 100%;
     min-width: 0;
     max-width: 100%;
-    overflow-wrap: anywhere;
+    flex: 1 1 100%;
+    align-self: stretch;
+    justify-self: stretch;
+    overflow-wrap: break-word;
+    word-break: normal;
     margin: 14px 0;
     padding: 18px;
     border: 1px solid color-mix(in srgb, var(--eta-accent) 22%, #d7dce2);

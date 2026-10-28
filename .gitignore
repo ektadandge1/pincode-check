@@ -33,3 +33,5 @@ database.sqlite
 
 # Local browser-tool artifacts
 .playwright-mcp/
+/test-results/
+/playwright-report/

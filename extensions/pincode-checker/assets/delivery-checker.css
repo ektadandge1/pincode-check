@@ -2,17 +2,23 @@
 .pin-checker--editor-empty-cart .pin-checker__empty-icon { display: grid; width: 42px; height: 42px; place-items: center; flex: 0 0 auto; border-radius: 14px; background: #e9f6ff; font-size: 21px; }
 .pin-checker {
 box-sizing: border-box;
-width: min(100%, 760px);
+display: block;
+width: 100%;
 margin: 18px auto;
 isolation: isolate;
 min-width: 0;
-max-width: 100%;
-container-type: inline-size;
+max-width: 760px;
+flex: 1 1 100%;
+align-self: stretch;
+justify-self: stretch;
+overflow-wrap: break-word;
+word-break: normal;
 }
 .pin-checker *,
 .pin-checker *::before,
 .pin-checker *::after {
 box-sizing: border-box;
+word-break: normal;
 }
 .pin-checker[hidden], .pin-checker [hidden] { display: none !important; }
 .pin-checker .pin-checker__header {
@@ -744,7 +750,8 @@ padding-inline: 4px;
 
 /* Storefront refinement: preserve the hierarchy at narrow theme and editor widths. */
 .pin-checker {
-  width: min(100%, 760px);
+  width: 100%;
+  max-width: 760px;
   margin: 24px auto;
   padding: clamp(16px, 3vw, 24px);
   border: 1px solid color-mix(in srgb, var(--pc-heading) 10%, transparent);
@@ -947,15 +954,10 @@ padding-inline: 4px;
   .pin-checker .pin-checker__option-state { white-space: normal; overflow-wrap: anywhere; }
 }
 
-/* Theme Editor panels can be narrow even when the browser viewport is wide. */
-@container (min-width: 540px) {
-  .pin-checker .pin-checker__row { grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, .9fr); }
-  .pin-checker .pin-checker__button { grid-column: auto; }
-}
-@container (max-width: 300px) {
+@media (max-width: 300px) {
   .pin-checker .pin-checker__row { grid-template-columns: minmax(0, 1fr); }
 }
-@container (max-width: 600px) {
+@media (max-width: 600px) {
   .pin-checker .pin-checker__journey-title { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -195,8 +195,9 @@ test('multiple widgets share one document observer and one fallback poll', () =>
 test('narrow-column layout and motion/live announcements are constrained without redesigning cards', () => {
   const base = new URL('../extensions/pincode-checker/', import.meta.url);
   const css = readFileSync(new URL('assets/product-delivery-pickup.css', base), 'utf8');
-  assert.match(css, /container-type:inline-size/);
-  assert.match(css, /@container \(max-width:390px\)/);
+  assert.doesNotMatch(css, /container-type:inline-size/);
+  assert.match(css, /display:\s*block;[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*680px/);
+  assert.match(css, /@media \(max-width:\s*390px\)/);
   const checkerCss = readFileSync(new URL('assets/delivery-checker.css', base), 'utf8');
   assert.match(checkerCss, /prefers-reduced-motion: reduce[\s\S]*__option-mark \{ animation: none !important/);
   for (const block of ['delivery-checker', 'estimated-delivery-date']) {

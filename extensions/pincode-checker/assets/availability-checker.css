@@ -1,11 +1,15 @@
 .incode-availability,
-.incode-availability * { box-sizing: border-box; }
+.incode-availability * { box-sizing: border-box; word-break: normal; }
 
 .incode-availability {
   --ia-accent: #1f4f91;
-  width: min(100%, 680px);
-  max-width: 100%;
+  display: block;
+  width: 100%;
+  max-width: 680px;
   min-width: 0;
+  flex: 1 1 100%;
+  align-self: stretch;
+  justify-self: stretch;
   margin: 18px auto;
   padding: 20px;
   border: 1px solid color-mix(in srgb, var(--ia-accent) 24%, #d8dee8);
@@ -14,8 +18,7 @@
   color: #172033;
   font-family: inherit;
   box-shadow: 0 12px 32px rgba(17, 24, 39, .08);
-  container-type: inline-size;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .incode-availability__heading { display: flex; gap: 12px; align-items: flex-start; }
@@ -46,16 +49,12 @@
 .incode-availability .incode-availability__status[data-state='error'] { border-color: #f0cccc; background: #fff3f3; color: #a51d1d; }
 .incode-availability__status[data-state='unavailable']::before,
 .incode-availability__status[data-state='error']::before { content: '!'; }
-@container (min-width: 540px) {
-  .incode-availability__form { grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) minmax(0, .9fr); }
-  .incode-availability button { grid-column: auto; }
-}
-@container (max-width: 300px) {
-  .incode-availability__form { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 480px) {
   .incode-availability { padding: 16px; margin: 14px auto; }
   .incode-availability h3 { font-size: 16px; }
+}
+@media (max-width: 300px) {
+  .incode-availability__form { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   .incode-availability button { transition: none; }

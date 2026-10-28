@@ -239,7 +239,9 @@ test('ETA refetch and checker expiry are versioned and keep local theme settings
   assert.match(eta, /window\.clearInterval\(countdownTimer\)/);
   assert.match(checker, /root\.dataset\.appearanceSource === 'block'/);
   assert.match(source('blocks/delivery-service-options.liquid'), /\.incode-service-card \[hidden\]/);
-  assert.match(source('assets/delivery-checker.css'), /@container/);
+  const checkerCss = source('assets/delivery-checker.css');
+  assert.doesNotMatch(checkerCss, /container-type\s*:\s*inline-size|@container/);
+  assert.match(checkerCss, /\.pin-checker\s*\{[\s\S]*?width:\s*100%;[\s\S]*?flex:\s*1 1 100%/);
 });
 
 test('shared ATC locks preserve native state and release only after the last widget unloads', () => {

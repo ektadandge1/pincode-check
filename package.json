@@ -21,6 +21,7 @@
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "node --test --test-concurrency=1 --experimental-strip-types tests/*.test.mjs",
+    "test:theme-layout": "playwright test theme-layout-browser.spec.js --workers=1",
     "test:zones": "npx --yes tsx scripts/verify-zones.mjs",
     "test:targets": "npx --yes tsx scripts/verify-targets.mjs",
     "test:plans": "npx --yes tsx scripts/verify-plan-enforcement.mjs",
@@ -51,6 +52,7 @@
     "vite-tsconfig-paths": "^5.1.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@shopify/api-codegen-preset": "^1.2.0",
     "@shopify/polaris-types": "^1.0.1",
     "@types/eslint": "^9.6.1",

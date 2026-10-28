@@ -12,7 +12,13 @@ test("Shopify loads Delivery checker styles through its app-block schema", () =>
   assert.match(css, /\.pin-checker \.pin-checker__button\s*\{[\s\S]*?width: 100%/);
 });
 
-test("container layout rules follow base form styles and allow narrow theme sections", () => {
-  assert.ok(css.lastIndexOf("@container (min-width: 540px)") > css.lastIndexOf("@media (max-width: 360px)"));
-  assert.match(css, /@container \(max-width: 300px\)\s*\{\s*\.pin-checker \.pin-checker__row \{ grid-template-columns: minmax\(0, 1fr\)/);
+test("root sizing cannot collapse in intrinsically sized theme sections", () => {
+  const root = css.match(/\.pin-checker\s*\{([\s\S]*?)\}/)[1];
+  assert.match(root, /display: block/);
+  assert.match(root, /width: 100%/);
+  assert.match(root, /max-width: 760px/);
+  assert.match(root, /flex: 1 1 100%/);
+  assert.match(root, /overflow-wrap: break-word/);
+  assert.doesNotMatch(root, /container-type|overflow-wrap:\s*anywhere|width:\s*min\(/);
+  assert.match(css, /@media \(max-width: 300px\)\s*\{\s*\.pin-checker \.pin-checker__row \{ grid-template-columns: minmax\(0, 1fr\)/);
 });

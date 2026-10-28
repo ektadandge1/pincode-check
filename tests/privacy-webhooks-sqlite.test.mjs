@@ -35,7 +35,7 @@ async function sqliteFixture(t) {
   }
   const actionFor = (db = prisma) => injectedServer({
     "app/db.server.ts": db,
-    "app/shopify.server.ts": { authenticate: { webhook: async () => ({ shop, topic: "SHOP_REDACT" }) } },
+    "app/shopify.server.ts": { authenticateWebhookOnly: { webhook: async () => ({ shop, topic: "SHOP_REDACT" }) } },
     "app/services/delivery-checker.server.ts": { clearDeliveryCheckCaches: () => {} },
     "app/services/plan-access.server.ts": { clearPlanAccessCache: () => {} },
   })("app/routes/webhooks.privacy.tsx").action;
